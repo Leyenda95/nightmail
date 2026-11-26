@@ -2,7 +2,8 @@
 // to the control by `htmlFor` and the messages by `aria-describedby`; an error also marks the control with
 // `aria-invalid` and carries an icon, so it does not depend on colour alone. The base stylesheet draws the error border on
 // `.field`; `.textarea` lacks it and `styles/app.css` supplies it.
-import { useId } from 'react';
+import { useId, useState } from 'react';
+import { t } from '../i18n/index.ts';
 import { describedBy } from '../pieces.ts';
 import { Icon } from './Icon.tsx';
 
@@ -43,8 +44,21 @@ interface Wiring {
 const QUIET = { autoComplete: 'off', autoCapitalize: 'off', autoCorrect: 'off', spellCheck: false } as const;
 
 function Control({ value, onChange, type = 'text', multiline = false, suffix, placeholder, disabled, autoFocus, ...wiring }: ControlProps & Wiring) {
+  // Password fields carry an eye button that shows what was typed and hides it again.
+  const [shown, setShown] = useState(false);
   const common = { ...QUIET, ...wiring, value, placeholder, disabled, autoFocus };
   if (multiline) return <textarea className="textarea w-full" rows={4} {...common} onChange={(e) => onChange(e.target.value)} />;
+  if (type === 'password') {
+    const label = shown ? t().screensMail.common.hidePassword : t().screensMail.common.showPassword;
+    return (
+      <span className="nm-con-ojo">
+        <input className="field w-full" type={shown ? 'text' : 'password'} {...common} onChange={(e) => onChange(e.target.value)} />
+        <button type="button" className="nm-con-ojo__boton" title={label} aria-label={label} aria-controls={wiring.id} disabled={disabled} onClick={() => setShown(!shown)}>
+          <Icon name={shown ? 'eye-off' : 'eye'} className="nm-ic" />
+        </button>
+      </span>
+    );
+  }
   const input = <input className={suffix ? 'field' : 'field w-full'} type={type} {...common} onChange={(e) => onChange(e.target.value)} />;
   if (!suffix) return input;
   return (

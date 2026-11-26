@@ -8,7 +8,7 @@
 // the table (62-byte header + 4 KiB..32 MiB, so the padding is already in it) and that it
 // starts with version and suite 0x01 0x01 (checked as soon as those two bytes arrive: a wrong one gets its 400
 // without waiting for the rest). It is then stored exactly like mail received by SMTP
-// (`MailboxStore.deliver`: own row, random id, date rounded to the hour, size), so the two cannot be told
+// (`MailboxStore.deliver`: own row, random id, date rounded to the minute, size), so the two cannot be told
 // apart afterwards.
 //
 // Checks go from the cheapest: headers (400 / 413), per-IP limits, the box (404, or 503 while the address
@@ -256,7 +256,7 @@ export class Deliveries {
 
   /**
    * The reason only reaches the debug log, which is off unless NIGHTMAIL_DEBUG=1 and must stay off in
-   * production: its timestamps would undo the hourly rounding of the stored dates (see the line for a stored
+   * production: its timestamps would give the exact second of the stored dates which are kept to the minute (see the line for a stored
    * envelope). It never carries the IP, the box or a header.
    */
   private rejected(reason: string, reply: Reply): Reply {
@@ -367,7 +367,7 @@ export class Deliveries {
       if (error instanceof QuotaExceeded) return this.rejected('quota', MAILBOX_FULL);
       throw error;
     }
-    // Debug only (off in production): the log timestamp would undo the hourly rounding of `received_at`.
+    // Debug only (off in production): the log timestamp would give the exact second of `received_at`, which is kept to the minute.
     this.deps.log.debug('api: envelope delivered');
     return DELIVERED;
   }

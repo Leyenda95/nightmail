@@ -1,14 +1,16 @@
-// Front screen (no session): welcome, create the seed phrase, show it, restore and unlock. On the left, the fixed
-// night panel (also in the light theme; with the night's primitive colours, no nested theme); on the right, the
-// form of each step and, in the top corner, the language (Settings only shows after unlocking). Under the logo,
-// the rotating slogans. From here too, the other accounts on this device ("Cambiar de cuenta", `Accounts.tsx`).
+// Front screen (no session): welcome, create a profile (first its new seed phrase, then its name and password),
+// restore and unlock. On the left, the fixed night panel (also in the light theme; with the night's primitive
+// colours, no nested theme); on the right, the form of each step and, in the top corner, the language (Settings
+// only shows after unlocking). Under the logo, the rotating slogans. From here too, the other accounts on this device (the back arrow of the unlock step, `Accounts.tsx`).
 import { useEffect, useState, type ReactNode } from 'react';
 import { accountNameTooLong, hasOtherAccounts, MAX_ACCOUNT_NAME } from '../accounts.ts';
 import { api, nextOp } from '../api.ts';
 import type { AccountView } from '../bindings/AccountView.ts';
 import type { AppStatus } from '../bindings/AppStatus.ts';
 import type { RecoveryReport } from '../bindings/RecoveryReport.ts';
+import type { SeedDraft } from '../bindings/SeedDraft.ts';
 import { Campo } from '../components/Campo.tsx';
+import { CopyButton } from '../components/Copiable.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { Languages } from '../components/Languages.tsx';
 import { Logo } from '../components/Logo.tsx';
@@ -20,7 +22,7 @@ import { progressParts } from '../progress.ts';
 import { phraseProblem } from '../seedCheck.ts';
 import { domSloganClock, rotateSlogans, sloganMemory } from '../slogans.ts';
 import type { CoreEvents } from '../useCoreEvents.ts';
-import { AccountChooser } from './Accounts.tsx';
+import { AccountChooser, NewProfile } from './Accounts.tsx';
 import { ErrorAviso } from './common.tsx';
 import { onSubmitWith } from './forms.ts';
 import { mismatchText, pairMismatch, pairReady } from './password.ts';
@@ -32,14 +34,13 @@ interface Props {
   events: CoreEvents;
   /** Asks for `app_status` again (the session is already open after creating or restoring). */
   onDone: () => void;
-  /** The account list is in front ("Cambiar de cuenta", or "Cerrar sesión" in the sidebar). */
+  /** The account list is in front (the back arrow of the unlock step, or "Cerrar sesión" in the sidebar). */
   chooser: boolean;
   onChooser: (open: boolean) => void;
 }
 
 const PRIMARY = 'button button-large button-solid-norm nm-btn w-full';
 const SECONDARY = 'button button-large button-outline-weak nm-btn w-full';
-const GHOST = 'button button-large button-ghost-weak nm-btn w-full';
 
 /** The slogans under the logo (`slogans.ts`). All sit in the same cell and only one is visible: so the height is that of the
  *  longest and the night below does not jump when it changes; the fade is in app.css. For the screen reader the rotating ones
@@ -97,10 +98,18 @@ function Portada({ paso, children }: { paso?: string; children: ReactNode }) {
   );
 }
 
-/** "Volver" to the menu; disabled while something is running (going back would lose what arrives). */
-function Back({ onBack, disabled }: { onBack: () => void; disabled: boolean }) {
+/** "Volver" to the menu (or, with `label`, to the profile list); disabled while something is running (going back would
+ *  lose what arrives). `label`: an accessible name that says where it goes, starting with the visible "Volver". */
+function Back({ onBack, disabled, label }: { onBack: () => void; disabled: boolean; label?: string }) {
   return (
-    <button type="button" className="button button-small button-ghost-weak nm-btn nm-volver" disabled={disabled} onClick={onBack}>
+    <button
+      type="button"
+      className="button button-small button-ghost-weak nm-btn nm-volver"
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      onClick={onBack}
+    >
       <Icon name="arrow-left" className="nm-ic" />
       {t().onboarding.welcome.back}
     </button>
@@ -124,6 +133,8 @@ function Unlock({ onDone, onAccounts }: { onDone: () => void; onAccounts: () => 
   const s = t().onboarding.welcome.unlock;
   return (
     <Portada>
+      {/* To the profile list ("Elige un perfil"), the same arrow as on the other steps. */}
+      <Back onBack={onAccounts} disabled={busy} label={t().onboarding.accounts.backToAccounts} />
       <h1 className="nm-portada__titulo">{s.title}</h1>
       <p>{s.text}</p>
       <form className="nm-pila nm-pila--l" onSubmit={onSubmitWith(() => ready && void submit())}>
@@ -133,18 +144,17 @@ function Unlock({ onDone, onAccounts }: { onDone: () => void; onAccounts: () => 
         </button>
       </form>
       <ErrorAviso message={fieldError ? null : error} />
-      <button type="button" className={GHOST} disabled={busy} onClick={onAccounts}>
-        {t().onboarding.accounts.switchAccount}
-      </button>
     </Portada>
   );
 }
 
-/** Shows the phrase ONCE; on confirming, it is discarded from state. */
-function ShowPhrase({ phrase, onWritten }: { phrase: string; onWritten: () => void }) {
+/** The new words, the first step of creating (nothing is saved yet). "Volver" goes back to the menu and drops them;
+ *  "La he apuntado" goes on to the name and the password. */
+function ShowPhrase({ phrase, onBack, onWritten }: { phrase: string; onBack: () => void; onWritten: () => void }) {
   const s = t().onboarding.welcome.showPhrase;
   return (
-    <Portada>
+    <Portada paso="frase">
+      <Back onBack={onBack} disabled={false} />
       <h1 className="nm-portada__titulo nm-portada__titulo--s">{s.title}</h1>
       <p>{s.text}</p>
       {/* The words come from the BIP-39 list in English, in both languages: a screen reader reads them in English. */}
@@ -153,7 +163,7 @@ function ShowPhrase({ phrase, onWritten }: { phrase: string; onWritten: () => vo
           <li key={i}>{word}</li>
         ))}
       </ol>
-      <p className="nm-portada__pie">{s.note}</p>
+      <CopyButton text={seedWords(phrase).join(' ')} label={s.copy} secret />
       <button type="button" className={PRIMARY} onClick={onWritten}>
         {s.written}
       </button>
@@ -212,7 +222,6 @@ function ProfileNameField({ value, onChange, autoFocus = false }: { value: strin
       label={s.label}
       value={value}
       onChange={onChange}
-      help={s.help(MAX_ACCOUNT_NAME)}
       error={accountNameTooLong(value) ? s.tooLong(MAX_ACCOUNT_NAME) : null}
       autoFocus={autoFocus}
     />
@@ -231,31 +240,67 @@ async function saveProfileName(name: string): Promise<void> {
   }
 }
 
+/** Creating a profile: first the new words (the core keeps them only in memory, `draftSeed`), then the optional name and
+ *  the password, which save them (`createSeed`). Nothing is written to disk before that last step. "Volver" on the words
+ *  drops them (`discardSeedDraft`) and goes to the menu; on the password, back to the same words. While the draft lives the
+ *  core answers the same words and id, so asking twice (React's development double effect) shows the same ones. Once
+ *  saved, the session is open and `onDone` leaves this screen (the words go with it). */
 function Create({ onBack, onDone }: { onBack: () => void; onDone: () => void }) {
-  const [phrase, setPhrase] = useState<string | null>(null);
+  const [draft, setDraft] = useState<SeedDraft | null>(null);
+  const [written, setWritten] = useState(false);
   const [name, setName] = useState('');
-  const { busy, error, run } = useAction();
-  async function create(password: string) {
-    const seed = await run(() => api.createSeed(password));
-    if (!seed) return;
-    await saveProfileName(name);
-    setPhrase(seed.phrase);
+  const { busy, error, run, setError } = useAction();
+  useEffect(() => {
+    let cancelled = false;
+    void run(() => api.draftSeed()).then((d) => {
+      if (!cancelled && d) setDraft(d);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [run]);
+  function leave() {
+    if (draft !== null) void api.discardSeedDraft(draft.id).catch(() => undefined);
+    setDraft(null);
+    onBack();
   }
-  if (phrase !== null) {
+  async function create(password: string) {
+    if (draft === null) return;
+    const id = draft.id;
+    const ok = await run(async () => {
+      await api.createSeed(id, password);
+      return true;
+    });
+    if (!ok) return;
+    await saveProfileName(name);
+    onDone();
+  }
+  if (draft === null) {
+    // Until the words arrive (at once, they are local) the box stays empty; if they cannot be made, why and the way back.
     return (
-      <ShowPhrase
-        phrase={phrase}
-        onWritten={() => {
-          setPhrase(null);
-          onDone();
-        }}
-      />
+      <Portada paso="frase-espera">
+        {error !== null && (
+          <>
+            <Back onBack={onBack} disabled={busy} />
+            <ErrorAviso message={error} />
+          </>
+        )}
+      </Portada>
     );
+  }
+  if (!written) {
+    return <ShowPhrase phrase={draft.phrase} onBack={leave} onWritten={() => setWritten(true)} />;
   }
   const s = t().onboarding.welcome.create;
   return (
-    <Portada>
-      <Back onBack={onBack} disabled={busy} />
+    <Portada paso="clave">
+      <Back
+        onBack={() => {
+          setError(null);
+          setWritten(false);
+        }}
+        disabled={busy}
+      />
       <h1 className="nm-portada__titulo nm-portada__titulo--s">{s.title}</h1>
       <p>{s.text}</p>
       <PasswordPair
@@ -360,8 +405,9 @@ function Restore({ events, onBack, onDone }: { events: CoreEvents; onBack: () =>
 }
 
 function Menu({ onCreate, onRestore, onAccounts }: { onCreate: () => void; onRestore: () => void; onAccounts: () => void }) {
-  // In a new account ("Crear o restaurar otra cuenta"), the way back to the others. Not on a first install.
-  const [accounts, setAccounts] = useState<AccountView[] | null>(null);
+  // In a new account ("Nuevo perfil"), the arrow back to the others. Not on a first install. `undefined`: the list
+  // has not answered yet (`null`: it failed, no arrow).
+  const [accounts, setAccounts] = useState<AccountView[] | null | undefined>(undefined);
   useEffect(() => {
     let cancelled = false;
     api.listAccounts().then(
@@ -373,8 +419,12 @@ function Menu({ onCreate, onRestore, onAccounts }: { onCreate: () => void; onRes
     };
   }, []);
   const s = t().onboarding.welcome.menu;
+  // The box stays empty until it is known whether the arrow goes: then it enters with its fade, so the title does not
+  // jump down when the arrow arrives (the list is local and answers at once).
+  if (accounts === undefined) return <Portada paso="menu-espera">{null}</Portada>;
   return (
-    <Portada>
+    <Portada paso="menu">
+      {hasOtherAccounts(accounts) && <Back onBack={onAccounts} disabled={false} label={t().onboarding.accounts.backToAccounts} />}
       <h1 className="nm-portada__titulo">{s.title}</h1>
       <p>{s.text}</p>
       <div className="nm-pila nm-pila--s">
@@ -384,11 +434,6 @@ function Menu({ onCreate, onRestore, onAccounts }: { onCreate: () => void; onRes
         <button type="button" className={SECONDARY} onClick={onRestore}>
           {s.restore}
         </button>
-        {hasOtherAccounts(accounts) && (
-          <button type="button" className={GHOST} onClick={onAccounts}>
-            {t().onboarding.accounts.backToAccounts}
-          </button>
-        )}
       </div>
     </Portada>
   );
@@ -396,11 +441,25 @@ function Menu({ onCreate, onRestore, onAccounts }: { onCreate: () => void; onRes
 
 type Mode = 'menu' | 'create' | 'restore';
 
-/** The account list on the front screen. Also for `App` when the account is open in another window. */
+/** The account list on the front screen, and from its "+" the "Nuevo perfil" step. Also for `App` when the account is
+ *  open in another window. */
 export function AccountsScreen({ onBack }: { onBack: () => void }) {
+  const [adding, setAdding] = useState(false);
+  // Back from "Nuevo perfil": the list puts focus on its "+" again.
+  const [returned, setReturned] = useState(false);
   return (
-    <Portada paso="cuentas">
-      <AccountChooser onBack={onBack} />
+    <Portada paso={adding ? 'perfil-nuevo' : 'cuentas'}>
+      {adding ? (
+        <NewProfile
+          onBack={() => {
+            setReturned(true);
+            setAdding(false);
+          }}
+          onDone={onBack}
+        />
+      ) : (
+        <AccountChooser onLeave={onBack} onNew={() => setAdding(true)} focusNew={returned} />
+      )}
     </Portada>
   );
 }

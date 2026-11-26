@@ -40,7 +40,6 @@ import { PlanSection } from './PlanSection.tsx';
 import { Reader } from './Reader.tsx';
 import { RecoveryDialog, RecoveryRetry } from './Recovery.tsx';
 import { ResumeNotices } from './ResumeNotices.tsx';
-import { SeedReveal } from './SeedReveal.tsx';
 import { SentFolder } from './Sent.tsx';
 import { Settings } from './Settings.tsx';
 import { useAction } from './useAction.ts';
@@ -72,6 +71,8 @@ interface InboxViewProps {
   archived: MessageView[] | null;
   /** The restore has not finished: instead of "first use", "Falta terminar la restauración". */
   restoring: boolean;
+  /** Changes when the plan must be re-read (first use shows only the step still missing). */
+  planKey: number;
   onNav: (action: NavAction) => void;
   onFlags: () => void;
   onLoaded: (ids: number[]) => void;
@@ -91,7 +92,7 @@ function useShown(messages: MessageView[] | null, addrKey: string | null, onLoad
 
 /** Inbox: the list and the reader according to the layout (`panes`). With two panels the list is hidden, still mounted. With no
  *  messages (and none open), an empty state at full width in their place. */
-function InboxView({ nav, layout, hidden, inbox, addresses, unread, archived, restoring, onNav, onFlags, onLoaded, onGone, domain, onReply }: InboxViewProps) {
+function InboxView({ nav, layout, hidden, inbox, addresses, unread, archived, restoring, planKey, onNav, onFlags, onLoaded, onGone, domain, onReply }: InboxViewProps) {
   // Only the message opened from the inbox (the archive's is shown by `ArchiveView`).
   const openId = openHere(nav, 'bandeja');
   const show = panes({ openId }, layout);
@@ -111,7 +112,7 @@ function InboxView({ nav, layout, hidden, inbox, addresses, unread, archived, re
   if (empty) {
     return (
       <div className="nm-paneles nm-paneles--uno" hidden={hidden}>
-        <InboxEmpty state={empty} error={inbox.error} syncing={inbox.syncing} onSync={inbox.syncNow} onPlan={() => onNav({ type: 'go', view: 'plan' })} onNew={() => onNav({ type: 'new' })} />
+        <InboxEmpty state={empty} error={inbox.error} syncing={inbox.syncing} onSync={inbox.syncNow} onPlan={() => onNav({ type: 'go', view: 'plan' })} onNew={() => onNav({ type: 'new' })} planKey={planKey} />
       </div>
     );
   }
@@ -288,7 +289,6 @@ export function Main({ events, onLocked }: { events: CoreEvents; onLocked: (toAc
   useTaskbarBadge(unread.total);
   // The archive: re-read with the same trigger as the inbox (archiving in one changes the other).
   const archive = useMessageList(events.syncTick + flagsTick, true);
-  const [seedOpen, setSeedOpen] = useState(false);
   const { busy: locking, error, run } = useAction();
   const [late, setLate] = useState<RecoveryReport | null>(null);
   const [lateDone, setLateDone] = useState(false);
@@ -304,8 +304,6 @@ export function Main({ events, onLocked }: { events: CoreEvents; onLocked: (toAc
   // counted here with any view open: on returning to the inbox, the notice already knows whether it applies.
   const serverNow = useServerLine();
 
-  const openSeed = useCallback(() => setSeedOpen(true), []);
-  const closeSeed = useCallback(() => setSeedOpen(false), []);
   const closeLate = useCallback(() => setLateDone(true), []);
   const onFlags = useCallback(() => setFlagsTick((t) => t + 1), []);
   const onPlanChanged = useCallback(() => setPlanTick((t) => t + 1), []);
@@ -393,7 +391,6 @@ export function Main({ events, onLocked }: { events: CoreEvents; onLocked: (toAc
           planKey={planTick + events.syncTick + addressesTick}
           onNav={onNav}
           onCompose={composer.onNew}
-          onSeed={openSeed}
           onLock={() => void lock(false)}
           onLogOut={() => void lock(true)}
           locking={locking}
@@ -419,15 +416,11 @@ export function Main({ events, onLocked }: { events: CoreEvents; onLocked: (toAc
                 tone="exito"
                 strip
                 actions={
-                  <>
-                    <button type="button" className="button button-small button-outline-weak nm-btn" onClick={() => onNav({ type: 'go', view: 'enviados' })}>
-                      {words.viewSent}
-                    </button>
-                    <button type="button" className="button button-small button-ghost-weak nm-btn" onClick={composer.dismissNotice}>
-                      {words.dismiss}
-                    </button>
-                  </>
+                  <button type="button" className="button button-small button-outline-weak nm-btn" onClick={() => onNav({ type: 'go', view: 'enviados' })}>
+                    {words.viewSent}
+                  </button>
                 }
+                dismiss={{ label: words.dismiss, onDismiss: composer.dismissNotice }}
               >
                 <p>{words.sent}</p>
               </Aviso>
@@ -448,6 +441,7 @@ export function Main({ events, onLocked }: { events: CoreEvents; onLocked: (toAc
             unread={unread}
             archived={archive.messages}
             restoring={events.recoverFailed !== null && !late}
+            planKey={planTick + events.syncTick}
             onNav={onNav}
             onFlags={onFlags}
             onLoaded={onLoaded}
@@ -522,8 +516,7 @@ export function Main({ events, onLocked }: { events: CoreEvents; onLocked: (toAc
           </Page>
         </main>
       </div>
-      {/* Dialogs: viewing the phrase (unmounts on closing, and the phrase with it) and the late result of a restore. */}
-      {seedOpen && <SeedReveal onClose={closeSeed} />}
+      {/* Dialogs: the late result of a restore. */}
       {recovered && !lateDone && <RecoveryDialog report={recovered} onDone={closeLate} />}
       {composer.dialog}
     </div>

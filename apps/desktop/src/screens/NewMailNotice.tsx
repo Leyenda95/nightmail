@@ -61,17 +61,12 @@ export function NewMailNotice({ count, onGo, onDismiss, onHold }: Props) {
         strip
         role={null}
         actions={
-          <>
-            <button type="button" className="button button-small button-outline-weak nm-btn" aria-describedby={STATUS_ID} onClick={onGo}>
-              <Icon name="inbox" className="nm-ic" />
-              {words.goToInbox}
-            </button>
-            <button type="button" className="button button-small button-ghost-weak nm-btn button-for-icon" title={words.dismiss} onClick={onDismiss}>
-              <Icon name="cross" className="nm-ic" />
-              <span className="sr-only">{words.dismiss}</span>
-            </button>
-          </>
+          <button type="button" className="button button-small button-outline-weak nm-btn" aria-describedby={STATUS_ID} onClick={onGo}>
+            <Icon name="inbox" className="nm-ic" />
+            {words.goToInbox}
+          </button>
         }
+        dismiss={{ label: words.dismiss, onDismiss }}
       >
         <p aria-hidden="true">{words.count(count)}</p>
       </Aviso>

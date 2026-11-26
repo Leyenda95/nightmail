@@ -1,8 +1,8 @@
 // Settings page: language, layout, theme, interface size, sound and the taskbar number. They apply instantly and are
 // stored on this device (`localStorage`); there is no save button nor anything that can fail. At the end, the
-// password: changing it goes in a dialog (`PasswordChange`). Then deleting the open profile from this computer, also in
-// a dialog (`DeleteProfile.tsx`). Those two and the profile name card are the only things on the page that talk to the
-// core. Below everything, the NightMail version.
+// password: changing it goes in a dialog (`PasswordChange`). Then seeing the recovery phrase (`SeedReveal`, with the
+// password) and deleting the open profile from this computer, also in dialogs (`DeleteProfile.tsx`). Those three and
+// the profile name card are the only things on the page that talk to the core. Below everything, the NightMail version.
 import { useCallback, useEffect, useState } from 'react';
 // The app version is that of its Tauri package: a single place.
 import { version } from '../../src-tauri/tauri.conf.json';
@@ -17,6 +17,7 @@ import { DeleteProfileDialog } from './DeleteProfile.tsx';
 import { PasswordChange } from './PasswordChange.tsx';
 // The profile name card talks to the core too (`set_account_name`): it lives in its own file.
 import { ProfileNameCard } from './ProfileNameCard.tsx';
+import { SeedReveal } from './SeedReveal.tsx';
 import { badgeCountChoices, languageChoices, layoutChoices, sizeChoices, soundChoices, themeChoices, type Choice } from './settings.ts';
 
 interface GroupProps<T extends string> {
@@ -96,6 +97,27 @@ function PasswordCard() {
         </button>
       </div>
       {open && <PasswordChange onClose={close} onChanged={done} />}
+    </section>
+  );
+}
+
+/** "Frase semilla" card: opens the dialog that asks for the password and shows the 24 words (`SeedReveal`). The phrase is
+ *  discarded on closing (the dialog unmounts). */
+function SeedCard() {
+  const [open, setOpen] = useState(false);
+  const close = useCallback(() => setOpen(false), []);
+  const s = t().settings.seed;
+  return (
+    <section className="nm-tarjeta">
+      <h2 className="nm-tarjeta__titulo">{s.title}</h2>
+      <p className="nm-suave">{s.text}</p>
+      <div>
+        <button type="button" className="button button-medium button-outline-weak nm-btn" onClick={() => setOpen(true)}>
+          <Icon name="key" className="nm-ic" />
+          {s.show}
+        </button>
+      </div>
+      {open && <SeedReveal onClose={close} />}
     </section>
   );
 }
@@ -180,6 +202,7 @@ export function Settings() {
       />
       <ProfileNameCard />
       <PasswordCard />
+      <SeedCard />
       <DeleteProfileCard />
       <p className="nm-pista">
         {s.version} <span className="text-monospace">{version}</span>

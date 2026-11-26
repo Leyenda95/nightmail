@@ -179,7 +179,7 @@ test('an envelope sealed by the sender is stored like SMTP mail, and the owner d
   assert.deepEqual(Object.keys(answer.headers).filter((h) => h.startsWith('access-control-')), [], 'no CORS');
 
   const [summary] = api.store.list(juan.addrKey, 0, 10).messages;
-  assert.deepEqual({ size: summary!.size, receivedAt: summary!.receivedAt }, { size: 4096, receivedAt: T0 }, 'bucket and date rounded to the hour');
+  assert.deepEqual({ size: summary!.size, receivedAt: summary!.receivedAt }, { size: 4096, receivedAt: T0 + 1200 }, 'bucket and date rounded to the minute (T0 + 20 min 34 s)');
   const [downloaded] = await downloadAll(api, juan);
   assert.ok(downloaded!.equals(envelope), 'stored byte for byte, nothing added');
   assert.equal(Buffer.from(openMailbox(juan.encSecretKey, downloaded!)).toString(), 'Hola Juan, esto lo cifró mi app.');

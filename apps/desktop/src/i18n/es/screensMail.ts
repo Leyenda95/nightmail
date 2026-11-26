@@ -20,6 +20,9 @@ export default {
     syncing: 'Sincronizando…',
     syncAgain: 'Volver a sincronizar',
     exitDeferred: 'Hay una operación de la cartera de pago en curso: la app se cerrará sola al terminar.',
+    // components/Campo.tsx: the eye button of the password fields.
+    showPassword: 'Mostrar contraseña',
+    hidePassword: 'Ocultar contraseña',
   },
   // screens/Inbox.tsx
   inbox: {
@@ -50,6 +53,8 @@ export default {
     firstIntro: 'Todavía no tienes ninguna. Son dos pasos:',
     firstStep1: 'Elige un plan. Hay uno gratis, con 1 buzón y 2 alias.',
     firstStep2: 'Crea tu buzón con el nombre que quieras, o un alias al azar.',
+    // Read before a step already done (its number is replaced by a check mark).
+    stepDone: 'Hecho.',
     choosePlan: 'Elegir un plan',
     createAddress: 'Crear una dirección',
     copyAddress: 'Copiar la dirección',
@@ -173,7 +178,7 @@ export default {
       rateLimited: 'Has enviado muchos mensajes en poco tiempo y el servidor pide esperar.',
       tooLarge: 'El servidor de NightMail no acepta un mensaje tan grande.',
       network: 'El servidor de NightMail no ha respondido.',
-      chainUnavailable: 'No se ha podido comprobar la dirección de destino en Midnight.',
+      chainUnavailable: 'No se ha podido comprobar la dirección de destino.',
       failed: 'El servidor de NightMail no ha aceptado el mensaje.',
     },
     retryLater: 'Puedes volver a intentarlo con el botón Reintentar.',
@@ -208,7 +213,6 @@ export default {
     mailboxes: 'Buzones',
     aliases: 'Alias',
     sent: 'Enviados',
-    seedPhrase: 'Frase semilla',
     lock: 'Bloquear',
     locking: 'Bloqueando…',
     // The Settings button opens two options: all the settings, or lock and go to the account list.

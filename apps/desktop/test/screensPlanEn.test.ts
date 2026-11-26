@@ -43,24 +43,24 @@ test('en screensPlan: the fixed glossary', () => {
 });
 
 test('en screensPlan: what it says about payment matches the Spanish', () => {
-  // The amount and balance are shown in the test token, payment is with private tokens of the Midnight network and
-  // the operator does not know who pays. No promise beyond that (no "leaves no trace").
-  for (const text of [en.plan.paidFromWallet, en.plan.shieldedHint, en.wallet.intro]) {
-    assert.match(text, /private tokens on the Midnight network/);
+  // The amount and balance are shown in the test token, payment is with shielded tokens of the Midnight network
+  // (Midnight's own term, owner 2026-11-26) and
+  // the operator does not know who pays. No promise beyond that (no "leaves no trace"). The wallet intro is checked apart below: it says "fully privately".
+  for (const text of [en.plan.paidFromWallet, en.plan.shieldedHint]) {
+    assert.match(text, /shielded tokens on the Midnight network/);
     assert.match(text, /who's paying/);
-    assert.doesNotMatch(text, /shielded|trace/i);
+    assert.doesNotMatch(text, /private tokens|trace/i);
   }
-  for (const text of [es.plan.paidFromWallet, es.plan.shieldedHint, es.wallet.intro]) {
-    assert.match(text, /tokens privados de la red Midnight/);
+  for (const text of [es.plan.paidFromWallet, es.plan.shieldedHint]) {
+    assert.match(text, /tokens protegidos de la red Midnight/);
     assert.match(text, /quién paga/);
-    assert.doesNotMatch(text, /shielded|rastro/i);
+    assert.doesNotMatch(text, /tokens privados|shielded|rastro/i);
   }
-  assert.equal(en.plan.payShielded, 'Pay with private tokens…');
-  assert.equal(es.plan.payShielded, 'Pagar con tokens privados…');
+  assert.equal(en.plan.payShielded, 'Pay with shielded tokens…');
+  assert.equal(es.plan.payShielded, 'Pagar con tokens protegidos…');
   assert.equal(
     es.wallet.intro,
-    'Desde ella puedes pagar el plan con tokens privados de la red Midnight: el operador cobra sin saber quién paga. ' +
-      'Las comisiones se pagan con DUST, que genera el NIGHT de la cartera.',
+    'Con ella puedes pagar el plan de forma totalmente privada, gracias a los tokens protegidos de la red Midnight.',
   );
   // The test token is called "NightMail token" in both languages, and it still says it has no real value.
   // The amounts take the plural, the brand keeps its capitals.
@@ -82,8 +82,10 @@ test('en screensPlan: what it says about payment matches the Spanish', () => {
   assert.equal(es.plan.paid, 'Night Plus');
   assert.equal(en.plan.paidTitle, 'Night Plus');
   assert.equal(es.plan.paidTitle, 'Night Plus');
-  assert.match(en.wallet.intro, /Fees are paid with DUST/);
-  assert.match(es.wallet.intro, /comisiones se pagan con DUST/);
+  assert.equal(en.wallet.intro, 'With it you can pay for the plan fully privately, thanks to shielded tokens on the Midnight network.');
+  assert.equal(es.wallet.intro, 'Con ella puedes pagar el plan de forma totalmente privada, gracias a los tokens protegidos de la red Midnight.');
+  assert.match(en.wallet.intro, /shielded tokens/);
+  assert.doesNotMatch(en.wallet.intro, /private tokens|trace/i);
   assert.match(en.wallet.tokenNote, /no real value/);
   assert.match(es.wallet.tokenNote, /sin valor real/);
   assert.match(en.pending.cancelBody, /slot in your plan becomes free/);

@@ -8,6 +8,7 @@ const PASSWORD = 'Contraseña';
 const CANCEL = 'Cancelar';
 const CREATE_PHRASE = 'Crear mi frase semilla';
 const RETRYING = 'Reintentando…';
+const COPY_PHRASE = 'Copiar';
 
 export default {
   // App.tsx: startup screens.
@@ -26,7 +27,7 @@ export default {
   welcome: {
     back: 'Volver',
     menu: {
-      title: 'Aquí no hay perfil.',
+      title: 'Aquí no hay cuentas ni registros.',
       text:
         'Tu identidad son 24 palabras que solo viven en este dispositivo. Con ellas creas direcciones que nadie puede ' +
         'relacionar entre sí. Tampoco nosotros.',
@@ -52,9 +53,9 @@ export default {
     showPhrase: {
       title: 'Tu frase semilla',
       text:
-        'Apúntala en papel, en este orden, y guárdala en un lugar seguro, sin conexión. No la compartas con nadie: ' +
-        'quien tenga estas 24 palabras controla tu perfil. Nosotros no la tenemos y no podemos recuperarla por ti.',
-      note: 'No se volverán a mostrar salvo con tu contraseña, en «Frase semilla».',
+        'Guárdala en un lugar seguro, sin conexión. Quien tenga estas 24 palabras puede acceder a tu perfil. Nosotros no ' +
+        'podremos recuperarla por ti.',
+      copy: COPY_PHRASE,
       written: 'La he apuntado',
     },
     restore: {
@@ -72,22 +73,33 @@ export default {
     },
     repeatPassword: 'Repite la contraseña',
   },
-  // screens/Accounts.tsx and accounts.ts: several accounts on one device ("Cambiar de perfil").
+  // screens/Accounts.tsx and accounts.ts: several accounts on one device ("Elige un perfil").
   accounts: {
-    switchAccount: 'Cambiar de perfil',
     title: 'Elige un perfil',
     text: 'Estos son los perfiles guardados en este dispositivo. Cada uno se abre con su propia contraseña.',
     name: (n: number): string => `Perfil ${n}`,
     // `day`: "18 nov 2026" (`formatDay`).
     created: (day: string): string => `Creado el ${day}`,
-    openNow: 'Abierto ahora',
-    createOther: 'Crear o restaurar otro perfil',
+    recentlyUsed: 'Usado recientemente',
+    // The "+" button of the list and the title of the screen it opens.
+    newProfile: 'Nuevo perfil',
+    newProfileText: 'Elige la red que usará este perfil.',
+    network: 'Red',
+    networks: {
+      local: { title: 'Local', text: 'Una red de pruebas en este ordenador.' },
+      preprod: { title: 'Preprod', text: 'La red de pruebas de Midnight.' },
+      mainnet: { title: 'Mainnet', text: 'La red principal de Midnight.' },
+    },
+    soon: 'Pronto',
+    continue: 'Continuar',
     backToAccounts: 'Volver a mis perfiles',
     openingTitle: 'Abriendo el perfil…',
     openingText: 'NightMail se cerrará y se abrirá de nuevo con el perfil elegido.',
     failed: 'No se ha podido cambiar de perfil. Vuelve a intentarlo.',
+    loadFailed: 'No se ha podido leer la lista de perfiles.',
+    retry: 'Reintentar',
   },
-  // screens/SeedReveal.tsx: the sidebar's "Frase semilla".
+  // screens/SeedReveal.tsx: the "Frase semilla" card of Settings.
   seedReveal: {
     askTitle: 'Ver tu frase semilla',
     askText: 'Escribe tu contraseña. Antes, comprueba que nadie más ve la pantalla.',
@@ -100,6 +112,7 @@ export default {
     hint:
       'Apúntala en papel y guárdala en un lugar seguro, sin conexión. No la compartas con nadie: quien tenga estas 24 ' +
       'palabras controla tu perfil.',
+    copy: COPY_PHRASE,
     close: 'Cerrar',
   },
   // screens/Recovery.tsx: result of the restore and its retry.
@@ -145,8 +158,6 @@ export default {
   // screens/Welcome.tsx: the optional profile name when creating or restoring (accounts.ts, `set_account_name`).
   profileName: {
     label: 'Nombre del perfil (opcional)',
-    help: (max: number): string =>
-      `Se guarda sin cifrar en este dispositivo y se ve antes de desbloquear. Hasta ${max} caracteres. Si lo dejas vacío, se muestra Perfil y su número.`,
     tooLong: (max: number): string => `Usa como máximo ${max} caracteres.`,
   },
   // screens/DeleteProfile.tsx: deleting a profile from this computer (the trash can of each box in the profile list

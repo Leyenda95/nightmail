@@ -711,7 +711,45 @@ fn reset_attempts(dir: &Path) {
 
 // ---------- Operations ----------
 
-/// Result of [`create`]: the phrase is shown to the user once and then dropped.
+/// A new phrase not saved yet (creating a profile shows the words first and asks for the password afterwards). Only
+/// its entropy, in memory: never written to disk until [`create`] seals it under the password. Wiped on drop.
+pub struct Draft {
+    entropy: Zeroizing<[u8; 32]>,
+}
+
+impl Draft {
+    /// 24 new random words.
+    pub fn new() -> Self {
+        let mut entropy = Zeroizing::new([0u8; 32]);
+        fill_random(entropy.as_mut());
+        Self { entropy }
+    }
+
+    /// The words to show (each call builds a new wiped buffer).
+    pub fn phrase(&self) -> Zeroizing<String> {
+        phrase_of(&mnemonic_from(&self.entropy))
+    }
+
+    /// The same draft (the app keeps it until the password arrives and hands a copy to the blocking thread).
+    pub fn duplicate(&self) -> Self {
+        Self { entropy: self.entropy.clone() }
+    }
+}
+
+impl Default for Draft {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Debug for Draft {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Draft(..)")
+    }
+}
+
+/// Result of the test shortcut [`create_with`]: a new seed already saved and its phrase.
+#[cfg(test)]
 pub struct Created {
     pub keys: KeyManager,
     pub phrase: Zeroizing<String>,
@@ -737,12 +775,21 @@ fn load(dir: &Path, password: &str, policy: &KdfPolicy) -> Result<Mnemonic, KeyE
     Ok(mnemonic_from(&*open_entropy(&text, password, policy)?))
 }
 
+pub(crate) fn create_from_draft_with(
+    dir: &Path,
+    draft: &Draft,
+    password: &str,
+    policy: &KdfPolicy,
+) -> Result<KeyManager, KeyError> {
+    store(dir, &mnemonic_from(&draft.entropy), password, policy)
+}
+
+/// Test shortcut: a new draft saved at once.
+#[cfg(test)]
 pub(crate) fn create_with(dir: &Path, password: &str, policy: &KdfPolicy) -> Result<Created, KeyError> {
-    let mut entropy = Zeroizing::new([0u8; 32]);
-    fill_random(entropy.as_mut());
-    let mnemonic = mnemonic_from(&entropy);
-    let keys = store(dir, &mnemonic, password, policy)?;
-    Ok(Created { keys, phrase: phrase_of(&mnemonic) })
+    let draft = Draft::new();
+    let keys = create_from_draft_with(dir, &draft, password, policy)?;
+    Ok(Created { keys, phrase: draft.phrase() })
 }
 
 pub(crate) fn restore_with(
@@ -820,9 +867,9 @@ pub fn forget_attempts(dir: &Path) {
 pub(crate) const TEST_POLICY: KdfPolicy =
     KdfPolicy { write: KdfParams { m: 8, t: 1, p: 1 }, minimum: KdfParams { m: 8, t: 1, p: 1 } };
 
-/// Generates a new phrase and saves `dir/seed.v1` (never overwrites an existing one).
-pub fn create(dir: &Path, password: &str) -> Result<Created, KeyError> {
-    create_with(dir, password, &PRODUCTION)
+/// Saves the phrase of `draft` as `dir/seed.v1`, sealed with the password (never overwrites an existing one).
+pub fn create(dir: &Path, draft: &Draft, password: &str) -> Result<KeyManager, KeyError> {
+    create_from_draft_with(dir, draft, password, &PRODUCTION)
 }
 
 /// Saves `dir/seed.v1` from a recovery phrase (never overwrites an existing one).
@@ -1053,6 +1100,29 @@ mod tests {
         assert_eq!(unlocked.master, created.keys.master);
         assert_eq!(reveal_phrase_with(dir.path(), PASSWORD, &FAST).unwrap(), created.phrase);
         assert_eq!(manager_for(&created.phrase).master, created.keys.master);
+    }
+
+    /// The words are shown before the password exists: the draft writes nothing, always shows the same words, a failed
+    /// save leaves no file and the draft usable, and the saved seed is exactly the words that were shown.
+    #[test]
+    fn a_draft_writes_nothing_until_saved_and_saves_the_words_shown() {
+        let dir = tempfile::tempdir().unwrap();
+        let draft = Draft::new();
+        let shown = draft.phrase();
+        assert_eq!(shown.split(' ').count(), WORD_COUNT);
+        assert_eq!(draft.phrase(), shown);
+        assert_eq!(draft.duplicate().phrase(), shown);
+        assert_ne!(Draft::new().phrase(), shown);
+        assert_eq!(format!("{draft:?}"), "Draft(..)");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0, "nothing on disk before the password");
+
+        assert_eq!(create_from_draft_with(dir.path(), &draft, "", &FAST).err(), Some(KeyError::EmptyPassword));
+        assert!(!seed_path(&dir).exists());
+
+        let keys = create_from_draft_with(dir.path(), &draft, PASSWORD, &FAST).unwrap();
+        assert_eq!(keys.master, manager_for(&shown).master);
+        assert_eq!(reveal_phrase_with(dir.path(), PASSWORD, &FAST).unwrap(), shown);
+        assert_eq!(create_from_draft_with(dir.path(), &draft, PASSWORD, &FAST).err(), Some(KeyError::Exists));
     }
 
     #[test]

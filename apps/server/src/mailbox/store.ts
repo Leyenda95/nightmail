@@ -1,15 +1,17 @@
 // MailboxStore: sealed envelopes per addrKey; no user table, nothing links two mailboxes.
 // Per message: a random `id` (a counter would leak volume and order), a per-mailbox `seq` cursor (no
-// rowid, so no global arrival order), `received_at` rounded down so a leaked database cannot link
-// mailboxes by mail that arrived together, and `size` for the quota (only its bucket is exposed).
+// rowid, so no global arrival order), `received_at` set by the server, not the sender, and rounded down to the
+// minute (owner decision 2026-11-26: the exact minute is shown; the hour rounding is dropped), and `size` for the
+// quota (only its bucket is exposed).
 import { randomBytes } from 'node:crypto';
 import { bucketOfEnvelope } from '@nightmail/core-ts';
 import { type Database, inTransaction } from '../storage/db.ts';
 
 /** Per-mailbox quota, in envelope bytes. Provisional default. */
 export const DEFAULT_MAILBOX_QUOTA_BYTES = 300 * 1024 * 1024;
-/** Granularity of the stored receipt time. Default pending confirmation. */
-export const RECEIVED_AT_GRANULARITY_SECONDS = 3600;
+/** Granularity of the stored receipt time: the minute, which is what the interface shows. Decided by the owner on
+ *  2026-11-26; the earlier hour rounding is dropped. */
+export const RECEIVED_AT_GRANULARITY_SECONDS = 60;
 
 const ADDR_KEY_BYTES = 32;
 const ID_BYTES = 16;

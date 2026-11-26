@@ -31,11 +31,11 @@ export default {
     price: 'Precio',
     balance: 'Tu saldo',
     paidFromWallet:
-      'Se paga desde tu cartera de pago, con tokens privados de la red Midnight: el operador no sabe quién paga.',
+      'Se paga desde tu cartera de pago, con tokens protegidos de la red Midnight: el operador no sabe quién paga.',
     confirmPayment: 'Confirmar el pago',
     paidTitle: PAID_PLAN,
-    shieldedHint: 'Con tokens privados de la red Midnight: el operador no sabe quién paga',
-    payShielded: 'Pagar con tokens privados…',
+    shieldedHint: 'Con tokens protegidos de la red Midnight: el operador no sabe quién paga',
+    payShielded: 'Pagar con tokens protegidos…',
     // The price and the balance, in the test token ("1 NightMail token", "100 NightMail tokens").
     amount: tokenAmount,
     cardHint: 'Con tarjeta (simulado en esta versión)',
@@ -50,8 +50,7 @@ export default {
   wallet: {
     title: 'Cartera de pago',
     intro:
-      'Desde ella puedes pagar el plan con tokens privados de la red Midnight: el operador cobra sin saber quién paga. ' +
-      'Las comisiones se pagan con DUST, que genera el NIGHT de la cartera.',
+      'Con ella puedes pagar el plan de forma totalmente privada, gracias a los tokens protegidos de la red Midnight.',
     dustInfo:
       'El DUST es un recurso que sirve para pagar las comisiones. Se regenera solo a partir del NIGHT de la cartera.',
     dustInfoLabel: 'Qué es el DUST',

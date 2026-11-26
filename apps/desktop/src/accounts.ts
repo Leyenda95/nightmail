@@ -13,7 +13,7 @@ export interface AccountRow {
   name: string;
   /** "Creado el 18 nov 2026", or `null` if the device does not know the day. */
   created: string | null;
-  /** The account this window opened ("Abierto ahora"). */
+  /** The account this window opened (marked "Usado recientemente"). */
   current: boolean;
 }
 
@@ -45,6 +45,23 @@ export function profileNameDraft(own: Pick<AccountView, 'name' | 'autoNumber'>, 
  *  new account). */
 export function hasOtherAccounts(list: readonly AccountView[] | null): boolean {
   return list !== null && list.some((a) => !a.current);
+}
+
+/** The networks offered on "Nuevo perfil". Only the local one can be chosen for now: the choice is shown but not sent
+ *  to the core, which in this build only knows the local network (`AppConfig` in `config.rs`). */
+export type Network = 'local' | 'preprod' | 'mainnet';
+
+export interface NetworkChoice {
+  value: Network;
+  title: string;
+  text: string;
+  /** `false`: shown disabled, with "Pronto". */
+  available: boolean;
+}
+
+export function networkChoices(): NetworkChoice[] {
+  const s = t().onboarding.accounts.networks;
+  return (['local', 'preprod', 'mainnet'] as const).map((value) => ({ value, ...s[value], available: value === 'local' }));
 }
 
 /** Longest name, in characters, the same as the core's (`MAX_NAME_CHARS` in `accounts.rs`). */

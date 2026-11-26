@@ -175,7 +175,7 @@ export class Ingress {
       const boxes = this.boxesOf(session);
       if (!boxes) return LOCAL_ERROR();
       store.deliver(sealedFor(boxes, message), Math.floor(this.now() / 1000));
-      // Debug only: the log timestamp would undo the hourly rounding of `received_at`.
+      // Debug only: the log timestamp would give the exact second of `received_at`, which is kept to the minute.
       log.debug(`smtp: message stored in ${boxes.length} mailbox(es)`);
       return null;
     } catch (error) {

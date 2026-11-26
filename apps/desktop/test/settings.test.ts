@@ -56,17 +56,15 @@ test('the three-panel option draws 3 boxes and the others 2', () => {
 });
 
 test('every size in prefs.ts has its option, in order, with its "Aa" growing each time and no boxes', () => {
-  const sizes = sizeChoices('175');
+  const sizes = sizeChoices('150');
   assert.deepEqual(sizes.map((c) => c.value), [...SIZES]);
-  assert.deepEqual(sizes.map((c) => c.title), ['Automático (175 %)', '100 %', '125 %', '150 %', '175 %', '200 %']);
-  assert.deepEqual(sizes.map((c) => c.scale), [1.75, 1, 1.25, 1.5, 1.75, 2]);
+  assert.deepEqual(sizes.map((c) => c.title), ['Automático (150 %)', '100 %', '125 %', '150 %']);
+  assert.deepEqual(sizes.map((c) => c.scale), [1.5, 1, 1.25, 1.5]);
   assert.deepEqual(sizes.map((c) => c.text), [
     'Se ajusta a la pantalla.',
     'Tamaño normal.',
     'Un 25 % más grande.',
     'Un 50 % más grande.',
-    'Un 75 % más grande.',
-    'Un 100 % más grande.',
   ]);
   for (const c of sizes) {
     assert.equal(c.boxes, 0, c.value);
@@ -78,14 +76,14 @@ test('"Automático" says the size in use, and its "Aa" is at that scale', () => 
   const [auto] = sizeChoices('100');
   assert.equal(auto.title, 'Automático (100 %)');
   assert.equal(auto.scale, 1);
-  assert.equal(sizeChoices('200')[0].title, 'Automático (200 %)');
+  assert.equal(sizeChoices('150')[0].title, 'Automático (150 %)');
   assert.equal(inLocale('en', () => sizeChoices('125'))[0].title, 'Automatic (125%)');
 });
 
 test('en: sizes with the English percent sign, without a space', () => {
-  const sizes = inLocale('en', () => sizeChoices('175'));
-  assert.deepEqual(sizes.map((c) => c.title), ['Automatic (175%)', '100%', '125%', '150%', '175%', '200%']);
-  assert.deepEqual(sizes.map((c) => c.text), ['Matches your screen.', 'Normal size.', '25% larger.', '50% larger.', '75% larger.', '100% larger.']);
+  const sizes = inLocale('en', () => sizeChoices('150'));
+  assert.deepEqual(sizes.map((c) => c.title), ['Automatic (150%)', '100%', '125%', '150%']);
+  assert.deepEqual(sizes.map((c) => c.text), ['Matches your screen.', 'Normal size.', '25% larger.', '50% larger.']);
 });
 
 test('en: Settings texts', () => {

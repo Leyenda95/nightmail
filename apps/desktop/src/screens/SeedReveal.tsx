@@ -1,8 +1,9 @@
-// "Frase semilla" (sidebar): a dialog that asks for the password again and shows the 24 words.
+// "Frase semilla" (Settings card): a dialog that asks for the password again and shows the 24 words.
 // The phrase is discarded on closing: whoever uses it unmounts it (Esc, "Cancelar", "Cerrar").
 import { useId, useState } from 'react';
 import { api } from '../api.ts';
 import { Campo } from '../components/Campo.tsx';
+import { CopyButton } from '../components/Copiable.tsx';
 import { Dialogo } from '../components/Dialogo.tsx';
 import { seedWords } from '../format.ts';
 import { t } from '../i18n/index.ts';
@@ -53,6 +54,7 @@ export function SeedReveal({ onClose }: { onClose: () => void }) {
             <li key={i}>{word}</li>
           ))}
         </ol>
+        <CopyButton text={seedWords(phrase).join(' ')} label={s.copy} secret />
         <p className="nm-pista">{s.hint}</p>
       </Dialogo>
     );

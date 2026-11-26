@@ -155,6 +155,29 @@ impl std::fmt::Debug for SeedPhrase {
     }
 }
 
+/// The words of a new profile, shown before its password is chosen. Not saved anywhere: the core keeps them in
+/// memory until `create_seed` (with this `id` and the password) or `discard_seed_draft`. The `id` is not secret: it
+/// only ties the save to the words that were shown. Wiped on drop (the copy in the IPC response is not).
+#[derive(Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../../desktop/src/bindings/")]
+pub struct SeedDraft {
+    pub id: u32,
+    pub phrase: String,
+}
+
+impl Drop for SeedDraft {
+    fn drop(&mut self) {
+        self.phrase.zeroize();
+    }
+}
+
+impl std::fmt::Debug for SeedDraft {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SeedDraft({}, ..)", self.id)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../../desktop/src/bindings/")]
@@ -662,6 +685,7 @@ mod tests {
         assert_eq!(secret.0.as_str(), "clave");
         assert_eq!(format!("{secret:?}"), "Secret(..)");
         assert_eq!(format!("{:?}", SeedPhrase { phrase: "a b".into() }), "SeedPhrase(..)");
+        assert_eq!(format!("{:?}", SeedDraft { id: 3, phrase: "a b".into() }), "SeedDraft(3, ..)");
     }
 
     #[test]

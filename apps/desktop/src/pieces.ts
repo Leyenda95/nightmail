@@ -94,9 +94,109 @@ export async function copyText(text: string, env: CopyEnv): Promise<boolean> {
   }
 }
 
-/** What the "Copiar" notice (`role="status"`) says for the result; nothing until it has been pressed. */
-export function copyStatus(state: 'idle' | 'ok' | 'fail'): string {
-  if (state === 'ok') return t().mail.copied;
+/** Seconds after which a copied secret (the recovery phrase) is wiped from the clipboard. */
+export const SECRET_CLEAR_SECONDS = 30;
+
+/** What `clearClipboard` needs from the environment: injected so it can be tested without a browser. */
+export interface ClearEnv {
+  /** `navigator.clipboard.writeText`, if it exists. */
+  writeText?: (text: string) => Promise<void>;
+  /** Plan B: `execCommand('copy')` with an empty text. Usually refused without a click, but it costs nothing to try. */
+  copyEmpty: () => boolean;
+}
+
+/** Empties the clipboard (writes an empty text) once. What is in it is not read first: reading the clipboard can ask
+ *  the person for permission and is itself a peek at what they copied, so it is wiped whatever it holds. Never throws.
+ *  Returns whether it was emptied. */
+export async function clearClipboard(env: ClearEnv): Promise<boolean> {
+  if (env.writeText) {
+    try {
+      await env.writeText('');
+      return true;
+    } catch {
+      // Falls through to plan B.
+    }
+  }
+  try {
+    return env.copyEmpty();
+  } catch {
+    return false;
+  }
+}
+
+/** What `secretWipe` needs besides the clipboard: timers and the window's events, injected for the tests. */
+export interface WipeEnv extends ClearEnv {
+  setTimer: (fn: () => void, ms: number) => number;
+  clearTimer: (id: number) => void;
+  /** Calls `fn` once, the next time the window gets focus. Returns how to stop waiting. */
+  onNextFocus: (fn: () => void) => () => void;
+  /** Calls `fn` on every copy made in this window (Ctrl+C or a copy button's plan B). Returns how to stop listening. */
+  onCopy: (fn: () => void) => () => void;
+}
+
+/** The wipe of a copied secret (the recovery phrase), `SECRET_CLEAR_SECONDS` after copying it. `schedule` after copying
+ *  the secret (it starts the count again). `cancel` after any other copy in the app: that copy already replaced the
+ *  secret in the clipboard and must not be wiped. The webview refuses to write while the window has no focus (the
+ *  person went to paste the phrase elsewhere): then it tries again each time the window gets focus back, until it works.
+ *  On purpose with no time limit (accepted by the owner): coming back hours later still wipes the clipboard, whatever
+ *  another app put in it by then. */
+export function secretWipe(env: WipeEnv): { schedule: () => void; cancel: () => void } {
+  let timer: number | null = null;
+  let stopFocus: (() => void) | null = null;
+  let stopCopy: (() => void) | null = null;
+  // Each `cancel` starts a new generation: an attempt still running from an older one does not wait for focus again.
+  let generation = 0;
+  // Plan B of the wipe is itself a copy: it must not cancel the wipe.
+  let wiping = false;
+
+  function cancel() {
+    generation++;
+    if (timer !== null) env.clearTimer(timer);
+    timer = null;
+    stopFocus?.();
+    stopFocus = null;
+    stopCopy?.();
+    stopCopy = null;
+  }
+
+  async function wipe(mine: number) {
+    wiping = true;
+    let ok: boolean;
+    try {
+      ok = await clearClipboard(env);
+    } finally {
+      wiping = false;
+    }
+    if (mine !== generation) return;
+    if (ok) {
+      cancel();
+      return;
+    }
+    stopFocus = env.onNextFocus(() => {
+      stopFocus = null;
+      void wipe(mine);
+    });
+  }
+
+  function schedule() {
+    cancel();
+    const mine = generation;
+    stopCopy = env.onCopy(() => {
+      if (!wiping) cancel();
+    });
+    timer = env.setTimer(() => {
+      timer = null;
+      void wipe(mine);
+    }, SECRET_CLEAR_SECONDS * 1000);
+  }
+
+  return { schedule, cancel };
+}
+
+/** What the "Copiar" notice (`role="status"`) says for the result; nothing until it has been pressed. `secret`: the
+ *  copied text is wiped from the clipboard after `SECRET_CLEAR_SECONDS`, and the notice says so. */
+export function copyStatus(state: 'idle' | 'ok' | 'fail', secret = false): string {
+  if (state === 'ok') return secret ? t().mail.copiedSecret(SECRET_CLEAR_SECONDS) : t().mail.copied;
   if (state === 'fail') return t().mail.copyFailed;
   return '';
 }

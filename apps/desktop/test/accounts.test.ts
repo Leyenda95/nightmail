@@ -12,6 +12,7 @@ import {
   deleteProfileLabel,
   hasOtherAccounts,
   MAX_ACCOUNT_NAME,
+  networkChoices,
   profileName,
   profileNameDraft,
 } from '../src/accounts.ts';
@@ -181,13 +182,11 @@ test('the Settings profile name texts, in both languages, always say perfil or p
 test('the profile name texts, in both languages', () => {
   const es = t().onboarding.profileName;
   assert.equal(es.label, 'Nombre del perfil (opcional)');
-  assert.match(es.help(40), /Hasta 40 caracteres/);
   assert.equal(es.tooLong(40), 'Usa como máximo 40 caracteres.');
   prefs.setLocale('en');
   try {
     const en = t().onboarding.profileName;
     assert.equal(en.label, 'Profile name (optional)');
-    assert.match(en.help(40), /Up to 40 characters/);
     assert.equal(en.tooLong(40), 'Use 40 characters at most.');
   } finally {
     prefs.setLocale('es');
@@ -271,4 +270,102 @@ test('the delete texts, in both languages: this computer only, nothing on Midnig
           : [];
   for (const text of texts(DICTIONARIES.es.onboarding.deleteProfile)) assert.doesNotMatch(text, /cuenta/i, text);
   for (const text of texts(DICTIONARIES.en.onboarding.deleteProfile)) assert.doesNotMatch(text, /account/i, text);
+});
+
+// --- "Nuevo perfil": the "+" of the list, the network and the back arrows ----------------------------------------
+
+test('"Nuevo perfil": the three networks in order, only the local one can be chosen (the others say "Pronto")', () => {
+  const choices = networkChoices();
+  assert.deepEqual(
+    choices.map((c) => [c.value, c.title, c.available]),
+    [
+      ['local', 'Local', true],
+      ['preprod', 'Preprod', false],
+      ['mainnet', 'Mainnet', false],
+    ],
+  );
+  assert.equal(choices[0]?.text, 'Una red de pruebas en este ordenador.');
+  prefs.setLocale('en');
+  try {
+    assert.equal(networkChoices()[2]?.text, "Midnight's main network.");
+  } finally {
+    prefs.setLocale('es');
+  }
+  // The screen: the local one comes checked and the others disabled; "Continuar" keeps the core's restart.
+  const screen = readFileSync(new URL('../src/screens/Accounts.tsx', import.meta.url), 'utf8');
+  assert.match(screen, /defaultChecked=\{c\.available\} disabled=\{!c\.available\}/);
+  assert.match(screen, /!c\.available && <Tag>\{s\.soon\}<\/Tag>/);
+  assert.match(screen, /onClick=\{\(\) => void open\(api\.newAccount\)\}>\s*\{s\.continue\}/);
+});
+
+test('the list: a "+" named "Nuevo perfil" instead of the full width button, and no "Cambiar de perfil" any more', () => {
+  const screen = readFileSync(new URL('../src/screens/Accounts.tsx', import.meta.url), 'utf8');
+  assert.match(screen, /title=\{s\.newProfile\} aria-label=\{s\.newProfile\} onClick=\{onNew\}>\s*<Icon name="plus"/);
+  assert.doesNotMatch(screen, /createOther/);
+  // Below the list (after its status line), not next to the title.
+  assert.doesNotMatch(screen, /nm-portada__cab/);
+  assert.ok(screen.indexOf("<button ref={plus}") > screen.indexOf("</ul>"));
+  const welcome = readFileSync(new URL('../src/screens/Welcome.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(welcome, /switchAccount/);
+  // Unlock: the back arrow to the list, at the top (before the title), always. The new profile's menu: only with others.
+  const unlock = welcome.slice(welcome.indexOf('function Unlock'), welcome.indexOf('function ShowPhrase'));
+  assert.match(unlock, /<Back onBack=\{onAccounts\} disabled=\{busy\} label=\{t\(\)\.onboarding\.accounts\.backToAccounts\} \/>\s*<h1/);
+  const menu = welcome.slice(welcome.indexOf('function Menu'), welcome.indexOf("type Mode = "));
+  assert.match(menu, /\{hasOtherAccounts\(accounts\) && <Back onBack=\{onAccounts\} disabled=\{false\} label=\{t\(\)\.onboarding\.accounts\.backToAccounts\} \/>\}\s*<h1/);
+  assert.doesNotMatch(menu, /button-ghost-weak nm-btn w-full/);
+});
+
+test('back from "Nuevo perfil" focus returns to the "+", and the new profile menu waits for the list before painting', () => {
+  const screen = readFileSync(new URL('../src/screens/Accounts.tsx', import.meta.url), 'utf8');
+  assert.match(screen, /if \(focusNew\) plus\.current\?\.focus\(\);/);
+  assert.match(screen, /<button ref=\{plus\} type="button" className=\{PLUS\}/);
+  const welcome = readFileSync(new URL('../src/screens/Welcome.tsx', import.meta.url), 'utf8');
+  assert.match(welcome, /focusNew=\{returned\}/);
+  const menu = welcome.slice(welcome.indexOf('function Menu'), welcome.indexOf("type Mode = "));
+  assert.match(menu, /if \(accounts === undefined\) return <Portada paso="menu-espera">\{null\}<\/Portada>;/);
+});
+
+test('"Elige un perfil" is the base screen: no back arrow, the open profile row and the "+" lead on', () => {
+  const screen = readFileSync(new URL('../src/screens/Accounts.tsx', import.meta.url), 'utf8');
+  const chooser = screen.slice(screen.indexOf('export function AccountChooser'));
+  assert.doesNotMatch(chooser, /<Back /);
+  // Ways forward: the open profile's row (to its front screen), another row (open it), the "+" and, with none left
+  // after deleting, the front screen.
+  assert.match(chooser, /row\.current \? onLeave\(\) : void open\(\(\) => api\.switchAccount\(row\.id\)\)/);
+  assert.match(chooser, /if \(accounts\.length === 0\) \{\s*onLeave\(\);/);
+  assert.match(chooser, /onClick=\{onNew\}/);
+  // "Nuevo perfil" keeps its arrow back to the list.
+  const fresh = screen.slice(screen.indexOf('export function NewProfile'), screen.indexOf('export function AccountChooser'));
+  assert.match(fresh, /<Back onBack=\{onBack\} \/>/);
+  // The "+" is compact and centred under the list, not full width: as tall as the large buttons and wider than square.
+  assert.match(screen, /const PLUS = 'button button-medium button-outline-weak nm-btn button-for-icon nm-cuentas__nuevo';/);
+  const css = readFileSync(new URL('../src/styles/app.css', import.meta.url), 'utf8');
+  assert.match(css, /\.button\.nm-cuentas__nuevo \{ justify-self: center; --padding-block: 0\.8125rem; --padding-inline: 2rem; \}/);
+});
+
+test('"Elige un perfil": the open profile says "Usado recientemente" in the plain muted tag, not in green', () => {
+  const screen = readFileSync(new URL('../src/screens/Accounts.tsx', import.meta.url), 'utf8');
+  assert.match(screen, /\{row\.current && <Tag>\{s\.recentlyUsed\}<\/Tag>\}/);
+  assert.doesNotMatch(screen, /row\.current && <Tag tone=/);
+  assert.equal(DICTIONARIES.es.onboarding.accounts.recentlyUsed, 'Usado recientemente');
+  assert.equal(DICTIONARIES.en.onboarding.accounts.recentlyUsed, 'Recently used');
+  // The plain tag is the muted secondary text tone.
+  const css = readFileSync(new URL('../src/styles/app.css', import.meta.url), 'utf8');
+  assert.match(css, /\.nm-tag \{[^}]*color: var\(--text-weak\);/);
+});
+
+test('"Elige un perfil": if the list cannot be read, "Reintentar" reads it again (no back arrow there either)', () => {
+  const screen = readFileSync(new URL('../src/screens/Accounts.tsx', import.meta.url), 'utf8');
+  const chooser = screen.slice(screen.indexOf('export function AccountChooser'));
+  assert.match(chooser, /\(\) => !cancelled && setLoadFailed\(true\)/);
+  assert.match(chooser, /\}, \[reload\]\);/);
+  assert.match(chooser, /setLoadFailed\(false\);\s*setReload\(\(n\) => n \+ 1\);/);
+  assert.match(chooser, /\{s\.retry\}\s*<\/button>\s*\}\s*>\s*<p>\{s\.loadFailed\}<\/p>/);
+  // After deleting, a failed re-read is the same failure.
+  assert.match(chooser, /setDeleted\(name\);\s*\} catch \{\s*setLoadFailed\(true\);/);
+  assert.doesNotMatch(chooser, /<Back /);
+  assert.equal(DICTIONARIES.es.onboarding.accounts.retry, 'Reintentar');
+  assert.equal(DICTIONARIES.en.onboarding.accounts.retry, 'Try again');
+  assert.equal(DICTIONARIES.es.onboarding.accounts.loadFailed, 'No se ha podido leer la lista de perfiles.');
+  assert.equal(DICTIONARIES.en.onboarding.accounts.loadFailed, "Couldn't read the list of profiles.");
 });

@@ -19,7 +19,7 @@ export type Layout = (typeof LAYOUTS)[number];
 
 /** Fixed interface sizes, as a % of normal (the first one, not enlarged). To change the list it is enough to
  *  touch this line and the one in `public/tema.js` (a test checks they match); Settings takes its options from here. */
-export const FIXED_SIZES = ['100', '125', '150', '175', '200'] as const;
+export const FIXED_SIZES = ['100', '125', '150'] as const;
 export type FixedSize = (typeof FIXED_SIZES)[number];
 
 /** What is chosen in Settings: "Automático" (the default, see `autoSize`) or a fixed one. */
@@ -51,7 +51,7 @@ export interface Prefs {
 }
 
 export const DEFAULT_PREFS: Prefs = {
-  theme: 'sistema',
+  theme: 'oscuro',
   layout: 'tres',
   listWidth: LIST_WIDTH_DEFAULT,
   size: 'auto',
@@ -78,7 +78,7 @@ function oneOf<T extends string>(values: readonly T[], raw: unknown, fallback: T
   return (values as readonly unknown[]).includes(raw) ? (raw as T) : fallback;
 }
 
-/** What is stored can be anything (or nothing): whatever is not a theme means "follow the system". */
+/** What is stored can be anything (or nothing): whatever is not a theme means the default (dark). */
 export function parseTheme(raw: unknown): Theme {
   return oneOf(THEMES, raw, DEFAULT_PREFS.theme);
 }
@@ -88,7 +88,7 @@ export function parseLayout(raw: unknown): Layout {
 }
 
 /** Sizes that no longer exist and which one they map to (the nearest; on a tie, the smaller): stored values are not left without meaning. */
-export const LEGACY_SIZES: Readonly<Record<string, Size>> = { '115': '125', '130': '125' };
+export const LEGACY_SIZES: Readonly<Record<string, Size>> = { '115': '125', '130': '125', '175': '150', '200': '150' };
 
 export function parseSize(raw: unknown): Size {
   const migrated = typeof raw === 'string' && Object.hasOwn(LEGACY_SIZES, raw) ? LEGACY_SIZES[raw] : raw;
@@ -133,11 +133,10 @@ const UNSCALED_DPR = 1.05;
 
 /** Steps of "Automático": the screen's short side in px (largest first) and the size it gets. The short side rather
  *  than the width, so a 3440 x 1440 ultrawide (as dense as a 2560 x 1440) does not come out huge. They are the heights of
- *  5K (2880), 4K (2160) and QHD (1440), with margin: 200 % as macOS does on 5K, 175 % on a 28" 4K and 125 % on QHD
+ *  4K (2160) and QHD (1440), with margin: 150 % on a 28" 4K or larger and 125 % on QHD
  *  (at 150 % it would fit the same as on a 1707 x 960 screen). */
 const AUTO_STEPS: readonly (readonly [number, FixedSize])[] = [
-  [2700, '200'],
-  [2000, '175'],
+  [2000, '150'],
   [1400, '125'],
 ];
 
@@ -159,7 +158,7 @@ export function resolveSize(size: Size, screen: ScreenInfo | null | undefined): 
  *  window (`test/prefs.test.ts` checks they match). */
 export const SIDEBAR_REM = 15.5;
 
-/** The real sidebar: 15.5 rem, but never more than a third of the window (at 200 %, in 960 px, 10 rem). */
+/** The real sidebar: 15.5 rem, but never more than a third of the window (at 150 %, in 720 px, 10 rem). */
 export function sidebarRem(viewportRem: number): number {
   return Math.min(SIDEBAR_REM, viewportRem / 3);
 }

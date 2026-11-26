@@ -7,11 +7,9 @@ export default {
   // Fixed headline above the rotating slogans: it never rotates and is always read.
   headline: 'El correo más privado del mundo.',
   list: [
-    'Sin cuenta. Sin número de teléfono. Sin IP.',
     'Ni nosotros podemos atar cabos.',
+    'Sin cuenta. Sin número de teléfono. Sin IP.',
     'Tu correo privado. Regístrate con libertad.',
-    'Escribe libremente. No dejes rastro.',
     'Regístrate donde quieras. Sin compartir nada.',
-    'Muchas direcciones. Ninguna pista.',
   ],
 } as const;

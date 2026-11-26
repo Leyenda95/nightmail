@@ -151,22 +151,18 @@ test('the fixed headline: a separate key in both languages, no forbidden marks a
   }
 });
 
-test('the slogans: all six, the new one first, in their order, in both languages', () => {
+test('the slogans: all four, in their order, in both languages', () => {
   assert.deepEqual(DICTIONARIES.en.slogans.list, [
-    'No account. No phone number. No IP.',
     "Even we can't connect the dots.",
+    'No account. No phone number. No IP.',
     'Email privately. Sign up freely.',
-    'Write freely. Leave no trace.',
     'Sign up anywhere. Share nothing.',
-    'Many addresses. Zero clues.',
   ]);
   assert.deepEqual(DICTIONARIES.es.slogans.list, [
-    'Sin cuenta. Sin número de teléfono. Sin IP.',
     'Ni nosotros podemos atar cabos.',
+    'Sin cuenta. Sin número de teléfono. Sin IP.',
     'Tu correo privado. Regístrate con libertad.',
-    'Escribe libremente. No dejes rastro.',
     'Regístrate donde quieras. Sin compartir nada.',
-    'Muchas direcciones. Ninguna pista.',
   ]);
   assert.equal(DICTIONARIES.es.slogans.list.length, DICTIONARIES.en.slogans.list.length);
   for (const list of [DICTIONARIES.en.slogans.list, DICTIONARIES.es.slogans.list]) {

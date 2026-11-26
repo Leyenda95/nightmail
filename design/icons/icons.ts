@@ -81,6 +81,14 @@ export const ICONS = {
     viewBox: '0 0 16 16',
     body: '<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path fill="currentColor" stroke="none" fill-rule="evenodd" d="M6.69 2.52A1.5 1.5 0 0 1 9.31 2.52L14.56 12.02A1.5 1.5 0 0 1 13.25 14.25H2.75A1.5 1.5 0 0 1 1.44 12.02zM8 5.5a.75.75 0 0 1 .75.75v2.5a.75.75 0 0 1-1.5 0v-2.5A.75.75 0 0 1 8 5.5zM8 10.5a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/></g>',
   },
+  'eye-off': {
+    viewBox: '0 0 16 16',
+    body: '<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.75 8c1.5-2.9 3.6-4.5 6.25-4.5s4.75 1.6 6.25 4.5c-1.5 2.9-3.6 4.5-6.25 4.5S3.25 10.9 1.75 8z"/><circle cx="8" cy="8" r="2"/><path d="M2.25 2.25l11.5 11.5"/></g>',
+  },
+  'eye': {
+    viewBox: '0 0 16 16',
+    body: '<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.75 8c1.5-2.9 3.6-4.5 6.25-4.5s4.75 1.6 6.25 4.5c-1.5 2.9-3.6 4.5-6.25 4.5S3.25 10.9 1.75 8z"/><circle cx="8" cy="8" r="2"/></g>',
+  },
   'file-image': {
     viewBox: '0 0 16 16',
     body: '<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.25 1.75h-4a2 2 0 0 0-2 2v8.5a2 2 0 0 0 2 2h5.5a2 2 0 0 0 2-2v-7z"/><path d="M9.25 1.75v2.5a1 1 0 0 0 1 1h2.5"/><circle cx="6" cy="7.5" r="1" fill="currentColor" stroke="none"/><path d="M6.25 12l3-3 3.5 3.5"/></g>',

@@ -202,7 +202,7 @@ export default {
     recipientNotFound: parts("That address wasn't found in NightMail.", null, 'Check that it is spelled correctly.'),
     recipientUnusable: parts("That address exists, but it can't receive mail right now.", null, null),
     registryUnavailable: parts(
-      "The recipient's address couldn't be checked on Midnight.",
+      "The recipient's address couldn't be checked.",
       null,
       'Try again in a few minutes.',
     ),

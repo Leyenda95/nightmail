@@ -24,6 +24,7 @@ import { ErrorAviso } from './common.tsx';
 import { DeleteDialog } from './DeleteDialog.tsx';
 import { ListResizer } from './Inbox.tsx';
 import { useAction } from './useAction.ts';
+import { useSpin } from './useSpin.ts';
 
 /** The row of message `id` (rows are told apart from the received ones: both lists stay mounted). */
 const rowSelector = (id: number) => `[data-nm-enviado="${id}"]`;
@@ -114,6 +115,9 @@ function List({ list, openId, hidden, resizable, onOpen, onRefresh }: ListProps)
   const messages = list.messages ?? [];
   const ids = messages.map((m) => m.id);
   const capped = list.total !== null && list.total > messages.length;
+  // Reading the list again is local and instant: the icon makes its minimum turn. It is decoration, not a wait
+  // indicator, so it stays still with reduced motion.
+  const spin = useSpin();
   return (
     <section className="nm-lista" aria-label={words.listLabel} hidden={hidden}>
       <header className="nm-lista__cab">
@@ -123,8 +127,16 @@ function List({ list, openId, hidden, resizable, onOpen, onRefresh }: ListProps)
           </h1>
           {list.total !== null && <p className="nm-lista__sub">{words.count(list.total)}</p>}
         </div>
-        <button type="button" className="button button-for-icon button-small button-ghost-weak nm-btn" title={words.refresh} onClick={onRefresh}>
-          <Icon name="arrows-rotate" className="nm-ic" />
+        <button
+          type="button"
+          className="button button-for-icon button-small button-ghost-weak nm-btn"
+          title={words.refresh}
+          onClick={() => {
+            spin.kick();
+            onRefresh();
+          }}
+        >
+          <Icon name="arrows-rotate" className={classes('nm-ic', spin.spinning && 'nm-fila__gira')} />
           <span className="sr-only">{words.refresh}</span>
         </button>
       </header>

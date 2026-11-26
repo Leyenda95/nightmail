@@ -31,7 +31,7 @@ export default {
   },
   sound: {
     legend: 'Sound for new mail',
-    on: { title: 'On', text: 'A short sound when mail arrives while you are not viewing the inbox.' },
+    on: { title: 'On', text: 'A short sound when mail arrives.' },
     off: { title: 'Off', text: 'Only the on-screen notice.' },
   },
   badgeCount: {
@@ -59,6 +59,11 @@ export default {
     changed: 'Password changed.',
     changedNext: 'Next time, unlock NightMail with the new one.',
     change: 'Change password',
+  },
+  seed: {
+    title: 'Recovery phrase',
+    text: 'Shows your 24 words after asking for your password.',
+    show: 'See recovery phrase',
   },
   version: 'NightMail version',
 } satisfies Messages['settings'];

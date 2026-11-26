@@ -64,6 +64,8 @@
 .nm-papel iframe:focus-visible,
 .nm-enlace-txt:focus-visible,
 .nm-copiar__boton:focus-visible,
+.nm-aviso__cerrar:focus-visible,
+.nm-con-ojo__boton:focus-visible,
 .nm-info__boton:focus-visible {
   outline: 2px solid var(--focus-outline);
   outline-offset: -2px;
@@ -182,32 +184,51 @@
 .nm-tag--atencion { border-color: var(--signal-warning); color: var(--signal-warning-major-1); }
 .nm-tag--exito { border-color: var(--signal-success); color: var(--signal-success-major-1); }
 
-/* Notice: what happened, what is still safe, what you can do. Always with icon and text. */
+/* Notice: what happened, what is still safe, what you can do. Always with icon and text.
+   Compact: one row [icon + text][buttons], the buttons to the right of the text and centred on it. They only drop
+   under the text when the text would get narrower than 16rem beside them (`flex-wrap` on the basis of the text block). */
 .nm-aviso {
   display: flex;
-  align-items: flex-start;
-  gap: 0.625rem;
-  padding: 0.625rem 0.875rem;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 0.75rem;
+  row-gap: 0.375rem;
+  padding: 0.4375rem 0.875rem;
   border-radius: var(--border-radius-md);
   background: var(--background-weak);
   color: var(--text-norm);
   font-size: 0.875rem;
   line-height: 1.45;
 }
-.nm-aviso > .nm-ic { margin-block-start: 0.15rem; color: var(--text-weak); }
+.nm-aviso__principal { flex: 1 1 16rem; min-inline-size: 0; display: flex; align-items: flex-start; gap: 0.625rem; }
+.nm-aviso__principal > .nm-ic { margin-block-start: 0.15rem; color: var(--text-weak); }
 .nm-aviso__cuerpo { flex: 1; min-inline-size: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.125rem; }
 .nm-aviso__cuerpo ul { padding-inline-start: 1.1rem; list-style: disc; }
-.nm-aviso__acciones { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-block-start: 0.5rem; }
+.nm-aviso__acciones { flex: 0 0 auto; max-inline-size: 100%; margin-inline-start: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+/* Closing a notice: only the "X", no border or box. On hover the icon darkens a little. */
+.nm-aviso__cerrar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 1.5rem;
+  block-size: 1.5rem;
+  border: 0;
+  border-radius: var(--border-radius-sm);
+  background: none;
+  color: var(--text-weak);
+  cursor: pointer;
+}
+.nm-aviso__cerrar:hover { color: var(--text-norm); }
 .nm-aviso--error { background: var(--signal-danger-minor-2); }
-.nm-aviso--error > .nm-ic { color: var(--signal-danger); }
+.nm-aviso--error .nm-aviso__principal > .nm-ic { color: var(--signal-danger); }
 .nm-aviso--atencion { background: var(--signal-warning-minor-2); }
-.nm-aviso--atencion > .nm-ic { color: var(--signal-warning); }
+.nm-aviso--atencion .nm-aviso__principal > .nm-ic { color: var(--signal-warning); }
 .nm-aviso--exito { background: var(--signal-success-minor-2); }
-.nm-aviso--exito > .nm-ic { color: var(--signal-success); }
+.nm-aviso--exito .nm-aviso__principal > .nm-ic { color: var(--signal-success); }
 .nm-aviso--info { background: var(--signal-info-minor-2); }
-.nm-aviso--info > .nm-ic { color: var(--signal-info); }
+.nm-aviso--info .nm-aviso__principal > .nm-ic { color: var(--signal-info); }
 /* Global strip: above the panels, edge to edge. */
-.nm-aviso--franja { border-radius: 0; padding: 0.625rem 1.25rem; border-block-end: 1px solid var(--border-weak); }
+.nm-aviso--franja { border-radius: 0; padding: 0.3125rem 1.25rem; border-block-end: 1px solid var(--border-weak); }
 
 /* A long operation in progress: the light beats and the text says the real stage the core sends. */
 .nm-progreso {
@@ -248,6 +269,22 @@
   font-family: var(--nm-font-mono);
   font-size: 0.75rem;
 }
+/* Password field with its eye button inside, at the end: open eye shows what was typed, the crossed one hides it again. */
+.nm-con-ojo { position: relative; display: block; }
+.nm-con-ojo .field { padding-inline-end: 2.5rem; }
+.nm-con-ojo__boton {
+  position: absolute;
+  inset-block: 0.25rem;
+  inset-inline-end: 0.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 2rem;
+  border-radius: var(--border-radius-sm);
+  color: var(--text-weak);
+  cursor: pointer;
+}
+.nm-con-ojo__boton:hover { background: var(--interaction-default-hover); color: var(--text-norm); }
 
 /* Seed phrase: 24 numbered words, in monospace. */
 .nm-semilla {
@@ -337,6 +374,17 @@
 .nm-copiar__boton:hover { background: var(--interaction-default-hover); color: var(--text-norm); }
 .nm-copiar [role="status"] { min-block-size: 1.25rem; font-size: 0.8125rem; }
 .nm-copiar__estado { color: var(--text-weak); }
+/* `CopyButton`'s plan B: the copied text, out of sight but selectable (not `display: none`, which cannot be selected). */
+.nm-copiar__oculto {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: pre;
+  -webkit-user-select: text;
+  user-select: text;
+}
 /* "i" icon with its explanation (InfoTip): the font size, like the copy one. The explanation appears above and
    covers nothing until requested. */
 .nm-info { position: relative; display: inline-block; vertical-align: middle; }
@@ -444,7 +492,7 @@
 
 /* ------------------------------------------------------------------ frame */
 /* The sidebar is `SIDEBAR_REM` wide (prefs.ts) and never more than a third of the window: with a large font in a narrow
-   window (at 200 %, 960 px is 30 rem) the rest goes to the list or the message. What does not fit in the
+   window (at 150 %, 720 px is 30 rem) the rest goes to the list or the message. What does not fit in the
    bar is cut with "...". `.nm-main` is the container of the "Narrow windows" rules (at the end). */
 .nm-app { display: grid; grid-template-columns: min(15.5rem, 33.333%) minmax(0, 1fr); block-size: 100%; overflow: hidden; }
 .nm-main { display: flex; flex-direction: column; min-inline-size: 0; min-block-size: 0; container: nm-main / inline-size; }
@@ -799,6 +847,11 @@
 .nm-pasos { display: grid; gap: 0.5rem; counter-reset: paso; text-align: start; }
 .nm-pasos li { counter-increment: paso; display: flex; gap: 0.625rem; align-items: baseline; }
 .nm-pasos li::before { content: counter(paso); flex: none; inline-size: 1.375rem; block-size: 1.375rem; border: 1px solid var(--field-norm); border-radius: 50%; color: var(--text-weak); font-family: var(--nm-font-mono); font-size: 0.75rem; line-height: 1.25rem; text-align: center; }
+/* A step already done: a check mark in the circle instead of its number (the number stays counted). */
+.nm-pasos li.nm-pasos__hecho::before { content: none; }
+/* The same box and line as the numbered circle, so it sits on the same baseline. */
+.nm-pasos__marca { flex: none; inline-size: 1.375rem; block-size: 1.375rem; border: 1px solid var(--signal-success); border-radius: 50%; color: var(--signal-success); font-size: 0.75rem; line-height: 1.25rem; text-align: center; }
+.nm-pasos__marca .nm-ic { inline-size: 0.875rem; block-size: 0.875rem; }
 
 /* ------------------------------------------------------------------ front screen (no session) */
 .nm-portada { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); block-size: 100%; }
@@ -871,8 +924,17 @@
 /* With the box in front: it weighs (0,2,0) and wins over `.nm-portada__caja > p` (0,1,1), which would otherwise override it. */
 .nm-portada__caja > .nm-portada__pie { color: var(--text-hint); font-size: 0.8125rem; }
 .nm-volver { justify-self: start; margin-inline-start: -0.75rem; }
-/* "Elige un perfil": one row per account, its name and creation day on the left and "Abierto ahora" on the right. */
+/* "Nuevo perfil": the networks one under the other; the ones not available yet are shown off, with "Pronto". */
+.nm-elecciones--una { grid-template-columns: minmax(0, 1fr); }
+.nm-eleccion--inactiva, .nm-eleccion--inactiva:hover { border-color: var(--border-weak); color: var(--text-weak); cursor: default; }
+.nm-eleccion--inactiva .nm-tag { margin-inline-start: 0.25rem; }
+/* "Elige un perfil": one row per account, its name and creation day on the left and, on the open one, "Usado
+   recientemente" on the right (the plain tag, in the muted secondary tone). */
 .nm-cuentas { display: grid; gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
+/* The "+" ("Nuevo perfil") under the list: compact and centred on it, wider than a square icon button and as tall as
+   the large buttons (44 px instead of 36 px, about 82 px wide instead of 50 px).
+   With `.button` it weighs (0,2,0) and wins over the base `.button-for-icon.button-medium` padding. */
+.button.nm-cuentas__nuevo { justify-self: center; --padding-block: 0.8125rem; --padding-inline: 2rem; }
 .nm-cuenta {
   display: flex;
   align-items: center;
@@ -1117,7 +1179,7 @@
 .nm-envio { font-size: inherit; }
 
 /* Narrow windows and large fonts */
-/* The breakpoints are in container rem, which follow the font size: at 200 % a 960 px window is 30 rem
+/* The breakpoints are in container rem, which follow the font size: at 150 % a 720 px window is 30 rem
    (10 rem bar and 20 rem for the rest). @media does not work: there a rem is always 16 px. How many panels
    show is decided by `effectiveLayout` (prefs.ts). */
 /* Pages (addresses, plan, settings): less margin, and cards and options one under another. */

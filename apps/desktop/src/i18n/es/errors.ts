@@ -229,7 +229,7 @@ export default {
     // Its keys cannot receive mail (or two aliases share its ending): repeating gives the same, so nothing is proposed.
     recipientUnusable: parts('Esa dirección existe, pero ahora mismo no puede recibir correo.', null, null),
     registryUnavailable: parts(
-      'No se ha podido comprobar la dirección de destino en Midnight.',
+      'No se ha podido comprobar la dirección de destino.',
       null,
       'Vuelve a intentarlo en unos minutos.',
     ),

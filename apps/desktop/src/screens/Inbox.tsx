@@ -9,8 +9,9 @@ import { Copiable } from '../components/Copiable.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { formatReceived, formatShortDate, senderAddress } from '../format.ts';
 import { t } from '../i18n/index.ts';
-import { cappedNote, focusOrphaned, recipientText, stepRow, type EmptyState, type ListHeading } from '../inbox.ts';
+import { cappedNote, firstUseSteps, focusOrphaned, recipientText, stepRow, type EmptyState, type ListHeading } from '../inbox.ts';
 import { LIST_TITLE_ID } from '../nav.ts';
+import { planKind, type PlanKind } from '../payment.ts';
 import { classes } from '../pieces.ts';
 import { prefs, usePrefs } from '../prefs.ts';
 import { clampListWidth, LIST_WIDTH_DEFAULT, LIST_WIDTH_MAX, LIST_WIDTH_MIN, LIST_WIDTH_VAR, listWidthMax, stepListWidth, widthFromPointer } from '../resize.ts';
@@ -19,6 +20,7 @@ import { senderSeal } from '../seal.ts';
 import { ErrorAviso } from './common.tsx';
 import { DeleteDialog } from './DeleteDialog.tsx';
 import { useAction } from './useAction.ts';
+import { useSpin } from './useSpin.ts';
 
 /** On mounting the list or the empty state (one replaces the other), if focus was left on `<body>` because the focused
  *  element unmounted, it goes to the title. If it is elsewhere, it is left alone. */
@@ -410,6 +412,7 @@ export function Inbox({ messages, heading, addresses, openId, error, hidden, syn
   const pickedSet = useMemo(() => new Set(picked), [picked]);
   const allId = useId();
   const shownError = error ?? bulk.error;
+  const spin = useSpin(syncing);
 
   // Ctrl/Cmd+A and Esc with focus in the list (rows, region or its bar). Not inside a dialog opened from here.
   function onListKey(e: KeyboardEvent<HTMLElement>) {
@@ -429,8 +432,16 @@ export function Inbox({ messages, heading, addresses, openId, error, hidden, syn
           </h1>
           <p className="nm-lista__sub">{heading.sub}</p>
         </div>
-        <button type="button" className="button button-for-icon button-small button-ghost-weak nm-btn" title={syncLabel(syncing)} onClick={onSync}>
-          <Icon name="arrows-rotate" className="nm-ic" />
+        <button
+          type="button"
+          className="button button-for-icon button-small button-ghost-weak nm-btn"
+          title={syncLabel(syncing)}
+          onClick={() => {
+            spin.kick();
+            onSync();
+          }}
+        >
+          <Icon name="arrows-rotate" className={classes('nm-ic', spin.spinning && 'nm-fila__gira keep-motion')} />
           <span className="sr-only">{syncLabel(syncing)}</span>
         </button>
       </header>
@@ -514,13 +525,77 @@ interface EmptyProps extends SyncProps {
   onPlan: () => void;
   /** "Crear una dirección" on first use: with a plan already chosen, the missing step (the addresses page). */
   onNew: () => void;
+  /** Changes when the plan must be re-read on first use (plan bought, sync). */
+  planKey: number;
+}
+
+/** How long first use waits for the plan before showing "Elegir un plan". */
+const FIRST_USE_WAIT_MS = 4000;
+
+/** First use: the two steps and only the button of the one missing (`firstUseSteps`). The plan is read here, as the
+ *  sidebar's quota does; if it cannot be read, as if there were none ("Elegir un plan" leads to the page that explains it). */
+function FirstUse({ planKey, onPlan, onNew }: { planKey: number; onPlan: () => void; onNew: () => void }) {
+  const [plan, setPlan] = useState<PlanKind | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api.getPlan().then(
+      (p) => !cancelled && setPlan(planKind(p.bonos)),
+      () => !cancelled && setPlan('none'),
+    );
+    // No answer after a while: as if there were none, so a button always shows (a late answer still corrects it).
+    const slow = setTimeout(() => setPlan((p) => p ?? 'none'), FIRST_USE_WAIT_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(slow);
+    };
+  }, [planKey]);
+  const words = t().screensMail.inbox;
+  const { planDone, button } = firstUseSteps(plan);
+  return (
+    <>
+      <h1 id={LIST_TITLE_ID} tabIndex={-1} className="nm-vacio__titulo">
+        {words.firstTitle}
+      </h1>
+      <p>{words.firstIntro}</p>
+      <ol className="nm-pasos">
+        {planDone ? (
+          <li className="nm-pasos__hecho">
+            <span className="nm-pasos__marca" aria-hidden="true">
+              <Icon name="checkmark" className="nm-ic" />
+            </span>
+            <span>
+              <span className="sr-only">{words.stepDone} </span>
+              {words.firstStep1}
+            </span>
+          </li>
+        ) : (
+          <li>{words.firstStep1}</li>
+        )}
+        <li>{words.firstStep2}</li>
+      </ol>
+      {button !== null && (
+        <div className="nm-vacio__botones">
+          {button === 'plan' ? (
+            <button type="button" className="button button-large button-solid-norm nm-btn" onClick={onPlan}>
+              {words.choosePlan}
+            </button>
+          ) : (
+            <button type="button" className="button button-large button-solid-norm nm-btn" onClick={onNew}>
+              {words.createAddress}
+            </button>
+          )}
+        </div>
+      )}
+    </>
+  );
 }
 
 /** Instead of the empty list, full width: first use or the empty inbox. The title carries the `id` of the list's:
  *  if the last message is archived or deleted, focus goes there. */
-export function InboxEmpty({ state, error, syncing, onSync, onPlan, onNew }: EmptyProps) {
+export function InboxEmpty({ state, error, syncing, onSync, onPlan, onNew, planKey }: EmptyProps) {
   useRescueFocus();
   const words = t().screensMail.inbox;
+  const spin = useSpin(syncing);
   return (
     <section className="nm-vacio">
       <div className="nm-vacio__noche">
@@ -534,25 +609,7 @@ export function InboxEmpty({ state, error, syncing, onSync, onPlan, onNew }: Emp
           <p>{words.restoringText}</p>
         </>
       ) : state.kind === 'primer-uso' ? (
-        <>
-          <h1 id={LIST_TITLE_ID} tabIndex={-1} className="nm-vacio__titulo">
-            {words.firstTitle}
-          </h1>
-          <p>{words.firstIntro}</p>
-          <ol className="nm-pasos">
-            <li>{words.firstStep1}</li>
-            <li>{words.firstStep2}</li>
-          </ol>
-          <div className="nm-vacio__botones">
-            <button type="button" className="button button-large button-solid-norm nm-btn" onClick={onPlan}>
-              {words.choosePlan}
-            </button>
-            {/* With the plan already chosen, step 2 is missing; without a plan, the "Nueva dirección" card explains why it cannot be done. */}
-            <button type="button" className="button button-large button-outline-weak nm-btn" onClick={onNew}>
-              {words.createAddress}
-            </button>
-          </div>
-        </>
+        <FirstUse planKey={planKey} onPlan={onPlan} onNew={onNew} />
       ) : (
         <>
           <h1 id={LIST_TITLE_ID} tabIndex={-1} className="nm-vacio__titulo">
@@ -562,8 +619,15 @@ export function InboxEmpty({ state, error, syncing, onSync, onPlan, onNew }: Emp
           <p>{emptyText(state)}</p>
           {state.address && <Copiable text={state.address.display} label={words.copyAddress} />}
           <ErrorAviso message={error} />
-          <button type="button" className="button button-medium button-outline-weak nm-btn" onClick={onSync}>
-            <Icon name="arrows-rotate" className="nm-ic" />
+          <button
+            type="button"
+            className="button button-medium button-outline-weak nm-btn"
+            onClick={() => {
+              spin.kick();
+              onSync();
+            }}
+          >
+            <Icon name="arrows-rotate" className={classes('nm-ic', spin.spinning && 'nm-fila__gira keep-motion')} />
             {syncLabel(syncing)}
           </button>
         </>

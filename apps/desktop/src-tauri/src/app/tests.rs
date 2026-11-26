@@ -75,10 +75,10 @@ async fn seed_lifecycle_create_lock_unlock_reveal() {
     assert_eq!(app.status().await, AppStatus { has_seed: false, unlocked: false });
     assert_eq!(app.unlock(secret("x")).await.unwrap_err(), AppError::Core(CoreError::NoSeed));
 
-    let phrase = app.create_seed(secret("contraseña")).await.unwrap();
+    let phrase = app.create_seed_now(secret("contraseña")).await.unwrap();
     assert_eq!(phrase.phrase.split(' ').count(), 24);
     assert_eq!(app.status().await, AppStatus { has_seed: true, unlocked: true });
-    assert_eq!(app.create_seed(secret("otra")).await.unwrap_err(), AppError::Core(CoreError::AlreadyUnlocked));
+    assert_eq!(app.create_seed_now(secret("otra")).await.unwrap_err(), AppError::Core(CoreError::AlreadyUnlocked));
 
     app.lock().await.unwrap();
     assert_eq!(app.session().await.err(), Some(AppError::Core(CoreError::NotUnlocked)));
@@ -103,7 +103,7 @@ async fn taskbar_badge_is_decided_under_the_session_lock() {
         })
     };
     assert_eq!(now().await, SessionNow::NeverOpened);
-    app.create_seed(secret("contraseña")).await.unwrap();
+    app.create_seed_now(secret("contraseña")).await.unwrap();
     assert_eq!(now().await, SessionNow::Open);
     app.lock().await.unwrap();
     assert_eq!(now().await, SessionNow::Closed);
@@ -118,7 +118,7 @@ async fn change_password_needs_the_session_and_the_current_password() {
     let (app, _) = make_app(dir.path());
     let change = |current: &str, new: &str| app.change_password(secret(current), secret(new));
     assert_eq!(change("x", "y").await.unwrap_err(), AppError::Core(CoreError::NotUnlocked));
-    let phrase = app.create_seed(secret("contraseña")).await.unwrap();
+    let phrase = app.create_seed_now(secret("contraseña")).await.unwrap();
     let seed_file = app.config.seed_dir().join(keys::SEED_FILE_NAME);
     let before = std::fs::read(&seed_file).unwrap();
 
@@ -143,7 +143,7 @@ async fn change_password_needs_the_session_and_the_current_password() {
 async fn lock_and_shutdown_respect_a_password_change_in_progress() {
     let dir = private_tempdir();
     let app = Arc::new(make_app(dir.path()).0);
-    app.create_seed(secret("contraseña")).await.unwrap();
+    app.create_seed_now(secret("contraseña")).await.unwrap();
     let seed_dir = app.config.seed_dir().to_path_buf();
     let before = std::fs::read(seed_dir.join(keys::SEED_FILE_NAME)).unwrap();
     let session = app.session().await.unwrap();
@@ -180,7 +180,7 @@ async fn lock_and_shutdown_respect_a_password_change_in_progress() {
 async fn without_midnight_mail_still_works_and_chain_ops_fail_cleanly() {
     let dir = private_tempdir();
     let (app, _) = make_app(dir.path());
-    app.create_seed(secret("contraseña")).await.unwrap();
+    app.create_seed_now(secret("contraseña")).await.unwrap();
     let session = app.session().await.unwrap();
 
     assert_eq!(session.free_plan(1).await.unwrap_err(), AppError::Orch(OrchError::MidnightUnavailable));
@@ -241,7 +241,7 @@ async fn without_midnight_mail_still_works_and_chain_ops_fail_cleanly() {
 async fn without_midnight_the_sender_of_an_e2e_mail_is_looked_up_later() {
     let dir = private_tempdir();
     let (app, _) = make_app(dir.path());
-    app.create_seed(secret("contraseña")).await.unwrap();
+    app.create_seed_now(secret("contraseña")).await.unwrap();
     let session = app.session().await.unwrap();
     // "Unavailable", not "not registered": the mail waits instead of being marked unverified.
     let answer = SessionSenders(&session).resolve_sender(&[2; 32], "ana@nightmail.local").await;
@@ -253,7 +253,7 @@ async fn without_midnight_the_sender_of_an_e2e_mail_is_looked_up_later() {
 async fn abandon_address_hides_it_keeps_its_slot_and_stops_syncing_it() {
     let dir = private_tempdir();
     let (app, events) = make_app(dir.path());
-    app.create_seed(secret("contraseña")).await.unwrap();
+    app.create_seed_now(secret("contraseña")).await.unwrap();
     let session = app.session().await.unwrap();
     let address = |key: u8, kind, j| Address {
         addr_key: [key; 32],
@@ -294,7 +294,7 @@ async fn abandon_address_hides_it_keeps_its_slot_and_stops_syncing_it() {
 async fn the_mail_of_an_abandoned_address_is_hidden_and_it_cannot_be_named() {
     let dir = private_tempdir();
     let (app, _) = make_app(dir.path());
-    app.create_seed(secret("contraseña")).await.unwrap();
+    app.create_seed_now(secret("contraseña")).await.unwrap();
     let session = app.session().await.unwrap();
     // A restored mailbox without a name (`used` slot) and an alias, each with an unread message.
     let mailbox = Address {
@@ -371,7 +371,7 @@ async fn wait_event(events: &StdMutex<Vec<AppEvent>>, pred: impl Fn(&AppEvent) -
 async fn restore_leaves_recovery_pending_until_recover_succeeds() {
     let dir = private_tempdir();
     let (app, _) = make_app(dir.path());
-    let phrase = app.create_seed(secret("uno")).await.unwrap();
+    let phrase = app.create_seed_now(secret("uno")).await.unwrap();
     app.shutdown().await;
 
     let clean = private_tempdir();
@@ -445,7 +445,7 @@ async fn half_done_alias(session: &Session) {
 async fn without_pending_work_unlock_does_not_start_midnight() {
     let dir = private_tempdir();
     let (app, events) = make_app(dir.path());
-    app.create_seed(secret("clave")).await.unwrap();
+    app.create_seed_now(secret("clave")).await.unwrap();
     app.lock().await.unwrap();
     app.unlock(secret("clave")).await.unwrap();
     let session = app.session().await.unwrap();
@@ -469,7 +469,7 @@ async fn without_pending_work_unlock_does_not_start_midnight() {
 async fn a_resume_notice_is_cleared_when_nothing_is_left() {
     let dir = private_tempdir();
     let (app, events) = make_app(dir.path());
-    app.create_seed(secret("clave")).await.unwrap();
+    app.create_seed_now(secret("clave")).await.unwrap();
     let session = app.session().await.unwrap();
     half_done_alias(&session).await;
     session.resume_now();
@@ -489,7 +489,7 @@ async fn a_resume_notice_is_cleared_when_nothing_is_left() {
 async fn every_resume_turn_announces_its_start_before_its_result() {
     let dir = private_tempdir();
     let (app, events) = make_app(dir.path());
-    app.create_seed(secret("clave")).await.unwrap();
+    app.create_seed_now(secret("clave")).await.unwrap();
     let session = app.session().await.unwrap();
     // With nothing unfinished, the requested turn still announces its start.
     session.resume_now();
@@ -520,7 +520,7 @@ async fn every_resume_turn_announces_its_start_before_its_result() {
 async fn a_turn_cut_short_still_sends_a_result_unless_the_session_is_closing() {
     let dir = private_tempdir();
     let (app, events) = make_app(dir.path());
-    app.create_seed(secret("clave")).await.unwrap();
+    app.create_seed_now(secret("clave")).await.unwrap();
     let session = app.session().await.unwrap();
     wait_until(|| !session.resume_state().running).await;
     let cut = AppEvent::ResumeFailed { error: OrchError::Internal };
@@ -556,7 +556,7 @@ fn failure_times(events: &StdMutex<Vec<(Instant, AppEvent)>>) -> Vec<Instant> {
 async fn an_operation_failure_waits_for_the_ladder_and_never_advances_it() {
     let dir = private_tempdir();
     let (app, events) = make_timed_app(dir.path());
-    app.create_seed(secret("clave")).await.unwrap();
+    app.create_seed_now(secret("clave")).await.unwrap();
     let session = app.session().await.unwrap();
     half_done_alias(&session).await;
     for error in [OrchError::Busy, OrchError::BonoNotReady { usable_at: None }, OrchError::NameTaken] {
@@ -582,7 +582,7 @@ async fn an_operation_failure_waits_for_the_ladder_and_never_advances_it() {
 async fn the_loop_climbs_the_ladder_and_a_request_restarts_it() {
     let dir = private_tempdir();
     let (app, events) = make_timed_app(dir.path());
-    app.create_seed(secret("clave")).await.unwrap();
+    app.create_seed_now(secret("clave")).await.unwrap();
     half_done_alias(&app.session().await.unwrap()).await;
     app.lock().await.unwrap();
     app.unlock(secret("clave")).await.unwrap();
@@ -603,7 +603,7 @@ async fn the_loop_climbs_the_ladder_and_a_request_restarts_it() {
 async fn unlock_resumes_in_background_and_retries_while_midnight_is_down() {
     let dir = private_tempdir();
     let (app, events) = make_app(dir.path());
-    app.create_seed(secret("clave")).await.unwrap();
+    app.create_seed_now(secret("clave")).await.unwrap();
     half_done_alias(&app.session().await.unwrap()).await;
     app.lock().await.unwrap();
     app.unlock(secret("clave")).await.unwrap();
@@ -633,7 +633,7 @@ async fn unlock_resumes_in_background_and_retries_while_midnight_is_down() {
 async fn no_task_escapes_a_session_that_is_closing() {
     let dir = private_tempdir();
     let (app, events) = make_app(dir.path());
-    app.create_seed(secret("clave")).await.unwrap();
+    app.create_seed_now(secret("clave")).await.unwrap();
     let session = app.session().await.unwrap();
     half_done_alias(&session).await;
     // Race: `close` has already set `stop` (and aborted the tasks) but `usage.closed` is not visible yet.
@@ -656,7 +656,7 @@ async fn with_our_server_down_the_loop_waits_for_it_and_resumes_as_soon_as_it_an
     let server = TestServer::start(move |_| Reply::new(if answers.load(Ordering::SeqCst) { 405 } else { 503 })).await;
     let dir = private_tempdir();
     let (app, events) = make_timed_app_on(dir.path(), &format!("http://{}", server.base.host()));
-    app.create_seed(secret("clave")).await.unwrap();
+    app.create_seed_now(secret("clave")).await.unwrap();
     let session = app.session().await.unwrap();
     half_done_alias(&session).await;
     session.retry_later_if_needed::<()>(&Err(AppError::Orch(OrchError::ServerUnreachable)));
@@ -687,7 +687,7 @@ async fn a_server_failure_moves_a_waiting_loop_from_the_ladder_to_the_server_che
     let server = TestServer::start(move |_| Reply::new(if answers.load(Ordering::SeqCst) { 405 } else { 503 })).await;
     let dir = private_tempdir();
     let (app, events) = make_timed_app_on(dir.path(), &format!("http://{}", server.base.host()));
-    app.create_seed(secret("clave")).await.unwrap();
+    app.create_seed_now(secret("clave")).await.unwrap();
     let session = app.session().await.unwrap();
     half_done_alias(&session).await;
     // A failure not caused by the server: the loop starts at the first step (without checking the server), runs its
@@ -717,7 +717,7 @@ async fn repeated_server_failures_do_not_postpone_the_next_turn() {
     let server = TestServer::start(|_| Reply::new(405)).await;
     let dir = private_tempdir();
     let (app, events) = make_timed_app_on(dir.path(), &format!("http://{}", server.base.host()));
-    app.create_seed(secret("clave")).await.unwrap();
+    app.create_seed_now(secret("clave")).await.unwrap();
     let session = app.session().await.unwrap();
     half_done_alias(&session).await;
     session.retry_later_if_needed::<()>(&Err(AppError::Orch(OrchError::StillPending)));
@@ -774,7 +774,7 @@ async fn an_expired_purchase_that_cannot_close_does_not_spin_the_loop() {
 async fn a_request_found_at_the_start_of_a_turn_counts_as_asked() {
     let dir = private_tempdir();
     let (app, _) = make_app(dir.path());
-    app.create_seed(secret("clave")).await.unwrap();
+    app.create_seed_now(secret("clave")).await.unwrap();
     let session = app.session().await.unwrap();
     session.resume_state().later = true;
     assert!(!session.clear_resume_marks(), "`later` is not a request");
@@ -788,7 +788,7 @@ async fn a_request_found_at_the_start_of_a_turn_counts_as_asked() {
 async fn lock_refuses_with_an_operation_in_flight_and_a_closed_session_is_not_reused() {
     let dir = private_tempdir();
     let (app, _) = make_app(dir.path());
-    app.create_seed(secret("clave")).await.unwrap();
+    app.create_seed_now(secret("clave")).await.unwrap();
     let session = app.session().await.unwrap();
     {
         let _op = session.enter().unwrap();
@@ -805,26 +805,93 @@ async fn lock_refuses_with_an_operation_in_flight_and_a_closed_session_is_not_re
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn create_seed_returns_the_phrase_even_if_the_session_cannot_open() {
+async fn create_seed_saves_the_seed_even_if_the_session_cannot_open() {
     let dir = private_tempdir();
     let (app, _) = make_app(dir.path());
     // A database from another seed in the profile: the session does not open (wrong key).
     let (other, _) = make_app(dir.path());
-    other.create_seed(secret("otra")).await.unwrap();
+    other.create_seed_now(secret("otra")).await.unwrap();
     other.shutdown().await;
     std::fs::remove_file(dir.path().join(keys::SEED_FILE_NAME)).unwrap();
 
-    let phrase = app.create_seed(secret("clave")).await.unwrap();
-    assert_eq!(phrase.phrase.split(' ').count(), 24);
+    let draft = app.draft_seed().await.unwrap();
+    app.create_seed(draft.id, secret("clave")).await.unwrap();
     assert_eq!(app.status().await, AppStatus { has_seed: true, unlocked: false });
+    // The words shown are the ones saved: unlocking later reveals them.
+    assert_eq!(app.reveal_seed(secret("clave")).await.unwrap().phrase, draft.phrase);
     app.shutdown().await;
+}
+
+/// Creating shows the words before the password exists: until `create_seed` nothing is on disk, asking again gives
+/// the same words, and what is saved is exactly what was shown.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_draft_is_only_in_memory_until_the_password_and_saves_the_words_shown() {
+    let dir = private_tempdir();
+    let (app, _) = make_app(dir.path());
+    let draft = app.draft_seed().await.unwrap();
+    assert_eq!(draft.phrase.split(' ').count(), 24);
+    let again = app.draft_seed().await.unwrap();
+    assert_eq!((again.id, &again.phrase), (draft.id, &draft.phrase), "a second ask gives the same words");
+    assert_eq!(app.status().await, AppStatus { has_seed: false, unlocked: false });
+    assert!(!dir.path().join(keys::SEED_FILE_NAME).exists(), "nothing saved before the password");
+
+    // A failed save keeps the draft: the same words can be saved on the next try.
+    assert_eq!(app.create_seed(draft.id, secret("")).await.unwrap_err(), AppError::Core(CoreError::EmptyPassword));
+    assert!(!dir.path().join(keys::SEED_FILE_NAME).exists());
+    // Another id never saves the current words.
+    assert_eq!(app.create_seed(draft.id + 1, secret("clave")).await.unwrap_err(), AppError::Core(CoreError::NotFound));
+
+    app.create_seed(draft.id, secret("clave")).await.unwrap();
+    assert_eq!(app.status().await, AppStatus { has_seed: true, unlocked: true });
+    assert_eq!(app.draft_seed().await.unwrap_err(), AppError::Core(CoreError::AlreadyUnlocked));
+    app.lock().await.unwrap();
+    // Once saved, the draft is gone and this profile has its seed.
+    assert_eq!(app.create_seed(draft.id, secret("clave")).await.unwrap_err(), AppError::Core(CoreError::NotFound));
+    assert_eq!(app.draft_seed().await.unwrap_err(), AppError::Core(CoreError::SeedExists));
+    app.unlock(secret("clave")).await.unwrap();
+    assert_eq!(app.reveal_seed(secret("clave")).await.unwrap().phrase, draft.phrase);
+    app.shutdown().await;
+}
+
+/// Back from the words: they are dropped and the next draft has other words and another id. Discarding with another
+/// id leaves the current draft alone.
+#[tokio::test(flavor = "multi_thread")]
+async fn discarding_the_draft_drops_its_words() {
+    let dir = private_tempdir();
+    let (app, _) = make_app(dir.path());
+    let first = app.draft_seed().await.unwrap();
+    app.discard_seed_draft(first.id + 1);
+    assert_eq!(app.draft_seed().await.unwrap().id, first.id, "another id discards nothing");
+    app.discard_seed_draft(first.id);
+    assert_eq!(app.create_seed(first.id, secret("clave")).await.unwrap_err(), AppError::Core(CoreError::NotFound));
+    let second = app.draft_seed().await.unwrap();
+    assert_ne!(second.id, first.id);
+    assert_ne!(second.phrase, first.phrase);
+    assert!(!dir.path().join(keys::SEED_FILE_NAME).exists());
+    // Restoring instead also drops a draft left behind.
+    let restore_phrase = first.phrase.clone();
+    app.restore_seed(secret(&restore_phrase), secret("clave")).await.unwrap();
+    app.lock().await.unwrap();
+    assert_eq!(app.create_seed(second.id, secret("clave")).await.unwrap_err(), AppError::Core(CoreError::NotFound));
+    app.shutdown().await;
+}
+
+/// On exit the process ends without dropping the `App`: `shutdown` wipes the draft itself.
+#[tokio::test(flavor = "multi_thread")]
+async fn shutdown_wipes_the_draft() {
+    let dir = private_tempdir();
+    let (app, _) = make_app(dir.path());
+    let draft = app.draft_seed().await.unwrap();
+    app.shutdown().await;
+    assert_eq!(app.create_seed(draft.id, secret("clave")).await.unwrap_err(), AppError::Core(CoreError::NotFound));
+    assert!(!dir.path().join(keys::SEED_FILE_NAME).exists());
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn inputs_are_bounded() {
     let dir = private_tempdir();
     let (app, _) = make_app(dir.path());
-    app.create_seed(secret("clave")).await.unwrap();
+    app.create_seed_now(secret("clave")).await.unwrap();
     let session = app.session().await.unwrap();
     let invalid = AppError::Core(CoreError::InvalidInput);
     assert_eq!(session.check_name("a".repeat(MAX_NAME_BYTES + 1)).await.unwrap_err(), invalid);
@@ -842,7 +909,7 @@ async fn inputs_are_bounded() {
 async fn lock_does_not_wait_forever_for_a_stuck_sync_round() {
     let dir = private_tempdir();
     let (app, _) = make_app(dir.path());
-    app.create_seed(secret("clave")).await.unwrap();
+    app.create_seed_now(secret("clave")).await.unwrap();
     let session = app.session().await.unwrap();
     let round = session.sync.hold_round().await;
     let started = std::time::Instant::now();

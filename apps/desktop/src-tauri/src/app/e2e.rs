@@ -140,7 +140,7 @@ async fn shielded_payment_on_devnet() {
     let started = Instant::now();
     let profile = private_tempdir();
     let app = real_app(profile.path());
-    app.create_seed(Secret(Zeroizing::new(PASSWORD.into()))).await.unwrap();
+    app.create_seed_now(Secret(Zeroizing::new(PASSWORD.into()))).await.unwrap();
     let session = app.session().await.unwrap();
 
     let wallet = session.wallet(1).await.expect("wallet");
@@ -177,7 +177,7 @@ async fn create_receive_and_restore_on_devnet() {
     let app = real_app(first.path());
 
     // 1. Seed, free plan, mailbox and two aliases.
-    let phrase = app.create_seed(Secret(Zeroizing::new(PASSWORD.into()))).await.unwrap();
+    let phrase = app.create_seed_now(Secret(Zeroizing::new(PASSWORD.into()))).await.unwrap();
     let session = app.session().await.unwrap();
     let bono = session.free_plan(1).await.expect("free plan");
     eprintln!("bono {} ready ({:?})", bono.n, started.elapsed());

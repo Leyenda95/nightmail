@@ -181,7 +181,8 @@ test('the wait indicators carry keep-motion (the base stylesheet stops the rest 
   // Only those files carry it: no light or decorative ornament.
   const all = ['components', 'screens'].flatMap((d) => readdirSync(new URL(`../src/${d}`, import.meta.url)).map((f) => `${d}/${f}`)).concat(['App.tsx', 'pieces.ts']);
   const withKeep = all.filter((f) => /\.tsx?$/.test(f) && read(f).includes('keep-motion')).sort();
-  assert.deepEqual(withKeep, ['components/Icon.tsx', 'components/Luz.tsx', 'components/Sidebar.tsx', 'screens/Welcome.tsx']);
+  // The refresh buttons of the lists turn like the sidebar's while they work (spin.test.ts).
+  assert.deepEqual(withKeep, ['components/Icon.tsx', 'components/Luz.tsx', 'components/Sidebar.tsx', 'screens/Inbox.tsx', 'screens/Welcome.tsx']);
   assert.equal((icon.match(/keep-motion/g) ?? []).length, 1);
 });
 

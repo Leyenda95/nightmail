@@ -60,11 +60,10 @@ function dateFormatter(cache: Map<string, Intl.DateTimeFormat>, options: Intl.Da
 
 const receivedFormatters = new Map<string, Intl.DateTimeFormat>();
 
-/** Full date and time, with seconds: "20/11/2026, 10:42:00" (es), "11/20/2026, 10:42:00" (en). The same pieces as
- *  `toLocaleString` without options: in Spanish it matches `toLocaleString('es-ES')`. */
+/** Full date and time, to the minute: "20/11/2026, 10:42" (es), "11/20/2026, 10:42" (en). */
 export function formatReceived(secs: number): string {
   const options: Intl.DateTimeFormatOptions = {
-    year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric',
+    year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric',
   };
   return dateFormatter(receivedFormatters, options).format(new Date(secs * 1000));
 }

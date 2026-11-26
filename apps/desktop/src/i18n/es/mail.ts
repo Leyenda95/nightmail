@@ -72,6 +72,7 @@ export default {
   },
   // pieces.ts
   copied: 'Copiada',
+  copiedSecret: (seconds: number): string => `Copiada. Se borrará del portapapeles en ${seconds} segundos.`,
   copyFailed: 'No se ha podido copiar. Selecciónala y pulsa Ctrl+C.',
   // sanitize.ts
   imageUnavailable: 'imagen no disponible',

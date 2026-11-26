@@ -1,5 +1,5 @@
 // Sidebar of the main view: "Nuevo mensaje", the menu (with "Enviados"), your addresses as an inbox filter and, at the foot, the quota,
-// the Midnight line, "Ajustes" (with "Cerrar sesión"), "Frase semilla" and "Bloquear".
+// the Midnight line, "Ajustes" (with "Cerrar sesión") and "Bloquear".
 import { useEffect, useState } from 'react';
 import { pendingTag, type PendingCount } from '../addresses.ts';
 import { api } from '../api.ts';
@@ -28,7 +28,6 @@ interface Props {
   onNav: (action: NavAction) => void;
   /** "Nuevo mensaje": opens the form (or the one already being written). */
   onCompose: () => void;
-  onSeed: () => void;
   onLock: () => void;
   /** "Cerrar sesión" (in the Settings options): lock and show the account list. */
   onLogOut: () => void;
@@ -259,7 +258,7 @@ function SettingsMenu({ on, onSettings, onLogOut }: { on: boolean; onSettings: (
   );
 }
 
-export function Sidebar({ nav, addresses, unread, planKey, onNav, onCompose, onSeed, onLock, onLogOut, locking, pending, syncing, onSync, serverNow }: Props) {
+export function Sidebar({ nav, addresses, unread, planKey, onNav, onCompose, onLock, onLogOut, locking, pending, syncing, onSync, serverNow }: Props) {
   const go = (view: View) => onNav({ type: 'go', view });
   return (
     <nav className="nm-side" aria-label={t().screensMail.sidebar.navLabel}>
@@ -285,7 +284,6 @@ export function Sidebar({ nav, addresses, unread, planKey, onNav, onCompose, onS
         <ServiceStatus serverNow={serverNow} />
         <ul className="nm-nav">
           <SettingsMenu on={nav.view === 'ajustes'} onSettings={() => go('ajustes')} onLogOut={onLogOut} />
-          <MenuItem icon="key" label={t().screensMail.sidebar.seedPhrase} onClick={onSeed} />
           <li>
             <button type="button" className="nm-nav__item" aria-busy={locking || undefined} onClick={onLock}>
               <Icon name="lock" className="nm-ic" />

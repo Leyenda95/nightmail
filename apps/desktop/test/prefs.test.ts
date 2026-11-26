@@ -105,7 +105,7 @@ test('the keys and defaults are the designed ones', () => {
     sound: 'nm.sonido',
     badgeCount: 'nm.insignia-numero',
   });
-  assert.deepEqual(DEFAULT_PREFS, { theme: 'sistema', layout: 'tres', listWidth: 20.5, size: 'auto', locale: 'en', sound: 'on', badgeCount: 'on' });
+  assert.deepEqual(DEFAULT_PREFS, { theme: 'oscuro', layout: 'tres', listWidth: 20.5, size: 'auto', locale: 'en', sound: 'on', badgeCount: 'on' });
   assert.equal(SIZES[0], DEFAULT_PREFS.size, 'the first size is the default');
   assert.deepEqual([...THEMES], ['sistema', 'claro', 'oscuro']);
   assert.deepEqual([...LAYOUTS], ['tres', 'dos']);
@@ -116,7 +116,7 @@ test('parseTheme and parseLayout: valid values pass as is, odd or missing ones g
   for (const theme of THEMES) assert.equal(parseTheme(theme), theme);
   for (const layout of LAYOUTS) assert.equal(parseLayout(layout), layout);
   for (const raw of [...STORED, undefined, 0, {}, ['oscuro']]) {
-    if (!THEMES.includes(raw as never)) assert.equal(parseTheme(raw), 'sistema', `tema ${String(raw)}`);
+    if (!THEMES.includes(raw as never)) assert.equal(parseTheme(raw), 'oscuro', `tema ${String(raw)}`);
     if (!LAYOUTS.includes(raw as never)) assert.equal(parseLayout(raw), 'tres', `layout ${String(raw)}`);
   }
 });
@@ -185,10 +185,10 @@ test('store: changing the theme saves it, applies it to the document and notifie
   let calls = 0;
   const off = prefs.subscribe(() => (calls += 1));
 
-  prefs.setTheme('oscuro');
-  assert.deepEqual(prefs.get(), { theme: 'oscuro', layout: 'tres', listWidth: 20.5, size: 'auto', locale: 'en', sound: 'on', badgeCount: 'on' });
-  assert.equal(storage.items.get('nm.tema'), 'oscuro');
-  assert.equal(root.theme(), 'dark');
+  prefs.setTheme('claro');
+  assert.deepEqual(prefs.get(), { theme: 'claro', layout: 'tres', listWidth: 20.5, size: 'auto', locale: 'en', sound: 'on', badgeCount: 'on' });
+  assert.equal(storage.items.get('nm.tema'), 'claro');
+  assert.equal(root.theme(), 'light');
   assert.equal(calls, 1);
 
   prefs.setTheme('sistema');
@@ -227,11 +227,11 @@ test('store: if it cannot be saved, the change still holds until the app closes'
   const prefs = createPrefs(env);
   let calls = 0;
   prefs.subscribe(() => (calls += 1));
-  prefs.setTheme('oscuro');
+  prefs.setTheme('claro');
   prefs.setLayout('dos');
   prefs.setSize('150');
-  assert.deepEqual(prefs.get(), { theme: 'oscuro', layout: 'dos', listWidth: 20.5, size: '150', locale: 'en', sound: 'on', badgeCount: 'on' });
-  assert.equal(root.theme(), 'dark');
+  assert.deepEqual(prefs.get(), { theme: 'claro', layout: 'dos', listWidth: 20.5, size: '150', locale: 'en', sound: 'on', badgeCount: 'on' });
+  assert.equal(root.theme(), 'light');
   assert.equal(root.font(), '21');
   assert.equal(calls, 3);
   assert.equal(storage.items.size, 0);
@@ -264,39 +264,41 @@ test('store: the list width is read clamped, saved as text and holds for next ti
 });
 
 test('sizes: the list, its validation and what goes into --setting-font-size', () => {
-  assert.deepEqual([...SIZES], ['auto', '100', '125', '150', '175', '200']);
-  assert.deepEqual([...FIXED_SIZES], ['100', '125', '150', '175', '200']);
+  assert.deepEqual([...SIZES], ['auto', '100', '125', '150']);
+  assert.deepEqual([...FIXED_SIZES], ['100', '125', '150']);
   for (const size of SIZES) assert.equal(parseSize(size), size);
   for (const raw of [...STORED, undefined, 0, 150, {}, ['150']]) {
-    if (!SIZES.includes(raw as never) && !(raw === '115' || raw === '130')) assert.equal(parseSize(raw), 'auto', `size ${String(raw)}`);
+    if (!SIZES.includes(raw as never) && !(raw === '115' || raw === '130' || raw === '175' || raw === '200')) assert.equal(parseSize(raw), 'auto', `size ${String(raw)}`);
   }
   // 14 px is the base stylesheet's default (root at 16 px): no property. The others, 14 times the %, rounded.
-  assert.deepEqual(FIXED_SIZES.map(sizeFontSize), [null, 18, 21, 25, 28]);
+  assert.deepEqual(FIXED_SIZES.map(sizeFontSize), [null, 18, 21]);
   // What was stored with sizes that no longer exist moves to the nearest (on a tie, the smaller).
   assert.equal(parseSize('115'), '125');
   assert.equal(parseSize('130'), '125');
+  assert.equal(parseSize('175'), '150');
+  assert.equal(parseSize('200'), '150');
 });
 
 const screenOf = (width: number, height: number, dpr = 1): ScreenInfo => ({ width, height, dpr });
 
 test("autoSize: with Windows scaling applied (or without a screen) 100 %, without it by the screen's short side", () => {
   // Without scale (WSLg, or Windows at 100 %): the short side gives the size.
-  assert.equal(autoSize(screenOf(3840, 2160)), '175', '4K monitor');
-  assert.equal(autoSize(screenOf(2160, 3840)), '175', '4K portrait');
-  assert.equal(autoSize(screenOf(5120, 2880)), '200', '5K');
+  assert.equal(autoSize(screenOf(3840, 2160)), '150', '4K monitor');
+  assert.equal(autoSize(screenOf(2160, 3840)), '150', '4K portrait');
+  assert.equal(autoSize(screenOf(5120, 2880)), '150', '5K');
   assert.equal(autoSize(screenOf(2560, 1440)), '125', 'QHD');
   assert.equal(autoSize(screenOf(3440, 1440)), '125', 'ultrawide QHD: wide, but not denser');
   assert.equal(autoSize(screenOf(2560, 1600)), '125');
   assert.equal(autoSize(screenOf(1920, 1080)), '100');
   assert.equal(autoSize(screenOf(1920, 1200)), '100');
   // The exact edges.
-  assert.equal(autoSize(screenOf(4000, 2700)), '200');
-  assert.equal(autoSize(screenOf(4000, 2699)), '175');
-  assert.equal(autoSize(screenOf(4000, 2000)), '175');
+  assert.equal(autoSize(screenOf(4000, 2700)), '150');
+  assert.equal(autoSize(screenOf(4000, 2699)), '150');
+  assert.equal(autoSize(screenOf(4000, 2000)), '150');
   assert.equal(autoSize(screenOf(4000, 1999)), '125');
   assert.equal(autoSize(screenOf(4000, 1400)), '125');
   assert.equal(autoSize(screenOf(4000, 1399)), '100');
-  assert.equal(autoSize(screenOf(3840, 2160, 1.05)), '175', 'a rounded scale still counts as "no scale"');
+  assert.equal(autoSize(screenOf(3840, 2160, 1.05)), '150', 'a rounded scale still counts as "no scale"');
   // With Windows' scale already applied (native WebView2 at 175 %: 2194 x 1234 and 1.75), nothing to enlarge.
   assert.equal(autoSize(screenOf(2194, 1234, 1.75)), '100');
   assert.equal(autoSize(screenOf(3840, 2160, 1.1)), '100');
@@ -308,7 +310,7 @@ test("autoSize: with Windows scaling applied (or without a screen) 100 %, withou
 });
 
 test('resolveSize: "Automático" comes from the screen, a chosen size is that one, whatever the screen', () => {
-  assert.equal(resolveSize('auto', screenOf(3840, 2160)), '175');
+  assert.equal(resolveSize('auto', screenOf(3840, 2160)), '150');
   assert.equal(resolveSize('auto', undefined), '100');
   for (const size of FIXED_SIZES) assert.equal(resolveSize(size, screenOf(3840, 2160)), size);
 });
@@ -318,11 +320,11 @@ test('store: without a saved size "Automático", a saved one (or an old one) is 
   const fresh = fakeEnv();
   const prefs = createPrefs({ ...fresh.env, screen: big });
   assert.equal(prefs.get().size, 'auto');
-  assert.equal(prefs.appliedSize(), '175');
+  assert.equal(prefs.appliedSize(), '150');
   prefs.apply();
-  assert.equal(fresh.root.font(), '25');
+  assert.equal(fresh.root.font(), '21');
   assert.equal(fresh.storage.items.size, 0, 'reading saves nothing');
-  for (const [stored, size, font] of [['100', '100', null], ['130', '125', '18'], ['200', '200', '28']] as const) {
+  for (const [stored, size, font] of [['100', '100', null], ['130', '125', '18'], ['200', '150', '21']] as const) {
     const { env, root } = fakeEnv({ 'nm.tamano': stored });
     const kept = createPrefs({ ...env, screen: big });
     kept.apply();
@@ -335,7 +337,7 @@ test('store: without a saved size "Automático", a saved one (or an old one) is 
   const back = createPrefs({ ...env, screen: big });
   back.setSize('auto');
   assert.equal(storage.items.get('nm.tamano'), 'auto');
-  assert.equal(root.font(), '25');
+  assert.equal(root.font(), '21');
 });
 
 test('store: with "Automático", apply looks at the screen again (another monitor or resolution)', () => {
@@ -343,7 +345,7 @@ test('store: with "Automático", apply looks at the screen again (another monito
   const { env, root } = fakeEnv();
   const prefs = createPrefs({ ...env, screen: () => current });
   prefs.apply();
-  assert.equal(root.font(), '25');
+  assert.equal(root.font(), '21');
   current = screenOf(1920, 1080);
   assert.equal(prefs.appliedSize(), '100');
   prefs.apply();
@@ -356,10 +358,6 @@ test('applySize: sets --setting-font-size on the root and removes it for the def
   assert.equal(root.font(), '21');
   applySize('125', root);
   assert.equal(root.font(), '18');
-  applySize('175', root);
-  assert.equal(root.font(), '25');
-  applySize('200', root);
-  assert.equal(root.font(), '28');
   applySize('100', root);
   assert.equal(root.font(), null);
   assert.equal(root.theme(), 'dark');
@@ -397,13 +395,13 @@ test('effectiveLayout: three panels only if they fit (60 rem), two is always res
   assert.equal(effectiveLayout('tres', 59.9), 'dos');
   assert.equal(effectiveLayout('tres', Infinity), 'tres');
   for (const rem of [10, 60, Infinity]) assert.equal(effectiveLayout('dos', rem), 'dos');
-  // The root is 16 px x font / 14: at a 1200 px window only 100 % fits; 125 % (1200 / 20.6 = 58.3 rem), 150 % and 200 % do not.
+  // The root is 16 px x font / 14: at a 1200 px window only 100 % fits; 125 % (1200 / 20.6 = 58.3 rem) and 150 % do not.
   const at1200 = FIXED_SIZES.map((s) => effectiveLayout('tres', viewportRem(1200, ((sizeFontSize(s) ?? 14) * 16) / 14)));
-  assert.deepEqual(at1200, ['tres', 'dos', 'dos', 'dos', 'dos']);
+  assert.deepEqual(at1200, ['tres', 'dos', 'dos']);
   // Full screen at 2K (2560 px), at 150 % they still fit.
   assert.equal(effectiveLayout('tres', viewportRem(2560, 24)), 'tres');
-  // "Automático" on a 4K monitor (175 %, root of 25 x 16 / 14 px): full screen fits all three, and at
-  // half screen (1920 px, 67 rem) too; in a 1200 px window, two.
+  // "Automático" on a 4K monitor (150 %, root of 24 x 16 / 14 px): full screen fits all three, and at
+  // half screen (1920 px, 80 rem) too; in a 1200 px window, two.
   const autoRoot = ((sizeFontSize(autoSize(screenOf(3840, 2160))) ?? 14) * 16) / 14;
   assert.deepEqual([3840, 1920, 1200].map((px) => effectiveLayout('tres', viewportRem(px, autoRoot))), ['tres', 'tres', 'dos']);
 });
@@ -447,13 +445,16 @@ test('store: apply sets the saved theme on the document (startup), and does not 
   createPrefs(env).apply();
   assert.equal(root.theme(), 'dark');
   const stale = fakeRoot('dark');
-  createPrefs({ storage: () => fakeStorage(), root: () => stale }).apply();
+  createPrefs({ storage: () => fakeStorage({ 'nm.tema': 'sistema' }), root: () => stale }).apply();
   assert.equal(stale.theme(), null, '"sistema" removes any existing attribute');
+  const fresh = fakeRoot();
+  createPrefs({ storage: () => fakeStorage(), root: () => fresh }).apply();
+  assert.equal(fresh.theme(), 'dark', 'nothing saved: dark, the default');
   assert.doesNotThrow(() => createPrefs({ storage: () => fakeStorage({ 'nm.tema': 'claro' }), root: () => undefined }).apply());
 });
 
 test('store: a value not in the list counts as the default, as when reading, and is never saved', () => {
-  const { env, storage, root } = fakeEnv({ 'nm.tema': 'oscuro', 'nm.disposicion': 'dos' });
+  const { env, storage, root } = fakeEnv({ 'nm.tema': 'claro', 'nm.disposicion': 'dos' });
   const prefs = createPrefs(env);
   let calls = 0;
   prefs.subscribe(() => (calls += 1));
@@ -461,8 +462,8 @@ test('store: a value not in the list counts as the default, as when reading, and
   prefs.setTheme('morado' as never);
   prefs.setLayout('"><img src=x>' as never);
   assert.deepEqual(prefs.get(), DEFAULT_PREFS);
-  assert.deepEqual([...storage.items], [['nm.tema', 'sistema'], ['nm.disposicion', 'tres']]);
-  assert.equal(root.theme(), null);
+  assert.deepEqual([...storage.items], [['nm.tema', 'oscuro'], ['nm.disposicion', 'tres']]);
+  assert.equal(root.theme(), 'dark');
   assert.equal(calls, 2);
   // And if it was already at the default, there is nothing to change.
   prefs.setTheme(undefined as never);
@@ -702,15 +703,15 @@ test('tema.js sets the same size as prefs.ts with any saved value and any screen
       }
     }
   }
-  // With nothing stored, on a 4K monitor with no scale: 175 %.
-  assert.equal(fontViaTemaJs({}, undefined, screenOf(3840, 2160)), '25');
+  // With nothing stored, on a 4K monitor with no scale: 150 %.
+  assert.equal(fontViaTemaJs({}, undefined, screenOf(3840, 2160)), '21');
   for (const size of FIXED_SIZES) {
     const px = sizeFontSize(size);
     assert.equal(fontViaTemaJs({ 'nm.tamano': size }), px === null ? null : String(px), `${size} missing in tema.js`);
   }
   // Size does not look at the theme, nor the theme at the size.
   assert.equal(fontViaTemaJs({ 'nm.tema': '150' }), null);
-  assert.equal(runTemaJs({ localStorage: fakeStorage({ 'nm.tamano': 'oscuro' }) }), null);
+  assert.equal(runTemaJs({ localStorage: fakeStorage({ 'nm.tamano': 'oscuro' }) }), 'dark');
 });
 
 /** Like `runTemaJs`, but returns the `lang` it leaves. */
@@ -750,13 +751,13 @@ test('tema.js: the three themes give exactly sistema → no attribute, claro →
   assert.equal(runTemaJs({ localStorage: fakeStorage({ 'nm.tema': 'claro' }) }), 'light');
   assert.equal(runTemaJs({ localStorage: fakeStorage({ 'nm.tema': 'oscuro' }) }), 'dark');
   // It does not look at the other preference.
-  assert.equal(runTemaJs({ localStorage: fakeStorage({ 'nm.disposicion': 'oscuro' }) }), null);
+  assert.equal(runTemaJs({ localStorage: fakeStorage({ 'nm.disposicion': 'claro' }) }), 'dark', 'the default theme: dark');
 });
 
-test('tema.js: if storage throws or does not exist, the system theme, like prefs.ts', () => {
+test('tema.js: if storage throws or does not exist, the default theme (dark), like prefs.ts', () => {
   const broken = fakeStorage({ 'nm.tema': 'oscuro' }, true);
-  assert.equal(runTemaJs({ localStorage: broken }, 'dark'), null);
-  assert.equal(viaPrefs(() => broken, 'dark'), null);
+  assert.equal(runTemaJs({ localStorage: broken }, 'light'), 'dark');
+  assert.equal(viaPrefs(() => broken, 'light'), 'dark');
 
   // In some browsers what throws is the access to `localStorage` itself.
   const denied = {
@@ -764,12 +765,12 @@ test('tema.js: if storage throws or does not exist, the system theme, like prefs
       throw new Error('SecurityError');
     },
   };
-  assert.equal(runTemaJs(denied, 'dark'), null);
-  assert.equal(viaPrefs(() => denied.localStorage, 'dark'), null);
+  assert.equal(runTemaJs(denied, 'light'), 'dark');
+  assert.equal(viaPrefs(() => denied.localStorage, 'light'), 'dark');
 
-  assert.equal(runTemaJs({}, 'dark'), null, 'without `localStorage` (ReferenceError)');
-  assert.equal(runTemaJs({ localStorage: null }, 'dark'), null);
-  assert.equal(viaPrefs(() => null, 'dark'), null);
+  assert.equal(runTemaJs({}, 'light'), 'dark', 'without `localStorage` (ReferenceError)');
+  assert.equal(runTemaJs({ localStorage: null }, 'light'), 'dark');
+  assert.equal(viaPrefs(() => null, 'light'), 'dark');
 });
 
 test('tema.js is a standalone classic script: no modules, no dependencies and leaving nothing global', () => {

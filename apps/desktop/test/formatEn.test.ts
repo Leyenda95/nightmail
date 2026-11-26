@@ -65,8 +65,8 @@ test('en formatDay: «Nov 18, 2026», in local time', () => {
 test('en formatDateTime and formatReceived: US order, 24-hour clock, never AM/PM nor «24:»', () => {
   assert.equal(formatDateTime(secs(new Date(2026, 10, 19, 19, 28, 45))), '11/19/2026, 19:28');
   assert.equal(formatDateTime(secs(new Date(2026, 10, 20, 0, 5))), '11/20/2026, 00:05');
-  assert.equal(formatReceived(secs(new Date(2026, 10, 19, 19, 28, 45))), '11/19/2026, 19:28:45');
-  assert.equal(formatReceived(secs(new Date(2026, 10, 20, 0, 5, 7))), '11/20/2026, 00:05:07');
+  assert.equal(formatReceived(secs(new Date(2026, 10, 19, 19, 28, 45))), '11/19/2026, 19:28');
+  assert.equal(formatReceived(secs(new Date(2026, 10, 20, 0, 5, 7))), '11/20/2026, 00:05');
   for (let h = 0; h < 24; h += 1) {
     const text = formatDateTime(secs(new Date(2026, 5, 1, h, 30)));
     assert.equal(text, `06/01/2026, ${String(h).padStart(2, '0')}:30`);
@@ -79,8 +79,8 @@ test('es dates stay exactly as before, also after switching language back and fo
   const midnight = secs(new Date(2026, 10, 20, 0, 5, 7));
   inLocale('es', () => {
     assert.equal(formatDateTime(at), '19/11/2026, 19:28');
-    assert.equal(formatReceived(at), new Date(at * 1000).toLocaleString('es-ES'));
-    assert.equal(formatReceived(midnight), new Date(midnight * 1000).toLocaleString('es-ES'));
+    assert.equal(formatReceived(at), '19/11/2026, 19:28');
+    assert.equal(formatReceived(midnight), '20/11/2026, 0:05');
     assert.equal(formatShortDate(secs(new Date(2026, 10, 19, 9, 0)), NOW), 'ayer');
     assert.equal(formatDay(secs(new Date(2026, 10, 18))), '18 nov 2026');
   });

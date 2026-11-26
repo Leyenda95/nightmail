@@ -27,11 +27,11 @@ export default {
     price: 'Price',
     balance: 'Your balance',
     paidFromWallet:
-      "It's paid from your payment wallet, with private tokens on the Midnight network: the operator doesn't know who's paying.",
+      "It's paid from your payment wallet, with shielded tokens on the Midnight network: the operator doesn't know who's paying.",
     confirmPayment: 'Confirm payment',
     paidTitle: PAID_PLAN,
-    shieldedHint: "With private tokens on the Midnight network: the operator doesn't know who's paying",
-    payShielded: 'Pay with private tokens…',
+    shieldedHint: "With shielded tokens on the Midnight network: the operator doesn't know who's paying",
+    payShielded: 'Pay with shielded tokens…',
     amount: tokenAmount,
     cardHint: 'By card (simulated in this version)',
     fiatMonthly: 'Simulated monthly payment',
@@ -45,8 +45,7 @@ export default {
   wallet: {
     title: 'Payment wallet',
     intro:
-      "With it you can pay for the plan using private tokens on the Midnight network: the operator gets paid without " +
-      "knowing who's paying. Fees are paid with DUST, which is generated from the wallet's NIGHT.",
+      'With it you can pay for the plan fully privately, thanks to shielded tokens on the Midnight network.',
     dustInfo: "DUST is a resource used to pay fees. It regenerates on its own from the wallet's NIGHT.",
     dustInfoLabel: 'What DUST is',
     tokenName: `${TOKEN_NAME} (test currency)`,

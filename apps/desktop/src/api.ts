@@ -16,6 +16,7 @@ import type { PendingSlot } from './bindings/PendingSlot.ts';
 import type { PeriodInput } from './bindings/PeriodInput.ts';
 import type { PlanView } from './bindings/PlanView.ts';
 import type { RecoveryReport } from './bindings/RecoveryReport.ts';
+import type { SeedDraft } from './bindings/SeedDraft.ts';
 import type { SeedPhrase } from './bindings/SeedPhrase.ts';
 import type { SentDetail } from './bindings/SentDetail.ts';
 import type { SentQuery } from './bindings/SentQuery.ts';
@@ -35,7 +36,10 @@ export const api = {
   sidecarPing: () => invoke<MidnightHealth>('sidecar_ping'),
   serverPing: () => invoke<ServerHealth>('server_ping'),
   appStatus: () => invoke<AppStatus>('app_status'),
-  createSeed: (password: string) => invoke<SeedPhrase>('create_seed', { password }),
+  // Creating a profile: the words first (kept only in the core's memory), then the password saves them.
+  draftSeed: () => invoke<SeedDraft>('draft_seed'),
+  createSeed: (draft: number, password: string) => invoke<void>('create_seed', { draft, password }),
+  discardSeedDraft: (draft: number) => invoke<void>('discard_seed_draft', { draft }),
   unlock: (password: string) => invoke<void>('unlock', { password }),
   lock: () => invoke<void>('lock'),
   restoreSeed: (phrase: string, password: string) => invoke<void>('restore_seed', { phrase, password }),

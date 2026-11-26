@@ -6,6 +6,7 @@ const PASSWORD = 'Password';
 const CANCEL = 'Cancel';
 const CREATE_PHRASE = 'Create my recovery phrase';
 const RETRYING = 'Retrying…';
+const COPY_PHRASE = 'Copy';
 
 export default {
   startup: {
@@ -22,7 +23,7 @@ export default {
   welcome: {
     back: 'Back',
     menu: {
-      title: "There's no profile here.",
+      title: 'No accounts or sign-ups here.',
       text:
         'Your identity is 24 words that live only on this device. With them you create addresses that no one can ' +
         'link to each other. Not even us.',
@@ -47,10 +48,8 @@ export default {
     },
     showPhrase: {
       title: 'Your recovery phrase',
-      text:
-        'Write it down on paper, in this order, and keep it somewhere safe and offline. Don\'t share it with anyone: ' +
-        "whoever has these 24 words controls your profile. We don't have it and can't recover it for you.",
-      note: "It won't be shown again except with your password, in “Recovery phrase”.",
+      text: 'Keep it somewhere safe and offline. Whoever has these 24 words can access your profile. We cannot recover it for you.',
+      copy: COPY_PHRASE,
       written: "I've written it down",
     },
     restore: {
@@ -69,18 +68,29 @@ export default {
     repeatPassword: 'Repeat the password',
   },
   accounts: {
-    switchAccount: 'Switch profile',
     title: 'Choose a profile',
     text: 'These are the profiles saved on this device. Each one opens with its own password.',
     name: (n: number): string => `Profile ${n}`,
     // `day`: "Nov 18, 2026" (`formatDay`).
     created: (day: string): string => `Created on ${day}`,
-    openNow: 'Open now',
-    createOther: 'Create or restore another profile',
+    recentlyUsed: 'Recently used',
+    // The "+" button of the list and the title of the screen it opens.
+    newProfile: 'New profile',
+    newProfileText: 'Choose the network this profile will use.',
+    network: 'Network',
+    networks: {
+      local: { title: 'Local', text: 'A test network on this computer.' },
+      preprod: { title: 'Preprod', text: "Midnight's test network." },
+      mainnet: { title: 'Mainnet', text: "Midnight's main network." },
+    },
+    soon: 'Soon',
+    continue: 'Continue',
     backToAccounts: 'Back to my profiles',
     openingTitle: 'Opening the profile…',
     openingText: 'NightMail will close and open again with the chosen profile.',
     failed: "Couldn't switch profiles. Try again.",
+    loadFailed: "Couldn't read the list of profiles.",
+    retry: 'Try again',
   },
   seedReveal: {
     askTitle: 'See your recovery phrase',
@@ -94,6 +104,7 @@ export default {
     hint:
       "Write it down on paper and keep it somewhere safe and offline. Don't share it with anyone: whoever has these 24 " +
       'words controls your profile.',
+    copy: COPY_PHRASE,
     close: 'Close',
   },
   recovery: {
@@ -134,8 +145,6 @@ export default {
   },
   profileName: {
     label: 'Profile name (optional)',
-    help: (max: number): string =>
-      `It is stored unencrypted on this device and shown before unlocking. Up to ${max} characters. If you leave it empty, it is shown as Profile and its number.`,
     tooLong: (max: number): string => `Use ${max} characters at most.`,
   },
   deleteProfile: {

@@ -130,3 +130,15 @@ test('infoTip: shows on mouse or focus, Escape hides it without removing focus a
 test('the closed explanation class exists in app.css', () => {
   assert.deepEqual(missing(['nm-info--abierta']), []);
 });
+
+test('a notice that can be closed: a plain "X" with its name, after the actions', () => {
+  const aviso = readFileSync(new URL('../src/components/Aviso.tsx', import.meta.url), 'utf8');
+  assert.match(aviso, /className="nm-aviso__cerrar" title=\{dismiss\.label\} aria-label=\{dismiss\.label\} onClick=\{dismiss\.onDismiss\}>\s*<Icon name="cross"/);
+  for (const f of ['../src/screens/Main.tsx', '../src/screens/NewMailNotice.tsx']) {
+    const s = readFileSync(new URL(f, import.meta.url), 'utf8');
+    assert.match(s, /dismiss=\{\{ label: words\.dismiss, onDismiss/, f);
+    assert.doesNotMatch(s, /\{words\.dismiss\}/, f);
+  }
+  const css = readFileSync(new URL('../src/styles/app.css', import.meta.url), 'utf8');
+  assert.match(css, /\.nm-aviso__cerrar \{[^}]*border: 0;[^}]*background: none;/);
+});

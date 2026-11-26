@@ -350,13 +350,13 @@ test('rejects a message maximum that does not fit in an envelope, the largest th
   await ingressWith({ limits: { maxMessageBytes: MAX_PLAINTEXT_LENGTH } });
 });
 
-test('the stored received date is the server time rounded to the hour', async () => {
+test('the stored received date is the server time rounded to the minute', async () => {
   const juan = mailbox('juan.perez');
   const ingress = await ingressWith({ addresses: [juan] });
-  const hour = Math.floor(ingress.clock.now / 3_600_000) * 3600;
-  ingress.clock.now = (hour + 3600 + 125) * 1000 + 999; // 2 min 5.999 s past the next hour
+  const minute = Math.floor(ingress.clock.now / 60_000) * 60;
+  ingress.clock.now = (minute + 60 + 5) * 1000 + 999; // 5.999 s past the next minute
   assert.match((await deliverRaw(ingress.port, [at(juan)], 'hola')).final, /^250 /);
-  assert.deepEqual(ingress.store.list(juan.addrKey, 0, 10).messages.map((m) => m.receivedAt), [hour + 3600]);
+  assert.deepEqual(ingress.store.list(juan.addrKey, 0, 10).messages.map((m) => m.receivedAt), [minute + 60]);
 });
 
 test('the plaintext message is wiped from memory once sealed', async (t) => {

@@ -28,7 +28,14 @@ test('en onboarding: the fixed glossary', () => {
   assert.equal(en.welcome.showPhrase.title, 'Your recovery phrase');
   assert.equal(en.welcome.restore.phrase, 'Recovery phrase');
   assert.equal(en.welcome.menu.create, 'Create my recovery phrase');
-  assert.match(en.welcome.showPhrase.note, /“Recovery phrase”/);
+  // Short text at creation (owner, 2026-11-26): it starts with where to keep it and ends with "we cannot recover it".
+  assert.equal(en.welcome.showPhrase.text, 'Keep it somewhere safe and offline. Whoever has these 24 words can access your profile. We cannot recover it for you.');
+  assert.equal(es.welcome.showPhrase.text, 'Guárdala en un lugar seguro, sin conexión. Quien tenga estas 24 palabras puede acceder a tu perfil. Nosotros no podremos recuperarla por ti.');
+  // No note under the phrase about seeing it again in Settings (owner, 2026-11-26).
+  assert.equal('note' in en.welcome.showPhrase, false);
+  assert.equal('note' in es.welcome.showPhrase, false);
+  assert.equal(DICTIONARIES.en.settings.seed.title, en.welcome.restore.phrase);
+  assert.equal(DICTIONARIES.es.settings.seed.title, es.welcome.restore.phrase);
   assert.equal(en.startup.retry, 'Retry');
   assert.equal(en.recovery.retry, 'Retry the restore');
   assert.equal(en.startup.badConfigTitle, 'Configuration incomplete');
@@ -43,8 +50,6 @@ test('en onboarding: the fixed glossary', () => {
 });
 
 test('profiles: the same words in both languages, "perfil" and never "cuenta"', () => {
-  assert.equal(es.accounts.switchAccount, 'Cambiar de perfil');
-  assert.equal(en.accounts.switchAccount, 'Switch profile');
   assert.equal(es.accounts.title, 'Elige un perfil');
   assert.equal(en.accounts.title, 'Choose a profile');
   assert.equal(es.accounts.text, 'Estos son los perfiles guardados en este dispositivo. Cada uno se abre con su propia contraseña.');
@@ -53,10 +58,12 @@ test('profiles: the same words in both languages, "perfil" and never "cuenta"', 
   assert.equal(en.accounts.name(2), 'Profile 2');
   assert.equal(es.accounts.created('18 nov 2026'), 'Creado el 18 nov 2026');
   assert.equal(en.accounts.created('Nov 18, 2026'), 'Created on Nov 18, 2026');
-  assert.equal(es.accounts.openNow, 'Abierto ahora');
-  assert.equal(en.accounts.openNow, 'Open now');
-  assert.equal(es.accounts.createOther, 'Crear o restaurar otro perfil');
-  assert.equal(en.accounts.createOther, 'Create or restore another profile');
+  assert.equal(es.accounts.recentlyUsed, 'Usado recientemente');
+  assert.equal(en.accounts.recentlyUsed, 'Recently used');
+  assert.equal(es.accounts.newProfile, 'Nuevo perfil');
+  assert.equal(en.accounts.newProfile, 'New profile');
+  assert.equal(es.accounts.soon, 'Pronto');
+  assert.equal(en.accounts.soon, 'Soon');
   assert.equal(es.accounts.backToAccounts, 'Volver a mis perfiles');
   assert.equal(en.accounts.backToAccounts, 'Back to my profiles');
   assert.equal(es.accounts.openingTitle, 'Abriendo el perfil…');
@@ -67,19 +74,20 @@ test('profiles: the same words in both languages, "perfil" and never "cuenta"', 
   assert.equal(en.startup.chooseOther, 'Choose another profile');
   assert.equal(es.startup.profileInUseText, 'Este perfil ya está abierto en otra ventana de NightMail. Usa esa ventana o elige otro perfil.');
   assert.match(en.startup.profileInUseText, /^This profile is already open in another NightMail window\./);
-  assert.equal(es.welcome.menu.title, 'Aquí no hay perfil.');
-  assert.equal(en.welcome.menu.title, "There's no profile here.");
-  assert.match(es.welcome.showPhrase.text, /controla tu perfil\./);
-  assert.match(en.welcome.showPhrase.text, /controls your profile\./);
+  assert.equal(es.welcome.menu.title, 'Aquí no hay cuentas ni registros.');
+  assert.equal(en.welcome.menu.title, 'No accounts or sign-ups here.');
+  assert.match(es.welcome.showPhrase.text, /puede acceder a tu perfil\./);
+  assert.match(en.welcome.showPhrase.text, /can access your profile\./);
   assert.match(es.seedReveal.hint, /controla tu perfil\.$/);
   assert.match(en.seedReveal.hint, /controls your profile\.$/);
   assert.equal(DICTIONARIES.es.screensMail.sidebar.logOut, 'Cerrar sesión');
   assert.equal(DICTIONARIES.en.screensMail.sidebar.logOut, 'Log out');
-  // No visible onboarding text says "cuenta" or "account" any more (the "Sin cuenta" slogan lives in `slogans`).
+  // No visible onboarding text says "cuenta" or "account" any more (the "Sin cuenta" slogan lives in `slogans`). The one
+  // exception is the menu title, which says there are none (owner, 2026-11-26), like that slogan.
   const strings = (o: unknown): string[] =>
     typeof o === 'string' ? [o] : typeof o === 'object' && o !== null ? Object.values(o).flatMap(strings) : [];
-  for (const text of strings(es)) assert.doesNotMatch(text, /cuenta/i, text);
-  for (const text of strings(en)) assert.doesNotMatch(text, /account/i, text);
+  for (const text of strings(es)) if (text !== es.welcome.menu.title) assert.doesNotMatch(text, /cuenta/i, text);
+  for (const text of strings(en)) if (text !== en.welcome.menu.title) assert.doesNotMatch(text, /account/i, text);
 });
 
 test('the pending notice button: "Retry now" and "Reintentar ahora"', () => {
@@ -108,8 +116,8 @@ test('en onboarding: what it says is still safe matches the Spanish', () => {
   // Phrase saved and encrypted on the device; no plan or addresses until it finishes. Nothing more.
   assert.match(en.recovery.safe, /already saved and encrypted on this device/);
   assert.match(en.recovery.safe, /can't use the plan or the addresses/);
-  assert.match(en.welcome.showPhrase.text, /We don't have it and can't recover it for you\./);
-  assert.match(es.welcome.showPhrase.text, /Nosotros no la tenemos y no podemos recuperarla por ti\./);
+  assert.match(en.welcome.showPhrase.text, /We cannot recover it for you\.$/);
+  assert.match(es.welcome.showPhrase.text, /Nosotros no podremos recuperarla por ti\.$/);
 });
 
 test('the password rules in English', () => {
@@ -136,6 +144,28 @@ test('the front page language selector: each name in its own language, the same 
   assert.deepEqual(DICTIONARIES.es.settings.languageNames, DICTIONARIES.en.settings.languageNames);
   assert.equal(DICTIONARIES.en.settings.language.legend, 'Language');
   assert.equal(DICTIONARIES.es.settings.language.legend, 'Idioma');
+});
+
+test('creating: the words first (only in the core memory), then name and password, with a way back from each step', () => {
+  const welcome = readFileSync(new URL('../src/screens/Welcome.tsx', import.meta.url), 'utf8');
+  const create = welcome.slice(welcome.indexOf('function Create('), welcome.indexOf('function Restore('));
+  // The words come from the core as a draft; nothing is saved until the password, which goes with the draft id only.
+  assert.match(create, /run\(\(\) => api\.draftSeed\(\)\)/);
+  assert.match(create, /await api\.createSeed\(id, password\);/);
+  assert.doesNotMatch(create, /createSeed\([^)]*phrase/);
+  // Step order: the words (ShowPhrase) before the name and the passwords.
+  assert.ok(create.indexOf('<ShowPhrase') > 0 && create.indexOf('<ShowPhrase') < create.indexOf('<PasswordPair'));
+  // Back from the words drops the draft and goes to the menu; back from the password goes to the same words.
+  assert.match(create, /function leave\(\) \{\s*if \(draft !== null\) void api\.discardSeedDraft\(draft\.id\)/);
+  assert.match(create, /<ShowPhrase phrase=\{draft\.phrase\} onBack=\{leave\} onWritten=\{\(\) => setWritten\(true\)\} \/>/);
+  assert.match(create, /setWritten\(false\);/);
+  const show = welcome.slice(welcome.indexOf('function ShowPhrase('), welcome.indexOf('interface PairProps'));
+  assert.match(show, /<Back onBack=\{onBack\} disabled=\{false\} \/>\s*<h1/);
+  // The copy button just says "Copiar", here and in Settings.
+  assert.equal(es.welcome.showPhrase.copy, 'Copiar');
+  assert.equal(en.welcome.showPhrase.copy, 'Copy');
+  assert.equal(es.seedReveal.copy, 'Copiar');
+  assert.equal(en.seedReveal.copy, 'Copy');
 });
 
 test('every screen before entering has the language selector, the same as the front page', () => {

@@ -90,6 +90,12 @@ pub struct App {
     ever_opened: std::sync::atomic::AtomicBool,
     /// Queues password changes (each reads and replaces the seed file).
     password_change: Mutex<()>,
+    /// The words of a profile being created, with their `id`, between [`App::draft_seed`] and saving or discarding
+    /// them. Only in memory, wiped when dropped, discarded, saved, or on [`App::shutdown`] (on exit the process ends
+    /// without running `Drop`).
+    seed_draft: std::sync::Mutex<Option<(u32, keys::Draft)>>,
+    /// Last draft `id` handed out.
+    draft_ids: std::sync::atomic::AtomicU32,
 }
 
 /// Session usage: closed, or with `active` operations in flight.
@@ -207,6 +213,16 @@ fn take_phrase(phrase: &mut zeroize::Zeroizing<String>) -> SeedPhrase {
     SeedPhrase { phrase: std::mem::take(&mut **phrase) }
 }
 
+#[cfg(test)]
+impl App {
+    /// Both steps of creating at once (draft, then save), for tests: the words that were saved.
+    pub async fn create_seed_now(&self, password: Secret) -> Result<SeedPhrase> {
+        let draft = self.draft_seed().await?;
+        self.create_seed(draft.id, password).await?;
+        Ok(SeedPhrase { phrase: draft.phrase.clone() })
+    }
+}
+
 impl App {
     pub fn new(config: AppConfig, sidecar: Arc<SidecarSupervisor>, transport: Arc<Transport>, sink: EventSink) -> Self {
         Self {
@@ -217,11 +233,13 @@ impl App {
             session: Mutex::new(None),
             ever_opened: Default::default(),
             password_change: Mutex::new(()),
+            seed_draft: std::sync::Mutex::new(None),
+            draft_ids: Default::default(),
         }
     }
 
     pub async fn status(&self) -> AppStatus {
-        let has_seed = self.config.seed_dir().join(keys::SEED_FILE_NAME).exists();
+        let has_seed = self.has_seed_file();
         AppStatus { has_seed, unlocked: self.session.lock().await.is_some() }
     }
 
@@ -242,18 +260,63 @@ impl App {
         self.session.lock().await.clone().ok_or(AppError::Core(CoreError::NotUnlocked))
     }
 
-    /// Creates the seed (24 words) and opens the session. The phrase is shown once, so it is returned even if the
-    /// session fails to open (the seed is already saved and the app stays locked).
-    pub async fn create_seed(&self, password: Secret) -> Result<SeedPhrase> {
+    /// First step of creating a profile: 24 new words to show before the password exists. They stay only in this
+    /// process's memory ([`keys::Draft`], wiped on drop) and nothing is written until [`App::create_seed`]. Asked again
+    /// before that (or before [`App::discard_seed_draft`]) it answers the same words and `id`, so a screen that asks
+    /// twice can never show words other than the ones that will be saved.
+    pub async fn draft_seed(&self) -> Result<SeedDraft> {
+        let _slot = self.unlocked_slot().await?;
+        if self.has_seed_file() {
+            return Err(AppError::Core(CoreError::SeedExists));
+        }
+        let mut held = self.draft();
+        let (id, draft) = held.get_or_insert_with(|| {
+            let id = self.draft_ids.fetch_add(1, std::sync::atomic::Ordering::Relaxed).wrapping_add(1);
+            (id, keys::Draft::new())
+        });
+        let mut phrase = draft.phrase();
+        // Moved without copying: the `Zeroizing` buffer goes into `SeedDraft` (wiped on drop).
+        Ok(SeedDraft { id: *id, phrase: std::mem::take(&mut *phrase) })
+    }
+
+    /// Second step: saves the words of draft `draft` sealed with the password and opens the session. Another `id`
+    /// (discarded, replaced or already saved) is `NotFound`. If saving fails (empty password, disk) the draft stays,
+    /// so the same words can be saved on the next try. Once saved the draft is dropped: the words live on only in
+    /// `seed.v1`, encrypted. The session may fail to open afterwards: the seed is saved and the app stays locked.
+    pub async fn create_seed(&self, draft: u32, password: Secret) -> Result<()> {
         let mut slot = self.unlocked_slot().await?;
+        let chosen = match &*self.draft() {
+            Some((id, held)) if *id == draft => held.duplicate(),
+            _ => return Err(AppError::Core(CoreError::NotFound)),
+        };
         let dir = self.config.seed_dir().to_path_buf();
-        let mut created = blocking(move || Ok(keys::create(&dir, &password.0)?)).await?;
-        let phrase = take_phrase(&mut created.phrase);
-        match self.open(created.keys, false).await {
+        let keys = blocking(move || Ok(keys::create(&dir, &chosen, &password.0)?)).await?;
+        self.forget_draft();
+        match self.open(keys, false).await {
             Ok(session) => self.put(&mut slot, session),
             Err(e) => log::warn!("[app] seed created, but the session did not open: {e:?}"),
         }
-        Ok(phrase)
+        Ok(())
+    }
+
+    /// Drops draft `draft` (back from its screen). Another `id` leaves the current one as is.
+    pub fn discard_seed_draft(&self, draft: u32) {
+        let mut held = self.draft();
+        if held.as_ref().is_some_and(|(id, _)| *id == draft) {
+            *held = None;
+        }
+    }
+
+    fn draft(&self) -> std::sync::MutexGuard<'_, Option<(u32, keys::Draft)>> {
+        self.seed_draft.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn forget_draft(&self) {
+        *self.draft() = None;
+    }
+
+    fn has_seed_file(&self) -> bool {
+        self.config.seed_dir().join(keys::SEED_FILE_NAME).exists()
     }
 
     /// Opens the seed with the password and resumes unfinished work (or the restore) in the background.
@@ -262,6 +325,7 @@ impl App {
         let dir = self.config.seed_dir().to_path_buf();
         let keys = blocking(move || Ok(keys::unlock(&dir, &password.0)?)).await?;
         let session = self.open(keys, true).await?;
+        self.forget_draft();
         self.put(&mut slot, session);
         Ok(())
     }
@@ -274,6 +338,7 @@ impl App {
         let keys = blocking(move || Ok(keys::restore(&dir, &phrase.0, &password.0)?)).await?;
         let session = self.open(keys, false).await?;
         session.store.with(|s| s.set_meta(RECOVERY_PENDING, b"1")).await?;
+        self.forget_draft();
         self.put(&mut slot, session);
         Ok(())
     }
@@ -327,8 +392,10 @@ impl App {
     /// Shutdown on app exit (no payment in flight by now): the session, even with operations running (they resume
     /// next time), then the sidecar. A password change in progress is not resumable, so it is awaited (seconds of
     /// Argon2id) to avoid dying with the temp file written and `seed.v1` not replaced. Capped in case the disk hangs;
-    /// even then the atomic `rename` leaves either the old or the new file, complete.
+    /// even then the atomic `rename` leaves either the old or the new file, complete. First of all, the words of a
+    /// profile being created are wiped (the process ends without dropping the `App`).
     pub async fn shutdown(&self) {
+        self.forget_draft();
         let _change = tokio::time::timeout(SHUTDOWN_WAIT, self.password_change.lock()).await;
         let session = self.session.lock().await.take();
         if let Some(session) = session {

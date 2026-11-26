@@ -3,6 +3,7 @@
 import type { AddressView } from './bindings/AddressView.ts';
 import type { MessageView } from './bindings/MessageView.ts';
 import { t } from './i18n/index.ts';
+import type { PlanKind } from './payment.ts';
 import { sideAddress } from './sidebar.ts';
 
 /** The messages of the address chosen in the sidebar (`null`: all), in the same order. */
@@ -113,6 +114,14 @@ export function emptyState(shown: number, addresses: readonly AddressView[] | nu
   if (addrKey !== null && isCapped(ctx.read)) return { kind: 'recortada', address };
   const archived = (ctx.archived ?? []).some((m) => addrKey === null || m.addrKey === addrKey);
   return { kind: 'vacia', address, archived };
+}
+
+/** First use ("Crea tu primera dirección"), two steps: 1 choose a plan, 2 create an address. Without a plan only step 1's
+ *  button; with one, step 1 is done and only step 2's button. `plan`: the plan kind (`planKind`, confirmed bonos only),
+ *  `null` while it is not known yet (no button, so the wrong one never flashes). */
+export function firstUseSteps(plan: PlanKind | null): { planDone: boolean; button: 'plan' | 'address' | null } {
+  if (plan === null) return { planDone: false, button: null };
+  return plan === 'none' ? { planDone: false, button: 'plan' } : { planDone: true, button: 'address' };
 }
 
 /** Has focus been left with nowhere to go? It happens when the list and the empty state replace each other (archiving

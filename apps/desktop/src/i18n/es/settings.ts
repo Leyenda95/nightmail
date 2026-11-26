@@ -24,7 +24,7 @@ export default {
   },
   size: {
     legend: 'Tamaño de la interfaz',
-    /** `percent` is the size "Automático" sets now, already written (`formatPercent`): "Automático (175 %)". */
+    /** `percent` is the size "Automático" sets now, already written (`formatPercent`): "Automático (150 %)". */
     automatic: (percent: string): string => `Automático (${percent})`,
     automaticText: 'Se ajusta a la pantalla.',
     standard: 'Tamaño normal.',
@@ -35,7 +35,7 @@ export default {
   // Sound on new mail outside the inbox (the on-screen notice always shows).
   sound: {
     legend: 'Sonido al recibir correo',
-    on: { title: 'Activado', text: 'Un sonido breve cuando llega correo y no estás viendo la bandeja.' },
+    on: { title: 'Activado', text: 'Un sonido breve cuando llega correo.' },
     off: { title: 'Desactivado', text: 'Solo el aviso en pantalla.' },
   },
   // Unread count on the taskbar icon (Windows). Off: no number, but the padlock still shows on locking.
@@ -67,6 +67,12 @@ export default {
     changed: 'Contraseña cambiada.',
     changedNext: 'La próxima vez, desbloquea NightMail con la nueva.',
     change: 'Cambiar la contraseña',
+  },
+  // The "Frase semilla" card: opens screens/SeedReveal.tsx.
+  seed: {
+    title: 'Frase semilla',
+    text: 'Muestra tus 24 palabras después de pedirte la contraseña.',
+    show: 'Ver la frase semilla',
   },
   version: 'Versión de NightMail',
 };

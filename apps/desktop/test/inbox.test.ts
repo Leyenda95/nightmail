@@ -7,7 +7,7 @@ import type { AddressView } from '../src/bindings/AddressView.ts';
 import type { MessageView } from '../src/bindings/MessageView.ts';
 import { formatShortDate } from '../src/format.ts';
 import { unreadBadge } from '../src/sidebar.ts';
-import { archiveHeading, cappedNote, emptyState, isCapped, MESSAGE_PAGE_MAX, focusOrphaned, headingFor, inAddress, listHeading, recipientText, stepRow, unreadCounts } from '../src/inbox.ts';
+import { archiveHeading, cappedNote, emptyState, firstUseSteps, isCapped, MESSAGE_PAGE_MAX, focusOrphaned, headingFor, inAddress, listHeading, recipientText, stepRow, unreadCounts } from '../src/inbox.ts';
 
 const secs = (d: Date) => Math.floor(d.getTime() / 1000);
 // Friday 20 November 2026, 12:00 (local time).
@@ -173,4 +173,20 @@ test("isCapped and cappedNote: the notice appears at exactly the cap, the cap is
   assert.equal(cappedNote(), 'Se ven los 500 mensajes más recientes.');
   const rust = readFileSync(new URL('../src-tauri/src/app/views.rs', import.meta.url), 'utf8');
   assert.equal(Number(/pub const MAX_PAGE: u32 = (\d+);/.exec(rust)?.[1]), MESSAGE_PAGE_MAX);
+});
+
+test('firstUseSteps: without a plan only "Elegir un plan", with one step 1 done and only "Crear una dirección"', () => {
+  assert.deepEqual(firstUseSteps('none'), { planDone: false, button: 'plan' });
+  assert.deepEqual(firstUseSteps('free'), { planDone: true, button: 'address' });
+  assert.deepEqual(firstUseSteps('paid'), { planDone: true, button: 'address' });
+  // Not known yet: no button, so the wrong one never flashes.
+  assert.deepEqual(firstUseSteps(null), { planDone: false, button: null });
+  // The screen shows a single button, the one of the step missing, and a check mark (with its words) on the step done.
+  const tsx = readFileSync(new URL('../src/screens/Inbox.tsx', import.meta.url), 'utf8');
+  const first = tsx.slice(tsx.indexOf('function FirstUse'), tsx.indexOf('export function InboxEmpty'));
+  assert.match(first, /button === 'plan' \?/);
+  // A plan read that never answers still ends with "Elegir un plan".
+  assert.match(first, /setTimeout\(\(\) => setPlan\(\(p\) => p \?\? 'none'\), FIRST_USE_WAIT_MS\)/);
+  assert.match(first, /<Icon name="checkmark"/);
+  assert.match(first, /<span className="sr-only">\{words\.stepDone\} <\/span>/);
 });

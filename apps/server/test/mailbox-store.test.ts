@@ -46,22 +46,22 @@ test('envelopeSize: the envelope length without reading it, only in its box', ()
 
 test('the list gives a random 16-byte id, bucketed size and rounded date, never the envelope', () => {
   const store = storeWith();
-  store.deliver([{ addrKey: key(1), envelope: envelope(envelopeLengthFor(5000)) }], NOW + 3599);
+  store.deliver([{ addrKey: key(1), envelope: envelope(envelopeLengthFor(5000)) }], NOW + 59);
   const { messages, next } = store.list(key(1), 0, 10);
   assert.equal(next, 1);
   assert.equal(messages.length, 1);
   assert.deepEqual(Object.keys(messages[0]!).sort(), ['id', 'receivedAt', 'size']);
   assert.match(messages[0]!.id, /^[0-9a-f]{32}$/);
   assert.equal(messages[0]!.size, 8192, 'the bucket, not the envelope length');
-  assert.equal(messages[0]!.receivedAt, NOW, 'rounded down to the hour');
-  assert.equal(RECEIVED_AT_GRANULARITY_SECONDS, 3600);
+  assert.equal(messages[0]!.receivedAt, NOW, 'rounded down to the minute');
+  assert.equal(RECEIVED_AT_GRANULARITY_SECONDS, 60);
 });
 
-test('a date on an exact hour does not change and one second earlier falls in the previous hour', () => {
+test('a date on an exact minute does not change and one second earlier falls in the previous minute', () => {
   const store = storeWith();
-  store.deliver([{ addrKey: key(1), envelope: envelope() }], NOW);
+  store.deliver([{ addrKey: key(1), envelope: envelope() }], NOW + 59);
   store.deliver([{ addrKey: key(1), envelope: envelope() }], NOW - 1);
-  assert.deepEqual(store.list(key(1), 0, 10).messages.map((m) => m.receivedAt), [NOW, NOW - 3600]);
+  assert.deepEqual(store.list(key(1), 0, 10).messages.map((m) => m.receivedAt), [NOW, NOW - 60]);
 });
 
 test('the ids are distinct and do not come from a counter', () => {

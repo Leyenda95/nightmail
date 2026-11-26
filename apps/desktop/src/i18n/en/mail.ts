@@ -70,6 +70,7 @@ export default {
   },
   // pieces.ts
   copied: 'Copied',
+  copiedSecret: (seconds: number): string => `Copied. It will be cleared from the clipboard in ${seconds} seconds.`,
   copyFailed: "Couldn't copy. Select it and press Ctrl+C.",
   // sanitize.ts
   imageUnavailable: 'image not available',

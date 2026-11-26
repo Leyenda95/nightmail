@@ -21,6 +21,9 @@ export default {
     syncing: 'Syncing…',
     syncAgain: 'Sync again',
     exitDeferred: 'A payment wallet operation is under way. The app will close on its own when it finishes.',
+    // components/Campo.tsx: the eye button of the password fields.
+    showPassword: 'Show password',
+    hidePassword: 'Hide password',
   },
   // screens/Inbox.tsx
   inbox: {
@@ -51,6 +54,8 @@ export default {
     firstIntro: "You don't have any yet. It takes two steps:",
     firstStep1: "Choose a plan. There's a free one, with 1 mailbox and 2 aliases.",
     firstStep2: 'Create your mailbox with any name you like, or a random alias.',
+    // Read before a step already done (its number is replaced by a check mark).
+    stepDone: 'Done.',
     choosePlan: 'Choose a plan',
     createAddress: 'Create an address',
     copyAddress: 'Copy the address',
@@ -173,7 +178,7 @@ export default {
       rateLimited: "You've sent many messages in a short time and the server asks you to wait.",
       tooLarge: "The NightMail server doesn't accept a message this large.",
       network: "The NightMail server didn't respond.",
-      chainUnavailable: "The recipient's address couldn't be checked on Midnight.",
+      chainUnavailable: "The recipient's address couldn't be checked.",
       failed: "The NightMail server didn't accept the message.",
     },
     retryLater: 'You can try again with the Retry button.',
@@ -208,7 +213,6 @@ export default {
     mailboxes: 'Mailboxes',
     aliases: 'Aliases',
     sent: 'Sent',
-    seedPhrase: 'Recovery phrase',
     lock: 'Lock',
     locking: 'Locking…',
     logOut: 'Log out',

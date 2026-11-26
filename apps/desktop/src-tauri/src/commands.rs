@@ -13,7 +13,7 @@ use ts_rs::TS;
 use crate::accounts::{AccountId, AccountView, Accounts, DeleteError};
 use crate::app::{
     App, AppError, AppStatus, CoreError, FlagsInput, MessageDetail, MessageQuery, MessageView, PeriodInput, PlanView, Secret,
-    SeedPhrase, SentDetail, SentQuery, SentView, ServerHealth, WalletView,
+    SeedDraft, SeedPhrase, SentDetail, SentQuery, SentView, ServerHealth, WalletView,
 };
 use crate::instance::ProfileLock;
 use crate::keys;
@@ -153,9 +153,24 @@ pub async fn app_status(state: State<'_>) -> Reply<AppStatus> {
     Ok(state.app()?.status().await)
 }
 
+/// Creating a profile, step 1: the new words, kept only in the core's memory until `create_seed` or
+/// `discard_seed_draft`.
 #[tauri::command]
-pub async fn create_seed(state: State<'_>, password: Secret) -> Reply<SeedPhrase> {
-    state.app()?.create_seed(password).await
+pub async fn draft_seed(state: State<'_>) -> Reply<SeedDraft> {
+    state.app()?.draft_seed().await
+}
+
+/// Creating a profile, step 2: saves the words of `draft` sealed with the password and opens the session.
+#[tauri::command]
+pub async fn create_seed(state: State<'_>, draft: u32, password: Secret) -> Reply<()> {
+    state.app()?.create_seed(draft, password).await
+}
+
+/// Back from the words: they are dropped from memory, nothing was saved.
+#[tauri::command]
+pub async fn discard_seed_draft(state: State<'_>, draft: u32) -> Reply<()> {
+    state.app()?.discard_seed_draft(draft);
+    Ok(())
 }
 
 #[tauri::command]
@@ -597,7 +612,9 @@ pub const COMMANDS: &[&str] = &[
     "sidecar_ping",
     "server_ping",
     "app_status",
+    "draft_seed",
     "create_seed",
+    "discard_seed_draft",
     "unlock",
     "lock",
     "restore_seed",

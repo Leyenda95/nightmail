@@ -65,7 +65,7 @@ async fn profile(label: &str) -> (Profile, Option<Duration>) {
     if app.status().await.has_seed {
         app.unlock(password()).await.unwrap_or_else(|e| panic!("{label}: unlock: {e:?}"));
     } else {
-        app.create_seed(password()).await.unwrap();
+        app.create_seed_now(password()).await.unwrap();
     }
     let session = app.session().await.unwrap();
     let kept = session.addresses().await.unwrap().into_iter().find(|a| a.name.is_some() && !a.display.is_empty());
