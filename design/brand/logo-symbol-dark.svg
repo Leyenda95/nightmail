@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-labelledby="t">
+  <title id="t">NightMail</title>
+  <!-- The two wings: identical drops (round tip of radius 5.6 at 16.5 from the pivot (23,25)), opened 39° to each side of the diagonal. They touch neither each other nor the lantern. -->
+  <path fill="#f5f0e4" d="M23.31 22.02 19.41 10.37A5.6 5.6 0 1 1 29.55 11.43z"/>
+  <path fill="#f5f0e4" d="M25.98 24.69 36.57 18.45A5.6 5.6 0 1 1 37.63 28.59z"/>
+  <!-- The lantern: the light of one's own. Version for dark backgrounds: wings in Alba, lantern in Lumbre. -->
+  <circle cx="13.5" cy="34.5" r="10.5" fill="#ffcf5c"/>
+</svg>

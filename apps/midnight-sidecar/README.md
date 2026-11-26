@@ -1,0 +1,5 @@
+# Midnight helper process
+
+This is the only part of the app that uses the Midnight SDK, which exists only in TypeScript. The desktop app (`apps/desktop`) launches it as a child process and speaks JSON-RPC with it, one message per line, over standard input and output. It opens no ports. It reads the `NightMailRegistry` state from the indexer, builds zero-knowledge proofs with the local proof server, and runs the wallet used to pay for a plan. It is not a server and stores nothing in the clear: the app passes it the wallet seed and the key that encrypts the wallet state it saves; while the wallet is open the keys are in its memory. It never talks to the mail server; the app does that. It shares registry logic with the server through `packages/midnight`, and the messages it exchanges with the app are pinned by the examples in `packages/test-vectors/rpc`. To build and run the whole app, see the [root README](../../README.md).
+
+**Run its tests** (from the repository root, with the contracts compiled): `npm test -w apps/midnight-sidecar`. The devnet suite (`npm run test:devnet -w apps/midnight-sidecar`) needs the local network running.

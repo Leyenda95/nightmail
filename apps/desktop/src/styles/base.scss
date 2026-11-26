@@ -1,0 +1,15 @@
+// Base stylesheet (GPLv3), compiled from vendor/base-styles
+// (see tools/vendor-base-styles.sh). Styles only: the React components are our own.
+// Colours do not come from here: the brand theme sets them (design/brand, see main.tsx).
+@use 'proton-mail';
+// The .button-solid-norm, .button-outline-weak... classes come from the separate button SCSS.
+// Only its SCSS is used; the React buttons are our own.
+@use '@proton/atoms/src/Button/ButtonLike';
+
+// The layout fills the whole window (body already has block-size: 100% in the base stylesheet).
+html,
+#root {
+	block-size: 100%;
+}
+
+// The base stylesheet sets `overflow: hidden` on body: each panel scrolls on its own (app.css).

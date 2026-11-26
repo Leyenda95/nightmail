@@ -1,0 +1,14 @@
+{
+  "note": "wallet.open: seed and state key (32-byte hex) and state folder (absolute path). Example values.",
+  "params": {
+    "seed": "5151515151515151515151515151515151515151515151515151515151515151",
+    "stateKey": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "stateDir": "/home/ejemplo/.local/share/nightmail/wallet"
+  },
+  "result": {
+    "unshieldedAddress": "mn_addr_undeployed1example",
+    "shieldedAddress": "mn_shield-addr_undeployed1example",
+    "restored": true,
+    "stateDiscarded": false
+  }
+}

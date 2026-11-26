@@ -1,0 +1,36 @@
+{
+  "name": "nightmail",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Private email provider on Midnight: not even the operator knows which addresses are yours",
+  "type": "module",
+  "engines": {
+    "node": ">=24.12.0 <25"
+  },
+  "workspaces": [
+    "apps/desktop",
+    "apps/midnight-sidecar",
+    "apps/server",
+    "contracts",
+    "packages/core-ts",
+    "packages/midnight",
+    "tools/demo-mailer",
+    "tools/demo-seed"
+  ],
+  "scripts": {
+    "demo": "bash tools/dev/demo.sh",
+    "demo:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/dev/demo.ps1",
+    "devnet:up": "docker compose -f infra/devnet/docker-compose.yml up -d --wait",
+    "devnet:down": "docker compose -f infra/devnet/docker-compose.yml stop",
+    "devnet:status": "docker compose -f infra/devnet/docker-compose.yml ps",
+    "test": "npm test --workspaces --if-present && cd apps/desktop/src-tauri && cargo test",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint:rust": "cd apps/desktop/src-tauri && cargo clippy --all-targets -- -D warnings"
+  },
+  "overrides": {
+    "@midnightntwrk/ledger-v9": "1.0.2",
+    "@midnightntwrk/onchain-runtime-v4": "4.0.2",
+    "@midnight-ntwrk/platform-js": "3.0.0",
+    "@midnight-ntwrk/onchain-runtime-v3": "3.1.2"
+  }
+}

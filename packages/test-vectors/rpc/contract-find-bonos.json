@@ -1,0 +1,16 @@
+{
+  "note": "contract.findBonos: the position of each requested leaf in the bono tree (null if absent), in the same order, with the block that was searched and how many leaves the tree has. minLeafCount (optional): the largest leafCount the core has seen; with fewer leaves, STALE_STATE behind. The leaves are those of contract-hashes.json (free and paid bonoLeaf).",
+  "params": {
+    "contractAddress": "adadadadadadadadadadadadadadadadadadadadadadadadadadadadadadadad",
+    "leaves": [
+      "1ab1c4e9ba99277cbde9dfa89707cdfb0791f9e74e0b5e34ce1fe60430c7ef2a",
+      "071f7433d23443b8bebca70adf67901ff6bc76fc1af016a71f6f1dd3ec85a289"
+    ],
+    "minLeafCount": 3
+  },
+  "result": {
+    "blockHeight": 100,
+    "leafCount": 3,
+    "positions": [0, null]
+  }
+}

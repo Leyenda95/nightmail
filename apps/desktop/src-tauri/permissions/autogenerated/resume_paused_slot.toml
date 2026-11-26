@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resume-paused-slot"
+description = "Enables the resume_paused_slot command without any pre-configured scope."
+commands.allow = ["resume_paused_slot"]
+
+[[permission]]
+identifier = "deny-resume-paused-slot"
+description = "Denies the resume_paused_slot command without any pre-configured scope."
+commands.deny = ["resume_paused_slot"]

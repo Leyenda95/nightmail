@@ -1,0 +1,10 @@
+{
+  "note": "wallet.faucet: TestToken only, on test networks.",
+  "params": {
+    "tokenAddress": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+    "amount": "5000000"
+  },
+  "result": {
+    "txId": "abababababababababababababababababababababababababababababababab"
+  }
+}

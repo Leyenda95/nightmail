@@ -1,0 +1,5 @@
+# Local Midnight network
+
+`docker-compose.yml` starts a local Midnight network in Docker for development, tests and the demo: a node (`127.0.0.1:9944`), an indexer (`127.0.0.1:8088`) and a proof server (`127.0.0.1:6300`). All ports are bound to `127.0.0.1` only. It is not part of NightMail itself. On preprod the node and indexer are reached through Blockfrost instead, but the server and the payer still need a proof server on `127.0.0.1:6300`. The network id is `undeployed`. The mail server and the payer use these ports when `NIGHTMAIL_NETWORK=undeployed`. The desktop app and its helper process always use them for now. It uses the standard devnet ports, so it cannot run next to another local Midnight devnet. Start it with `npm run devnet:up`, check it with `npm run devnet:status` and stop it with `npm run devnet:down`; for the full setup, see the [root README](../../README.md).
+
+**Run its tests**: there are none here. Once it is up, `npm run test:devnet -w apps/server` and `npm run test:devnet -w apps/midnight-sidecar` run against it.

@@ -1,0 +1,5 @@
+# Contracts
+
+This folder holds the two Compact contracts NightMail runs on Midnight. `src/NightMailRegistry.compact` is the registry of plans and addresses: it stores the issued plans, the slots already spent and the public keys of each address, and its header explains what is public and what stays private. `src/TestToken.compact` is the test NightMail token with a faucet, for test networks only. The contracts never see mail. Nothing here runs on its own: `npm run compile -w contracts` writes the compiled contracts and ZK keys to `managed/`, which `packages/midnight` and the helper process (`apps/midnight-sidecar`) import, and the server deploys them with `deploy-contracts`. `npm run vectors -w contracts` regenerates `packages/test-vectors/contract/registry.json`. You need the Compact compiler 0.36.1; for setup, see the [root README](../README.md).
+
+**Run its tests** (from the repository root): `npm test -w contracts`. It compiles a simulator build (`managed/*-sim`, no ZK keys) and runs the tests against it, with no network needed.

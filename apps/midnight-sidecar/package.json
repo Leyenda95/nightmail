@@ -1,0 +1,33 @@
+{
+  "name": "@nightmail/midnight-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NightMail helper process: talks to Midnight (TypeScript SDK) over JSON-RPC on stdio",
+  "type": "module",
+  "engines": {
+    "node": ">=24.12.0 <25"
+  },
+  "scripts": {
+    "start": "node src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "pretest": "node ../../packages/midnight/scripts/require-compiled.ts",
+    "test": "node --test \"test/*.test.ts\"",
+    "test:devnet": "node --max-old-space-size=4096 --test --test-concurrency=1 --test-timeout=3600000 \"test-devnet/*.devnet.ts\""
+  },
+  "dependencies": {
+    "@midnight-ntwrk/compact-js": "3.0.2",
+    "@midnight-ntwrk/midnight-js-contracts": "5.0.1",
+    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "5.0.1",
+    "@midnight-ntwrk/midnight-js-types": "5.0.1",
+    "@midnightntwrk/ledger-v9": "1.0.2",
+    "@midnightntwrk/wallet-sdk": "2.0.1",
+    "@midnightntwrk/wallet-sdk-capabilities": "4.0.1",
+    "@nightmail/contracts": "0.1.0",
+    "@nightmail/midnight": "0.1.0"
+  },
+  "devDependencies": {
+    "@midnight-ntwrk/compact-runtime": "0.21.0",
+    "@types/node": "^24.19.2",
+    "typescript": "~5.9.3"
+  }
+}

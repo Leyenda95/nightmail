@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-forget-pending-bono"
+description = "Enables the forget_pending_bono command without any pre-configured scope."
+commands.allow = ["forget_pending_bono"]
+
+[[permission]]
+identifier = "deny-forget-pending-bono"
+description = "Denies the forget_pending_bono command without any pre-configured scope."
+commands.deny = ["forget_pending_bono"]

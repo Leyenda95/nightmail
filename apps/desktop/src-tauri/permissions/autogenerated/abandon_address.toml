@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-abandon-address"
+description = "Enables the abandon_address command without any pre-configured scope."
+commands.allow = ["abandon_address"]
+
+[[permission]]
+identifier = "deny-abandon-address"
+description = "Denies the abandon_address command without any pre-configured scope."
+commands.deny = ["abandon_address"]

@@ -1,0 +1,21 @@
+{
+  "note": "STALE_STATE error of contract.proveCall (and of contract.findBonos with minLeafCount): the indexer state cannot be used for proving. data.reason: old (block older than the freshness limit, 120 s), future (block more than 60 s ahead of the local clock: the computer clock is behind), behind (fewer leaves in the bono tree than minLeafCount). data.ageMs: local clock minus the block time, in ms (negative if the block is ahead). data.leafCount: only with behind, the leaves of the tree that was read (example in \"behind\").",
+  "error": {
+    "code": -32010,
+    "message": "Stale chain state",
+    "data": {
+      "reason": "old",
+      "ageMs": 125000
+    }
+  },
+  "behind": {
+    "reason": "behind",
+    "ageMs": 4000,
+    "leafCount": 41
+  },
+  "reasons": [
+    "old",
+    "future",
+    "behind"
+  ]
+}

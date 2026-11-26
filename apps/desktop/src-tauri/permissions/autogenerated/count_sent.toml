@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-count-sent"
+description = "Enables the count_sent command without any pre-configured scope."
+commands.allow = ["count_sent"]
+
+[[permission]]
+identifier = "deny-count-sent"
+description = "Denies the count_sent command without any pre-configured scope."
+commands.deny = ["count_sent"]

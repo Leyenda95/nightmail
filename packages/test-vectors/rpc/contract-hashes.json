@@ -1,0 +1,47 @@
+{
+  "note": "contract.hashes with the inputs of ../contract/registry.json: the results are its vectors (and the alias text of its aliasKey). 4294967295 = noExpiry.",
+  "params": {
+    "contractAddress": "adadadadadadadadadadadadadadadadadadadadadadadadadadadadadadadad",
+    "ops": [
+      { "op": "idK", "s": "5151515151515151515151515151515151515151515151515151515151515151", "k": 1 },
+      { "op": "leaf", "id": "251036843701b78fad376cfe904f789831d07c0aee6f56abe0cc0a9b529637be", "plan": "free", "validUntil": 4294967295 },
+      { "op": "leaf", "id": "251036843701b78fad376cfe904f789831d07c0aee6f56abe0cc0a9b529637be", "plan": "paid", "validUntil": 4294967295 },
+      { "op": "slotNul", "s": "5151515151515151515151515151515151515151515151515151515151515151", "kind": "mailbox", "j": 3, "gen": 0 },
+      { "op": "slotNul", "s": "5151515151515151515151515151515151515151515151515151515151515151", "kind": "alias", "j": 3, "gen": 0 },
+      { "op": "slotNul", "s": "5151515151515151515151515151515151515151515151515151515151515151", "kind": "mailbox", "j": 3, "gen": 1 },
+      { "op": "normalizeName", "name": "Juan.Perez" },
+      { "op": "addrKey", "name": "Juan.Perez" },
+      {
+        "op": "aliasAddrKey",
+        "encPk": "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
+        "authPk": "a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7",
+        "slotNul": "5f1cf3b9e2515b8b450a241d37d988943a89fae05b1cd4d78b8a7956adee403e"
+      },
+      {
+        "op": "commit",
+        "addrKey": "621068aeef170d87aab62215f32c563c6ef3d198cf39b86a0fb109c4d2046c54",
+        "encPk": "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
+        "authPk": "a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7",
+        "salt": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+        "slotNul": "d16cd513a552583fe5c1f718aa72a50f24a50fa2341a380a42a2e080008a95ec"
+      },
+      { "op": "aliasAddress", "addrKey": "8b1353356240f350c37992b8f2e30229039937485f6ef9a8c764994702ae7979" }
+    ]
+  },
+  "result": {
+    "ctx": "adadadadadadadadadadadadadadadadadadadadadadadadadadadadadadadad",
+    "results": [
+      "251036843701b78fad376cfe904f789831d07c0aee6f56abe0cc0a9b529637be",
+      "1ab1c4e9ba99277cbde9dfa89707cdfb0791f9e74e0b5e34ce1fe60430c7ef2a",
+      "071f7433d23443b8bebca70adf67901ff6bc76fc1af016a71f6f1dd3ec85a289",
+      "d16cd513a552583fe5c1f718aa72a50f24a50fa2341a380a42a2e080008a95ec",
+      "5f1cf3b9e2515b8b450a241d37d988943a89fae05b1cd4d78b8a7956adee403e",
+      "ba294c2dfe8ef1ea8c1d4d6ad6664f474aa4961c04606a6fd6a84307d100eba5",
+      "juan.perez",
+      "621068aeef170d87aab62215f32c563c6ef3d198cf39b86a0fb109c4d2046c54",
+      "8b1353356240f350c37992b8f2e30229039937485f6ef9a8c764994702ae7979",
+      "2ca50a6c52377d4da657691710fdcd2c9f37473a0f261ce874acf78b00f4f855",
+      "around.rubber.hc9n6db283sn"
+    ]
+  }
+}

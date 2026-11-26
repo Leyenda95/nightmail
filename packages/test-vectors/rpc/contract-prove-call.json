@@ -1,0 +1,37 @@
+{
+  "note": "contract.proveCall: one call per circuit (createAlias, reserveMailbox, revealMailbox) with the inputs of ../contract/registry.json, and the shape of the result (tx = proven unbalanced transaction, in hex; truncated here). 4294967295 = noExpiry; round is Uint<64> in decimal. minLeafCount (optional, in the first one): the largest leafCount the core has seen.",
+  "calls": [
+    {
+      "contractAddress": "adadadadadadadadadadadadadadadadadadadadadadadadadadadadadadadad",
+      "circuit": "createAlias",
+      "args": {
+        "encPk": "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
+        "authPk": "a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7"
+      },
+      "witnesses": { "s": "5151515151515151515151515151515151515151515151515151515151515151", "k": 0, "plan": "free", "validUntil": 4294967295, "j": 1 },
+      "minLeafCount": 3
+    },
+    {
+      "contractAddress": "adadadadadadadadadadadadadadadadadadadadadadadadadadadadadadadad",
+      "circuit": "reserveMailbox",
+      "args": { "commit": "2ca50a6c52377d4da657691710fdcd2c9f37473a0f261ce874acf78b00f4f855", "round": "8" },
+      "witnesses": { "s": "5151515151515151515151515151515151515151515151515151515151515151", "k": 1, "plan": "paid", "validUntil": 4294967295, "j": 3 }
+    },
+    {
+      "contractAddress": "adadadadadadadadadadadadadadadadadadadadadadadadadadadadadadadad",
+      "circuit": "revealMailbox",
+      "args": {
+        "name": "Juan.Perez",
+        "encPk": "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
+        "authPk": "a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7",
+        "salt": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+        "slotNul": "d16cd513a552583fe5c1f718aa72a50f24a50fa2341a380a42a2e080008a95ec",
+        "nameCipher": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1"
+      }
+    }
+  ],
+  "result": {
+    "tx": "6d69646e696768743a7472616e73616374696f6e",
+    "blockHeight": 100
+  }
+}

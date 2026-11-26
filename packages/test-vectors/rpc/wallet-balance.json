@@ -1,0 +1,17 @@
+{
+  "note": "wallet.sync and wallet.balance (params {}) return WalletBalance; amounts in decimal.",
+  "params": {},
+  "result": {
+    "synced": true,
+    "night": "2500000",
+    "unregisteredNight": "500000",
+    "dust": "1200000000",
+    "dustCoins": 2,
+    "tokens": [
+      {
+        "color": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+        "amount": "5000000"
+      }
+    ]
+  }
+}

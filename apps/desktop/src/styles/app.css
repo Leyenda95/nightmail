@@ -1,0 +1,1160 @@
+/*
+ * NightMail: the interface's own styles (`nm-*` classes).
+ *
+ * Built on the base stylesheet's variables (already filled in by the "Luciérnagas" theme) and the `--nm-*` tokens: no colour
+ * is written by hand here. The mail paper is always light (`--nm-alba-0`) because the sender's HTML is
+ * designed for a white background.
+ *
+ * Imported in main.tsx AFTER base.scss, tokens.css, theme-base.css and brand.css: it changes no theme
+ * variable, it only uses them, and at equal specificity its rules win over the base stylesheet's.
+ *
+ * What is NOT here comes from the base stylesheet and is already in the app: `.button*`, `.field`, `.textarea`, `.meter-bar`,
+ * `.sr-only`, `.text-monospace`, utilities (`w-full`...), the reset and the base typography.
+ */
+
+/* ------------------------------------------------------------------ base */
+.nm-raiz {
+  block-size: 100%;
+  background: var(--background-norm);
+  color: var(--text-norm);
+  font-family: var(--nm-font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+/* The interface is not selectable as text (a click on empty space must not mark anything). Selection is allowed again
+   where copying makes sense; `.nm-semilla` (text) and `.nm-copiable` (all) say so further down. WebKitGTK 2.52 only
+   understands `-webkit-user-select` (`CSS.supports("user-select", "none")` is false) and `vite dev` does not add the
+   prefix (only the build does), hence it is written by hand in each rule. */
+.nm-raiz { -webkit-user-select: none; user-select: none; }
+.nm-raiz :where(input, textarea),
+.nm-lector__cab, .nm-texto, .nm-filas__dir, .nm-datos dd, .nm-aviso, .nm-enlaces__destino, .nm-adjuntos__nombre,
+.nm-lista__titulo.text-monospace, .nm-campo__error { -webkit-user-select: text; user-select: text; }
+/* Scrollbars. The base stylesheet sets `scrollbar-width: thin` and `scrollbar-color` on everything; in WebKitGTK 2.52 those two
+   standard properties override `::-webkit-scrollbar` and leave the native (Adwaita, overlay) bar, which without a GPU
+   repaints endlessly while it exists: a single scrollable area measured ~90 % of a core with the window idle; with
+   `::-webkit-scrollbar`, 0. They are reset to `auto` so the base stylesheet's `::-webkit-scrollbar` rules apply
+   (thin, the thumb only on hover or focus). The mail paper carries its own (`srcdoc.ts`). */
+@supports (scrollbar-width: auto) {
+  html:not(.feature-scrollbars-off) body,
+  html:not(.feature-scrollbars-off) body * { scrollbar-width: auto !important; scrollbar-color: auto !important; }
+}
+/* Reset of what hangs from `.nm-raiz`. Note: `:where()` only zeroes its own weight; the whole selector weighs
+   as much as `.nm-raiz`, (0,1,0), and this file comes last, so these rules WIN over a bare base class: the font
+   of `.button-large` and `.text-*` on a <button>, and `.m-*` / `.mb-*` on a paragraph, list or heading. This is
+   deliberate: margins come from the containers (`nm-pila`, `nm-fila`, `gap`), not from each element. The pieces in
+   `components/` rely on it: outside `.nm-raiz` the base margins return. */
+.nm-raiz :where(p, ul, ol, dl, dd, h1, h2, h3, h4, pre) { margin: 0; }
+.nm-raiz :where(ul, ol) { padding: 0; list-style: none; }
+.nm-raiz :where(button) { font: inherit; }
+
+/* Each icon carries its own stroke and fill in `currentColor` (components/Icon.tsx): the svg only sets the size. */
+.nm-ic { display: inline-block; vertical-align: middle; inline-size: 1rem; block-size: 1rem; flex: none; }
+.nm-ic--lg { inline-size: 1.25rem; block-size: 1.25rem; }
+
+/* Visible focus on what is not a base button or field (those carry their own). */
+.nm-nav__item:focus-visible,
+.nm-dir:focus-visible,
+.nm-msg:focus-visible,
+.nm-cupo:focus-visible,
+.nm-cuenta:focus-visible,
+.nm-side__mas:focus-visible,
+.nm-fila__act:focus-visible,
+.nm-estado:focus-visible,
+.nm-pliegue > summary:focus-visible,
+.nm-texto:focus-visible,
+.nm-papel iframe:focus-visible,
+.nm-enlace-txt:focus-visible,
+.nm-copiar__boton:focus-visible,
+.nm-info__boton:focus-visible {
+  outline: 2px solid var(--focus-outline);
+  outline-offset: -2px;
+  box-shadow: 0 0 0 0.1875rem var(--focus-ring);
+}
+/* Keyboard-only focus (modality.ts): while the mouse is in charge no ring shows, not even the one that appears when
+   code moves focus (list title, reader, the button that opened a dialog...). Text fields stay as they are: they
+   show focus with a click too (that is where one types). The app's and the browser's rings are `outline`; the
+   halo and border (the base buttons' and the app's) come from --focus-ring and --focus-outline: the border
+   returns to each button's own. The rules of each ring stay the same: this only turns them off. */
+:root[data-nm-entrada="puntero"] :focus-visible:not(input:not([type="checkbox"], [type="radio"]), textarea, select) {
+  outline: none;
+  --focus-ring: transparent;
+  --focus-outline: var(--button-default-border-color, transparent);
+}
+:root[data-nm-entrada="puntero"] .button:focus-visible:hover { --focus-outline: var(--button-hover-border-color, transparent); }
+/* What is drawn outside the focused element (with :has) does not inherit those variables: it is turned off separately. */
+:root[data-nm-entrada="puntero"] .nm-eleccion:has(input:focus-visible),
+:root[data-nm-entrada="puntero"] .nm-casilla:has(input:focus-visible) .nm-casilla__caja { outline: none; box-shadow: none; }
+/* The handle receives focus when dragged: its hover stripe is not turned off with the ring. */
+:root[data-nm-entrada="puntero"] .nm-tirador:hover::after,
+:root.nm-arrastrando[data-nm-entrada="puntero"] .nm-tirador::after { background: var(--interaction-norm); }
+
+/* Base button with an icon: inline, centred and not wrapping. */
+.nm-btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; white-space: nowrap; }
+.nm-btn[disabled] { pointer-events: none; opacity: 0.5; }
+/* Unavailable but still reachable with Tab (it keeps focus and can say why): it looks disabled and does nothing. */
+.nm-btn[aria-disabled="true"] { opacity: 0.5; cursor: default; }
+/* Danger button: truly red in the dark theme too (--nm-peligro-solido-*, design/brand). */
+.nm-raiz .button-solid-danger {
+  --button-default-background-color: var(--nm-peligro-solido);
+  --button-hover-background-color: var(--nm-peligro-solido-hover);
+  --button-active-background-color: var(--nm-peligro-solido-activo);
+  --button-default-text-color: var(--nm-peligro-solido-texto);
+  --button-hover-text-color: var(--nm-peligro-solido-texto);
+  --button-active-text-color: var(--nm-peligro-solido-texto);
+}
+.nm-enlace-txt { color: var(--link-norm, var(--interaction-norm)); text-decoration: underline; cursor: pointer; border-radius: var(--border-radius-sm); }
+
+.nm-fila { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.nm-fila--fin { justify-content: flex-end; }
+.nm-pila { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.75rem; }
+.nm-pila--s { gap: 0.375rem; }
+.nm-pila--l { gap: 1.25rem; }
+.nm-suave { color: var(--text-weak); }
+.nm-pista { color: var(--text-hint); font-size: 0.8125rem; }
+.nm-num { font-family: var(--nm-font-mono); font-feature-settings: var(--nm-font-mono-features); font-variant-numeric: tabular-nums; }
+
+/* ------------------------------------------------------------------ the light */
+/* The brand's own marker: "yours / new / active". Never decoration nor error. */
+.nm-luz {
+  display: inline-block;
+  inline-size: 0.5rem;
+  block-size: 0.5rem;
+  border-radius: 50%;
+  background: var(--nm-marca);
+  box-shadow: var(--nm-halo);
+  flex: none;
+}
+.nm-luz--apagada { background: var(--nm-marca-apagada); box-shadow: none; }
+/* STILL BY DEFAULT. Nothing that repeats endlessly moves by default: the address lights and the front screen's night
+   stay at rest (light fully on, yours in its place). The beats stay defined but only apply with `<html data-movimiento>`.
+   To turn it back on, add `data-movimiento` to `<html>` in `index.html`.
+   What only moves while something is genuinely working (`nm-luz--trabaja` with "Abriendo NightMail..." and the
+   `Progreso` stages, the "Actualizar" spin while syncing and the wait icon's spin, `espera`) does NOT depend on this switch. */
+/* Each address beats with a different period (coprime): they never synchronise. */
+/* Cost: without a GPU (WebKitGTK on WSLg) every frame is painted on the CPU; with a continuous curve, five beating
+   lights asked for 60 frames per second (~95 % of a core, measured). With `steps()` it only paints at each step (12 per
+   rise or fall: ~0.05 opacity every ~0.2 s, unnoticeable): ~80 % less. And with the window unfocused or hidden they
+   stop (the stillness block, `stillness.ts`).
+   SINGLE SWITCH, steps or curve: `--nm-latido-paso` rules the lights that beat and the front screen's night;
+   `--nm-trabaja-paso`, "working". Setting both to `ease-in-out` restores smooth motion (more CPU). */
+:root { --nm-latido-paso: steps(12); --nm-trabaja-paso: steps(8); }
+:root[data-movimiento] .nm-luz--late { animation: nm-latido 5.3s var(--nm-latido-paso) infinite; }
+:root[data-movimiento] .nm-luz--late-2 { animation-duration: 7.1s; animation-delay: -2s; }
+:root[data-movimiento] .nm-luz--late-3 { animation-duration: 11.3s; animation-delay: -6s; }
+:root[data-movimiento] .nm-luz--late-4 { animation-duration: 13.7s; animation-delay: -4s; }
+:root[data-movimiento] .nm-luz--late-5 { animation-duration: 17.9s; animation-delay: -9s; }
+/* Something running (proof, payment, wallet): a shorter beat. It always comes with the stage text. */
+.nm-luz--trabaja { animation: nm-latido 1.6s var(--nm-trabaja-paso) infinite; }
+/* Mail arrives or an address lights up: a single flash. */
+.nm-luz--destello { animation: nm-destello var(--nm-destello-duracion) var(--nm-destello-curva) 1; }
+
+@keyframes nm-latido { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes nm-destello {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgb(var(--nm-luz-rgb) / 0); }
+  18% { transform: scale(1.7); box-shadow: 0 0 0 6px rgb(var(--nm-luz-rgb) / 0.28), 0 0 18px 4px rgb(var(--nm-luz-rgb) / 0.6); }
+  100% { transform: scale(1); box-shadow: var(--nm-halo); }
+}
+/* Reduced motion: only decorative things are removed (beats and flashes of the lights). The wait indicators
+   (`nm-espera__gira`, `nm-fila__gira` and `nm-luz--trabaja`) ALWAYS move: Windows turns off "Animation effects" on many
+   machines and WebView2 turns that into `prefers-reduced-motion`; with them still, the app looked hung. They are slow,
+   gentle spins or beats, nothing flashes.
+   This block is not enough on its own. The base stylesheet (`_media.scss`) forces `animation-duration: .01ms !important` on the whole document
+   for `*:not(.keep-motion)`, so each wait indicator also carries the `keep-motion` class in the TSX. The same
+   goes for the front screen's slogans (`.nm-lema`): their fade always shows. */
+@media (prefers-reduced-motion: reduce) {
+  .nm-luz:not(.nm-luz--trabaja) { animation: none !important; }
+}
+
+/* ------------------------------------------------------------------ pieces */
+.nm-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding-inline: 0.5rem;
+  border: 1px solid var(--field-norm);
+  border-radius: 99px;
+  color: var(--text-weak);
+  font-size: 0.6875rem;
+  line-height: 1.25rem;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+/* The text uses the "major-1" tone: on the sidebar's weak background the base tone falls to 4.47 : 1. */
+.nm-tag--atencion { border-color: var(--signal-warning); color: var(--signal-warning-major-1); }
+.nm-tag--exito { border-color: var(--signal-success); color: var(--signal-success-major-1); }
+
+/* Notice: what happened, what is still safe, what you can do. Always with icon and text. */
+.nm-aviso {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  padding: 0.625rem 0.875rem;
+  border-radius: var(--border-radius-md);
+  background: var(--background-weak);
+  color: var(--text-norm);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+.nm-aviso > .nm-ic { margin-block-start: 0.15rem; color: var(--text-weak); }
+.nm-aviso__cuerpo { flex: 1; min-inline-size: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.125rem; }
+.nm-aviso__cuerpo ul { padding-inline-start: 1.1rem; list-style: disc; }
+.nm-aviso__acciones { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-block-start: 0.5rem; }
+.nm-aviso--error { background: var(--signal-danger-minor-2); }
+.nm-aviso--error > .nm-ic { color: var(--signal-danger); }
+.nm-aviso--atencion { background: var(--signal-warning-minor-2); }
+.nm-aviso--atencion > .nm-ic { color: var(--signal-warning); }
+.nm-aviso--exito { background: var(--signal-success-minor-2); }
+.nm-aviso--exito > .nm-ic { color: var(--signal-success); }
+.nm-aviso--info { background: var(--signal-info-minor-2); }
+.nm-aviso--info > .nm-ic { color: var(--signal-info); }
+/* Global strip: above the panels, edge to edge. */
+.nm-aviso--franja { border-radius: 0; padding: 0.625rem 1.25rem; border-block-end: 1px solid var(--border-weak); }
+
+/* A long operation in progress: the light beats and the text says the real stage the core sends. */
+.nm-progreso {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 0.875rem;
+  border-radius: var(--border-radius-md);
+  background: var(--background-weak);
+}
+.nm-progreso > .nm-luz { margin-block-start: 0.4rem; }
+.nm-progreso__etapa { font-weight: var(--nm-font-weight-semibold); }
+.nm-progreso__nota { color: var(--text-weak); font-size: 0.8125rem; }
+
+/* Field with the label above. */
+.nm-campo { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.375rem; }
+.nm-campo__label { font-weight: var(--nm-font-weight-semibold); }
+.nm-campo__ayuda { color: var(--text-hint); font-size: 0.8125rem; }
+.nm-campo__error { display: flex; align-items: flex-start; gap: 0.375rem; color: var(--signal-danger); font-size: 0.8125rem; font-weight: var(--nm-font-weight-semibold); }
+.nm-campo__error .nm-ic { margin-block-start: 0.1rem; }
+.nm-campo__ok { display: flex; align-items: center; gap: 0.375rem; color: var(--signal-success); font-size: 0.8125rem; font-weight: var(--nm-font-weight-semibold); }
+.nm-campo .textarea { font-family: var(--nm-font-mono); min-block-size: 6.5rem; line-height: 1.6; resize: none; }
+/* The base stylesheet only brings the error border for `.field`; the `.textarea`'s is set here, with the same rule. */
+.nm-campo .textarea[aria-invalid="true"]:not(:focus) { border-color: var(--signal-danger); }
+/* Field with a fixed suffix ("@nightmail.local"). */
+.nm-con-sufijo { display: flex; align-items: stretch; }
+.nm-con-sufijo .field { flex: 1; min-inline-size: 0; padding-inline: 0.75rem; border-start-end-radius: 0; border-end-end-radius: 0; font-family: var(--nm-font-mono); font-size: 0.8125rem; }
+.nm-con-sufijo__sufijo {
+  display: flex;
+  align-items: center;
+  padding-inline: 0.625rem;
+  border: 1px solid var(--field-norm);
+  border-inline-start: 0;
+  border-start-end-radius: var(--border-radius-md);
+  border-end-end-radius: var(--border-radius-md);
+  background: var(--background-weak);
+  color: var(--text-weak);
+  font-family: var(--nm-font-mono);
+  font-size: 0.75rem;
+}
+
+/* Seed phrase: 24 numbered words, in monospace. */
+.nm-semilla {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.375rem;
+  counter-reset: palabra;
+  font-family: var(--nm-font-mono);
+  font-feature-settings: var(--nm-font-mono-features);
+  font-size: 0.875rem;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.nm-semilla li {
+  counter-increment: palabra;
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: var(--border-radius-sm);
+  background: var(--background-weak);
+}
+.nm-semilla li::before { content: counter(palabra); min-inline-size: 1.25rem; color: var(--text-hint); text-align: end; -webkit-user-select: none; user-select: none; }
+
+/* Card of the management pages. */
+.nm-tarjeta {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.875rem;
+  padding: 1.25rem;
+  border: 1px solid var(--border-weak);
+  border-radius: var(--border-radius-lg);
+  background: var(--background-norm);
+}
+.nm-tarjeta__titulo { font-size: 1rem; font-weight: var(--nm-font-weight-bold); line-height: 1.3; }
+.nm-tarjeta__cab { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
+.nm-tarjeta--hundida { background: var(--background-weak); border-color: transparent; }
+.nm-separador { border: 0; border-block-start: 1px solid var(--border-weak); margin: 0; }
+
+/* Quota: figure + bar (the bar is the base `.meter-bar`; here only its size and neutral colour). */
+.nm-cupos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.nm-cupo-dato { display: grid; gap: 0.375rem; }
+.nm-cupo-dato__cifra { font-size: 1.5rem; font-weight: var(--nm-font-weight-bold); line-height: 1.1; }
+.nm-cupo-dato__cifra small { font-size: 0.875rem; font-weight: var(--nm-font-weight-normal); color: var(--text-weak); }
+.nm-raiz .meter-bar { --size: 0.25rem; --meter-bar-thumb-color-success: var(--nm-marca-apagada); border-radius: 99px; }
+.nm-raiz .meter-bar-thumb { border-radius: 99px; }
+
+/* Data list (wallet, restore report, Midnight status). */
+.nm-datos { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.375rem 1rem; align-items: baseline; }
+.nm-datos dt { color: var(--text-weak); }
+.nm-datos dd { min-inline-size: 0; overflow-wrap: anywhere; }
+/* The NIGHT-to-DUST registration the app does by itself (wallet), under the DUST balance. */
+.nm-dust-setup { display: flex; gap: 0.375rem; align-items: center; margin-block-start: 0.25rem; }
+.nm-copiable {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border-norm);
+  border-radius: var(--border-radius-md);
+  background: var(--background-weak);
+  font-family: var(--nm-font-mono);
+  font-feature-settings: var(--nm-font-mono-features);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  -webkit-user-select: all;
+  user-select: all;
+}
+.nm-copiable strong { color: var(--text-norm); font-weight: var(--nm-font-weight-bold); background: var(--optional-highlight-background-norm); border-radius: 3px; padding-inline: 2px; }
+/* Address with its copy button attached to the end of the text (inside the box, at the font size) and, below,
+   the notice of whether it was copied. Only the text is selected and copied (`nm-copiar__texto`), not the button. */
+.nm-copiar { display: grid; gap: 0.5rem; }
+.nm-copiar__caja { -webkit-user-select: none; user-select: none; }
+.nm-copiar__texto { font: inherit; -webkit-user-select: all; user-select: all; }
+.nm-copiar__boton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 1.25rem;
+  block-size: 1.25rem;
+  margin-block: -0.125rem;
+  margin-inline-start: 0.25rem;
+  border-radius: var(--border-radius-sm);
+  color: var(--text-weak);
+  vertical-align: middle;
+  cursor: pointer;
+}
+.nm-copiar__boton .nm-ic { inline-size: 0.875rem; block-size: 0.875rem; }
+.nm-copiar__boton:hover { background: var(--interaction-default-hover); color: var(--text-norm); }
+.nm-copiar [role="status"] { min-block-size: 1.25rem; font-size: 0.8125rem; }
+.nm-copiar__estado { color: var(--text-weak); }
+/* "i" icon with its explanation (InfoTip): the font size, like the copy one. The explanation appears above and
+   covers nothing until requested. */
+.nm-info { position: relative; display: inline-block; vertical-align: middle; }
+.nm-info__boton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 1.25rem;
+  block-size: 1.25rem;
+  margin-block: -0.125rem;
+  border-radius: var(--border-radius-sm);
+  color: var(--text-weak);
+  cursor: help;
+}
+.nm-info__boton .nm-ic { inline-size: 0.875rem; block-size: 0.875rem; }
+.nm-info__boton:hover { background: var(--interaction-default-hover); color: var(--text-norm); }
+.nm-info__texto {
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block-end: calc(100% + 0.375rem);
+  z-index: 2;
+  inline-size: max-content;
+  max-inline-size: 18rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border-norm);
+  border-radius: var(--border-radius-md);
+  background: var(--optional-background-elevated, var(--background-norm));
+  box-shadow: 0 0.5rem 1.5rem rgb(var(--shadow-default-color) / var(--shadow-lifted-opacity));
+  color: var(--text-norm);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  visibility: hidden;
+}
+/* Invisible bridge over the gap between the icon and the explanation: moving the mouse to it does not close it. */
+.nm-info__texto::before { content: ""; position: absolute; inset-inline: 0; inset-block-start: 100%; block-size: 0.5rem; }
+/* When it is visible is decided by InfoTip (mouse, focus and Escape): the component sets the class. */
+.nm-info--abierta .nm-info__texto { visibility: visible; }
+
+/* List rows with actions (addresses, bonos, half-done). */
+.nm-filas { display: grid; grid-template-columns: minmax(0, 1fr); }
+.nm-filas > li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.25rem 0.75rem; padding-block: 0.625rem; border-block-start: 1px solid var(--border-weak); }
+.nm-filas > li:first-child { border-block-start: 0; padding-block-start: 0; }
+.nm-filas > li:last-child { padding-block-end: 0; }
+.nm-filas__principal { min-inline-size: 0; display: grid; gap: 0.125rem; }
+.nm-filas__titulo { display: flex; align-items: center; gap: 0.5rem; min-inline-size: 0; }
+.nm-filas__titulo .text-monospace { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.8125rem; }
+.nm-filas__sub { color: var(--text-weak); font-size: 0.8125rem; }
+.nm-filas__ancho { grid-column: 2 / -1; }
+
+/* Purchase or creation option: a small card inside a card. */
+.nm-opcion { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.625rem; padding: 1rem; border: 1px solid var(--border-norm); border-radius: var(--border-radius-md); }
+.nm-opcion__cab { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
+.nm-opcion__titulo { font-weight: var(--nm-font-weight-bold); }
+.nm-opcion__precio { font-size: 0.8125rem; color: var(--text-weak); white-space: nowrap; }
+
+/* ------------------------------------------------------------------ dialog */
+/* A native <dialog> opened with showModal() (components/Dialogo.tsx): it brings trapped focus, Esc and focus
+   return. A flex column, NOT grid: the modal <dialog> comes with `top: 0; bottom: 0; height: fit-content`, and WebKitGTK,
+   with a grid container, resolves that height as all that is available and spreads the surplus among the rows (a
+   full-height dialog, 172 px buttons). In flex it is sized by its content. Do not set `block-size: auto` nor touch `inset`: with
+   `top: 0; bottom: 0`, `auto` stretches it again. With long content: a height cap, title and footer fixed and the body
+   scrolls. */
+.nm-dialogo {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  inline-size: min(32rem, calc(100% - 2rem));
+  max-block-size: calc(100% - 2rem);
+  overflow: hidden;
+  padding: 1.5rem;
+  border: 1px solid var(--border-weak);
+  border-radius: var(--border-radius-xl);
+  background: var(--optional-background-elevated, var(--background-norm));
+  color: var(--text-norm);
+  box-shadow: 0 1rem 3rem rgb(var(--shadow-default-color) / var(--shadow-lifted-opacity));
+}
+/* Confirmations (s) and wide content: seed phrase, restore (l). */
+.nm-dialogo--s { inline-size: min(26rem, calc(100% - 2rem)); }
+.nm-dialogo--l { inline-size: min(36rem, calc(100% - 2rem)); }
+/* Closed it is not shown: the `display` above (and the `dialog { display: block }` of the base reset) would override the
+   browser rule that hides it. */
+.nm-dialogo:not([open]) { display: none; }
+.nm-dialogo::backdrop { background: var(--backdrop-norm); }
+.nm-dialogo__titulo { flex: none; font-size: 1.125rem; font-weight: var(--nm-font-weight-bold); line-height: 1.3; }
+/* The body is the only thing that scrolls. The padding with a negative margin leaves room for the fields' focus ring
+   (`overflow` would clip it) without moving anything. */
+.nm-dialogo__cuerpo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  align-content: start;
+  min-block-size: 0;
+  overflow: auto;
+  padding: 0.25rem;
+  margin: -0.25rem;
+}
+/* If it overflows it enters the keyboard order (Dialogo.tsx): it shows where it is, like the message list. */
+.nm-dialogo__cuerpo:focus-visible {
+  outline: 2px solid var(--focus-outline);
+  outline-offset: -2px;
+  box-shadow: 0 0 0 0.1875rem var(--focus-ring);
+}
+.nm-dialogo__pie { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.5rem; margin-block-start: 0.25rem; }
+.nm-dialogo__pie .nm-btn { flex: none; }
+
+/* ------------------------------------------------------------------ frame */
+/* The sidebar is `SIDEBAR_REM` wide (prefs.ts) and never more than a third of the window: with a large font in a narrow
+   window (at 200 %, 960 px is 30 rem) the rest goes to the list or the message. What does not fit in the
+   bar is cut with "...". `.nm-main` is the container of the "Narrow windows" rules (at the end). */
+.nm-app { display: grid; grid-template-columns: min(15.5rem, 33.333%) minmax(0, 1fr); block-size: 100%; overflow: hidden; }
+.nm-main { display: flex; flex-direction: column; min-inline-size: 0; min-block-size: 0; container: nm-main / inline-size; }
+/* List width: `--nm-lista-ancho` is set by Main.tsx / Archive.tsx through the `style` prop (CSSOM, which the CSP allows)
+   from the `nm.ancho-lista` preference. Never below 17 rem, and the reader never drops below 24 rem
+   (`resize.ts`). `--dos` and `--uno` override it. */
+.nm-paneles { flex: 1; min-block-size: 0; display: grid; grid-template-columns: clamp(17rem, var(--nm-lista-ancho, 20.5rem), calc(100% - 24rem)) minmax(0, 1fr); }
+/* While the handle is dragged (`<html>` carries `.nm-arrastrando`, Inbox.tsx): nothing is selected, the cursor does
+   not change when passing over something else (neither the sidebar nor base buttons with their own cursor: hence
+   the `!important`) and the HTML mail (another document, in its `iframe`) does not swallow the mouse. WebKitGTK only understands
+   `-webkit-user-select` (see `.nm-raiz`). */
+.nm-arrastrando, .nm-arrastrando * { cursor: col-resize !important; -webkit-user-select: none !important; user-select: none !important; }
+.nm-arrastrando .nm-papel iframe { pointer-events: none; }
+.nm-paneles--uno { grid-template-columns: minmax(0, 1fr); }
+
+/* Sidebar. With a large font and little height (at 150 % in 800 px) the footer takes almost the whole bar: the centre
+   does not go below 14 rem (the menu, "Tus direcciones" and the first one) and, if that does not fit, the whole bar scrolls. */
+.nm-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-block-size: 0;
+  overflow-y: auto;
+  padding: 0.75rem;
+  background: var(--background-weak);
+  border-inline-end: 1px solid var(--border-weak);
+  container: nm-side / inline-size;
+}
+.nm-side__marca { padding: 0.375rem 0.5rem 0.125rem; }
+.nm-side__marca img { display: block; block-size: 1.625rem; inline-size: auto; }
+.nm-side__centro { flex: 1; min-block-size: 14rem; overflow: auto; display: flex; flex-direction: column; gap: 0.75rem; }
+.nm-nav { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.125rem; }
+.nm-nav__item,
+.nm-dir {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  inline-size: 100%;
+  block-size: 2.25rem;
+  padding-inline: 0.625rem;
+  border-radius: var(--border-radius-md);
+  color: var(--text-weak);
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+}
+.nm-nav__item:hover, .nm-dir:hover { background: var(--interaction-default-hover); color: var(--text-norm); }
+.nm-nav__item[aria-current], .nm-dir[aria-current] {
+  background: var(--interaction-default-active);
+  color: var(--text-norm);
+  font-weight: var(--nm-font-weight-semibold);
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+.nm-nav__num { margin-inline-start: auto; font-size: 0.75rem; font-weight: var(--nm-font-weight-semibold); font-variant-numeric: tabular-nums; }
+.nm-nav__item .nm-tag { margin-inline-start: auto; }
+/* "Bandeja de entrada": "Actualizar" and the badge sit over the right end of the button (which reserves its room).
+   The room is in rem (it grows with the font like the interface size) and depends on whether there is a badge; the name
+   does not wrap to two lines: if it does not fit, it is cut with "..." (in the narrow bar it may go to two lines, see
+   below). */
+.nm-fila { position: relative; }
+.nm-fila__ir { padding-inline-end: 2rem; }
+.nm-fila--num .nm-fila__ir { padding-inline-end: 4rem; }
+.nm-fila__txt, .nm-nav__txt { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nm-fila__fin { position: absolute; inset-block: 0; inset-inline-end: 0.25rem; display: flex; align-items: center; gap: 0.125rem; pointer-events: none; }
+.nm-fila__act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 1.5rem;
+  block-size: 1.5rem;
+  border-radius: var(--border-radius-md);
+  color: var(--text-weak);
+  cursor: pointer;
+  pointer-events: auto;
+}
+.nm-fila__act:hover { background: var(--interaction-default-active); color: var(--text-norm); }
+.nm-fila__act[aria-busy] { cursor: progress; }
+/* It only spins while syncing, in steps (8): without a GPU it costs far less than a continuous spin. */
+.nm-fila__gira { animation: nm-gira 1s steps(8) infinite; }
+/* The wait icon (ring with a dot) spins smoothly and continuously, one turn per second. */
+.nm-espera__gira { animation: nm-gira 1s linear infinite; }
+@keyframes nm-gira { to { transform: rotate(360deg); } }
+/* Unread badge with the proportions of the base `.navigation-counter-item`: taller than wide
+   (20 px high, the figure with 4 px each side: about 15 x 20 px with one digit), 4 px corners and an 11 px bold
+   number. No minimum width: with more digits it grows sideways. The radius is written out (4 px) because the brand's
+   --border-radius-sm is 5 px. The brand's action colour (--primary and its contrast). */
+.nm-fila__num {
+  padding-inline: 0.25rem;
+  border-radius: 0.25rem;
+  background: var(--primary);
+  color: var(--primary-contrast);
+  font-size: 0.6875rem;
+  font-weight: var(--nm-font-weight-bold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25rem;
+  text-align: center;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.nm-side__cabecera { display: flex; align-items: center; justify-content: space-between; margin: 0.375rem 0.25rem 0 0; }
+.nm-side__mas {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 1.5rem;
+  block-size: 1.5rem;
+  border-radius: var(--border-radius-md);
+  color: var(--text-weak);
+}
+.nm-side__mas:hover { background: var(--interaction-default-hover); color: var(--text-norm); }
+.nm-side__titulo {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+  margin: 0 0.625rem;
+  color: var(--text-hint);
+  font-size: 0.6875rem;
+  font-weight: var(--nm-font-weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.nm-dir { block-size: 2rem; gap: 0.5rem; color: var(--text-norm); }
+.nm-dir__txt { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--nm-font-mono); font-feature-settings: var(--nm-font-mono-features); font-size: 0.75rem; }
+.nm-dir--sin-nombre .nm-dir__txt { font-family: var(--nm-font-sans); color: var(--text-weak); font-size: 0.8125rem; }
+.nm-side__nota { margin: 0.125rem 0.625rem 0; color: var(--text-hint); font-size: 0.75rem; line-height: 1.4; }
+.nm-side__pie { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.375rem; padding-block-start: 0.75rem; border-block-start: 1px solid var(--border-weak); }
+.nm-cupo {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem 0.5rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--border-weak);
+  border-radius: var(--border-radius-md);
+  background: var(--background-norm);
+  color: var(--text-norm);
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+}
+.nm-cupo:hover { border-color: var(--border-norm); }
+.nm-cupo__plan { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; font-size: 0.8125rem; font-weight: var(--nm-font-weight-semibold); }
+.nm-cupo__plan .nm-ic { color: var(--text-hint); }
+.nm-cupo__dato { display: grid; gap: 0.25rem; font-size: 0.75rem; color: var(--text-weak); }
+/* The name and its figure ("Buzones 10/10") on a single line, not wrapping. */
+.nm-cupo__etiqueta { white-space: nowrap; }
+.nm-cupo__dato b { color: var(--text-norm); font-family: var(--nm-font-mono); font-weight: var(--nm-font-weight-normal); }
+.nm-estado {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  inline-size: 100%;
+  padding: 0.375rem 0.625rem;
+  border-radius: var(--border-radius-md);
+  color: var(--text-weak);
+  font-size: 0.8125rem;
+  text-align: start;
+  cursor: pointer;
+}
+.nm-estado:hover { background: var(--interaction-default-hover); }
+.nm-estado > .nm-ic:last-child { margin-inline-start: auto; color: var(--text-hint); }
+/* Status dot: green operational, yellow (the brand's warning amber) with incidents, red unavailable and grey while
+   unknown. It is only seen: the word goes in `sr-only`, without `title`. The colours are each theme's warning ones,
+   legible in light and dark. A badge-style design without halo: a tinted disc with a core of the state's colour, in
+   proportion to the disc (39 % of the radius), so it grows with the interface size. The tints
+   (`--signal-*-minor-1`) change by themselves with the theme. To change the design only this is touched: the colour goes in `--c` and the tint in `--t`. */
+.nm-punto { --c: var(--text-hint); --t: var(--background-strong); flex: none; display: inline-block; inline-size: 0.875rem; block-size: 0.875rem; border-radius: 50%; background: radial-gradient(circle closest-side, var(--c) 0 39%, var(--t) 46%); }
+.nm-punto--ok { --c: var(--signal-success); --t: var(--signal-success-minor-1); }
+.nm-punto--aviso { --c: var(--signal-warning); --t: var(--signal-warning-minor-1); }
+.nm-punto--caido { --c: var(--signal-danger); --t: var(--signal-danger-minor-1); }
+/* In the sidebar line, the dot takes the place of an icon: the text stays aligned with the rest of the menu. */
+.nm-estado > .nm-punto { margin-inline: 0.0625rem; }
+/* The service status detail opens upwards, over the rest of the bar (it does not push it). */
+.nm-estado-caja { position: relative; }
+.nm-estado-panel {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: calc(100% + 0.375rem);
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.625rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border-norm);
+  border-radius: var(--border-radius-md);
+  background: var(--optional-background-elevated, var(--background-norm));
+  box-shadow: 0 0.5rem 1.5rem rgb(var(--shadow-default-color) / var(--shadow-lifted-opacity));
+  font-size: 0.8125rem;
+}
+.nm-estado-panel .nm-ic { vertical-align: -0.15rem; }
+.nm-estado-panel__parte { display: grid; gap: 0.375rem; }
+.nm-estado-panel__parte + .nm-estado-panel__parte { padding-block-start: 0.625rem; border-block-start: 1px solid var(--border-weak); }
+/* Title and rows: the name on the left (if it does not fit, it breaks at whole words) and, on the right, the title's dot
+   or the row's word, which never breaks ("respon / de"): the right column does not shrink. */
+.nm-estado-panel__titulo,
+.nm-estado-panel__filas > div { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
+.nm-estado-panel__titulo { align-items: center; margin: 0; font-size: 0.8125rem; font-weight: var(--nm-font-weight-semibold); }
+.nm-estado-panel__filas { display: grid; gap: 0.25rem; }
+.nm-estado-panel__filas dt { min-inline-size: 0; color: var(--text-weak); overflow-wrap: normal; word-break: normal; }
+.nm-estado-panel__palabra { flex: none; white-space: nowrap; color: var(--text-hint); }
+/* The row's word, with a touch of its state's colour: green if it responds, red if not and grey with no data. */
+.nm-estado-panel__palabra--ok { color: var(--signal-success); }
+.nm-estado-panel__palabra--caido { color: var(--signal-danger); }
+/* The Settings options ("Ajustes", "Cerrar sesión"): open upwards over the bar like the service status detail. */
+.nm-menu-caja { position: relative; }
+.nm-menu-panel {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: calc(100% + 0.375rem);
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.125rem;
+  padding: 0.375rem;
+  border: 1px solid var(--border-norm);
+  border-radius: var(--border-radius-md);
+  background: var(--optional-background-elevated, var(--background-norm));
+  box-shadow: 0 0.5rem 1.5rem rgb(var(--shadow-default-color) / var(--shadow-lifted-opacity));
+}
+
+/* Message list */
+.nm-lista { position: relative; display: flex; flex-direction: column; min-block-size: 0; background: var(--optional-background-lowered, var(--background-weak)); border-inline-end: 1px solid var(--border-weak); }
+/* Width handle: 6 px centred on the list's edge, above the reader. At rest only the border shows; on hover, with focus
+   or when dragged, a 2 px stripe in the action colour. */
+.nm-tirador { position: absolute; inset-block: 0; inset-inline-end: -3.5px; z-index: 1; inline-size: 6px; cursor: col-resize; touch-action: none; -webkit-user-select: none; user-select: none; }
+.nm-tirador::after { content: ''; position: absolute; inset-block: 0; inset-inline-start: 2px; inline-size: 2px; background: transparent; transition: background-color 120ms; }
+.nm-tirador:hover::after, .nm-arrastrando .nm-tirador::after { background: var(--interaction-norm); }
+.nm-tirador:focus { outline: none; }
+.nm-tirador:focus-visible::after { background: var(--focus-outline); box-shadow: 0 0 0 0.1875rem var(--focus-ring); }
+.nm-lista__cab { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.5rem; padding: 0.875rem 0.75rem 0.75rem 1.125rem; }
+.nm-lista__titulo { font-size: 1.125rem; font-weight: var(--nm-font-weight-bold); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nm-lista__titulo.text-monospace { font-size: 0.875rem; line-height: 1.7; }
+.nm-lista__sub { color: var(--text-weak); font-size: 0.75rem; }
+.nm-lista__aviso { margin: 0 0.75rem 0.75rem; }
+.nm-msgs { flex: 1; min-block-size: 0; overflow: auto; }
+.nm-msg {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.125rem;
+  inline-size: 100%;
+  padding: 0.625rem 0.875rem 0.625rem 1.5rem;
+  border-block-start: 1px solid var(--border-weak);
+  background: var(--optional-email-item-read-background-color);
+  color: var(--optional-email-item-read-text-color);
+  text-align: start;
+  cursor: pointer;
+}
+.nm-msg:hover { background: var(--interaction-default-hover); }
+.nm-msg__de { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
+.nm-msg__de > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--nm-font-mono); font-feature-settings: var(--nm-font-mono-features); font-size: 0.75rem; }
+.nm-msg__sello { display: inline-flex; margin-inline-end: 0.25rem; vertical-align: -0.125rem; color: var(--text-weak); }
+.nm-msg__sello .nm-ic { inline-size: 0.75rem; block-size: 0.75rem; }
+.nm-msg__hora { flex: none; color: var(--text-weak); font-size: 0.75rem; }
+.nm-msg__asunto, .nm-msg__resumen { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nm-msg__resumen { color: var(--text-weak); font-size: 0.8125rem; }
+.nm-msg__para { display: flex; align-items: center; gap: 0.375rem; margin-block-start: 0.125rem; color: var(--text-hint); font-family: var(--nm-font-mono); font-feature-settings: var(--nm-font-mono-features); font-size: 0.6875rem; }
+.nm-msg__para .nm-ic { inline-size: 0.75rem; block-size: 0.75rem; }
+.nm-msg--nuevo { background: var(--background-norm); color: var(--text-norm); }
+.nm-msg--nuevo .nm-msg__de > span:first-child, .nm-msg--nuevo .nm-msg__asunto { font-weight: var(--nm-font-weight-bold); }
+.nm-msg--nuevo::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0.625rem;
+  inset-block-start: 1.05rem;
+  inline-size: 0.4375rem;
+  block-size: 0.4375rem;
+  border-radius: 50%;
+  background: var(--nm-marca);
+  box-shadow: var(--nm-halo);
+}
+.nm-msg[aria-current] {
+  background: var(--optional-email-item-selected-background-color);
+  color: var(--optional-email-item-selected-text-color);
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+/* On the tint of "open" or of hover, the hint tone does not reach 4.5 : 1: it switches to the secondary. */
+.nm-msg:hover .nm-msg__para,
+.nm-msg[aria-current] .nm-msg__para { color: var(--text-weak); }
+
+/* Reader */
+.nm-lector { display: flex; flex-direction: column; min-inline-size: 0; min-block-size: 0; background: var(--background-norm); }
+/* `flex-wrap`: if the buttons do not fit in one row (longer texts, high zoom), they drop to another instead of overflowing. */
+.nm-lector__barra { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; row-gap: 0.375rem; padding: 0.625rem 0.75rem 0.625rem 1.25rem; border-block-end: 1px solid var(--border-weak); }
+.nm-lector__barra > :last-child { margin-inline-start: auto; }
+.nm-lector__cab { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.625rem; padding: 1rem 1.25rem 0.75rem; }
+.nm-lector__asunto { font-size: 1.25rem; font-weight: var(--nm-font-weight-bold); line-height: 1.3; letter-spacing: -0.005em; overflow-wrap: anywhere; }
+.nm-meta { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.125rem 0.75rem; font-size: 0.8125rem; }
+.nm-meta dt { color: var(--text-weak); }
+.nm-meta dd { min-inline-size: 0; overflow-wrap: anywhere; }
+.nm-lector__nota { display: flex; align-items: flex-start; gap: 0.5rem; margin: 0 1.25rem 0.75rem; color: var(--text-weak); font-size: 0.8125rem; }
+.nm-lector__nota .nm-ic { margin-block-start: 0.125rem; }
+.nm-lector__aviso { margin: 0 0.75rem 0.75rem; }
+.nm-lector__sello { display: flex; align-items: center; gap: 0.375rem; margin: 0; color: var(--text-weak); font-size: 0.8125rem; }
+.nm-lector__cab .nm-lector__aviso { margin: 0; }
+/* The paper: the sender's HTML, in its sandbox iframe, fills all the free height and scrolls inside. */
+.nm-papel {
+  flex: 1;
+  display: flex;
+  min-block-size: 8rem;
+  margin: 0 0.75rem 0.75rem;
+  border: 1px solid var(--border-weak);
+  border-radius: var(--border-radius-md);
+  background: var(--nm-alba-0);
+  overflow: hidden;
+}
+.nm-papel iframe { flex: 1; inline-size: 100%; block-size: 100%; border: 0; background: var(--nm-alba-0); color-scheme: light; }
+/* Text-only mail: painted by the app (React escapes it), so it follows the theme. */
+.nm-texto {
+  flex: 1;
+  min-block-size: 8rem;
+  margin: 0 0.75rem 0.75rem;
+  padding: 1rem 1.25rem;
+  overflow: auto;
+  border: 1px solid var(--border-weak);
+  border-radius: var(--border-radius-md);
+  font-family: var(--nm-font-sans);
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.nm-lector__hueco { flex: 1; display: grid; place-items: center; padding: 2rem; color: var(--text-weak); text-align: center; }
+/* Folds at the foot: links and attachments, outside the iframe. */
+.nm-raiz details.nm-pliegue { border: 0; border-block-start: 1px solid var(--border-weak); }
+.nm-pliegue > summary { display: flex; align-items: center; gap: 0.5rem; padding: 0.625rem 1.25rem; font-size: 0.8125rem; font-weight: var(--nm-font-weight-semibold); list-style: none; cursor: pointer; }
+.nm-pliegue > summary::-webkit-details-marker { display: none; }
+.nm-pliegue > summary .nm-ic:last-child { margin-inline-start: auto; color: var(--text-hint); transition: transform 0.15s; }
+.nm-pliegue[open] > summary .nm-ic:last-child { transform: rotate(180deg); }
+.nm-pliegue__cuerpo { max-block-size: 15rem; overflow: auto; padding: 0 1.25rem 0.875rem; font-size: 0.8125rem; }
+.nm-enlaces > li { display: grid; grid-template-columns: 2rem minmax(0, 1fr) auto; align-items: center; gap: 0.125rem 0.5rem; padding-block: 0.375rem; border-block-start: 1px solid var(--border-weak); }
+.nm-enlaces__n { color: var(--text-hint); font-family: var(--nm-font-mono); }
+.nm-enlaces__txt { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nm-enlaces__txt .text-monospace { color: var(--text-weak); }
+.nm-enlaces__error { grid-column: 2 / -1; }
+.nm-adjuntos > li { display: flex; align-items: center; gap: 0.5rem; padding-block: 0.375rem; border-block-start: 1px solid var(--border-weak); }
+.nm-adjuntos > li > span:last-child { margin-inline-start: auto; color: var(--text-weak); white-space: nowrap; }
+
+/* Management pages (addresses, plan and wallet) */
+.nm-pagina { flex: 1; min-block-size: 0; overflow: auto; padding: 1.5rem 2rem 2rem; background: var(--optional-background-lowered, var(--background-weak)); }
+.nm-pagina__cab { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.25rem; margin-block-end: 1.25rem; }
+.nm-pagina__titulo { font-size: 1.5rem; font-weight: var(--nm-font-weight-bold); line-height: 1.25; letter-spacing: -0.01em; }
+.nm-pagina__cab p { max-inline-size: 86ch; color: var(--text-weak); }
+.nm-cols { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 1.25rem; align-items: start; }
+.nm-col { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.25rem; min-inline-size: 0; }
+
+/* Empty state: the illustration is always night, also in the light theme. */
+.nm-vacio { flex: 1; display: grid; justify-items: center; align-content: center; gap: 1rem; padding: 2rem; text-align: center; background: var(--background-norm); }
+.nm-vacio__noche { inline-size: min(26rem, 100%); border-radius: var(--border-radius-xl); background: var(--nm-noche-900); overflow: hidden; }
+.nm-vacio__noche img { display: block; inline-size: 100%; block-size: auto; }
+.nm-vacio__titulo { font-size: 1.25rem; font-weight: var(--nm-font-weight-bold); line-height: 1.3; }
+.nm-vacio p { max-inline-size: 46ch; color: var(--text-weak); }
+.nm-vacio__botones { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.75rem; }
+.nm-pasos { display: grid; gap: 0.5rem; counter-reset: paso; text-align: start; }
+.nm-pasos li { counter-increment: paso; display: flex; gap: 0.625rem; align-items: baseline; }
+.nm-pasos li::before { content: counter(paso); flex: none; inline-size: 1.375rem; block-size: 1.375rem; border: 1px solid var(--field-norm); border-radius: 50%; color: var(--text-weak); font-family: var(--nm-font-mono); font-size: 0.75rem; line-height: 1.25rem; text-align: center; }
+
+/* ------------------------------------------------------------------ front screen (no session) */
+.nm-portada { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); block-size: 100%; }
+.nm-portada__noche {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-block-size: 0;
+  overflow: hidden;
+  background: var(--nm-noche-950);
+  color: var(--nm-alba-100);
+  border-inline-end: 1px solid var(--border-weak);
+}
+.nm-portada__marca { padding: 2rem 2.25rem 0; }
+.nm-portada__marca img { display: block; block-size: 1.875rem; inline-size: auto; }
+.nm-portada__lemas { padding: 0 2.25rem; min-inline-size: 0; }
+/* Fixed headline and slogans: a single block (the panel shares the space among logo, block and night). Sizes scale with
+   the window width between two rem caps (so they follow the interface size) and words do not break. */
+.nm-portada__titular { max-inline-size: 22ch; font-size: clamp(1.25rem, 2.6vw, 1.75rem); font-weight: var(--nm-font-weight-bold); line-height: 1.2; letter-spacing: -0.01em; overflow-wrap: normal; hyphens: manual; }
+/* The rotating slogans, one step below the fixed headline (the reserved height is still the longest's). Fixed colour
+   of the night panel (it does not follow the theme, which is always dark there): alba 100 at 80 %, over 4.5:1 on noche 950. */
+.nm-portada__lema { margin-block-start: 0.75rem; max-inline-size: 30ch; font-size: clamp(1rem, 1.9vw, 1.25rem); font-weight: var(--nm-font-weight-semibold); line-height: 1.3; color: color-mix(in srgb, var(--nm-alba-100) 80%, transparent); overflow-wrap: normal; hyphens: manual; }
+/* Rotating slogans (`slogans.ts`): all in the same cell, so the box is as tall as the longest and the night does not
+   jump. A soft, two-stage fade (the previous one leaves, then the new one enters; never two half-faded at once). Only
+   `opacity`, and only during the change: nothing is painted in between. An exception to "still by default". The fade also
+   shows with reduced motion. The base stylesheet removes transitions on all `*:not(.keep-motion)`, so each `.nm-lema` carries
+   `keep-motion` in Welcome.tsx (and nothing else on the front screen). With the window still (`data-quieto`), the clock in
+   `slogans.ts` stops and there are no changes. */
+.nm-lemas { display: grid; }
+.nm-lema { grid-area: 1 / 1; opacity: 0; visibility: hidden; transition: opacity 450ms ease-in, visibility 0s linear 450ms; }
+.nm-lema--visible { opacity: 1; visibility: visible; transition: opacity 600ms ease-out 450ms, visibility 0s linear 450ms; }
+.nm-noche, .nm-portada__noche > svg { display: block; inline-size: 100%; block-size: auto; }
+.nm-portada__noche > svg { flex: 0 1 auto; min-block-size: 0; }
+/* Front screen motion. There is no reduced-motion @media of its own in this block, but with
+   `prefers-reduced-motion` (Windows without "Animation effects") the base stylesheet (`_media.scss`) leaves these animations at
+   0.01 ms and a single iteration: the night stays still. Only the slogans (above) carry `keep-motion` and still
+   fade. Only `opacity` and `transform`, slow and of small amplitude: nothing flashes (periods of 5 s or more, the light
+   never drops below 0.55) and the layout does not move. */
+/* In steps, like the light (above): 12 per rise or fall are indistinguishable from the continuous curve at this pace and
+   amplitude, and the front screen goes from ~1640 to ~330 cs of CPU every 10 s (WebKitGTK without a GPU, measured). */
+/* Still by default (see "STILL BY DEFAULT" above): it only beats with `<html data-movimiento>`. Without it the
+   rest pose of frames 0 %/100 % shows (lights fully on, yours in its place). */
+:root[data-movimiento] .nm-noche__luz { animation: nm-noche-late 5.3s var(--nm-latido-paso) infinite; }
+:root[data-movimiento] .nm-noche__luz--2 { animation-duration: 7.1s; animation-delay: -2s; }
+:root[data-movimiento] .nm-noche__luz--3 { animation-duration: 11.3s; animation-delay: -6s; }
+:root[data-movimiento] .nm-noche__luz--4 { animation-duration: 13.7s; animation-delay: -4s; }
+:root[data-movimiento] .nm-noche__luz--5 { animation-duration: 17.9s; animation-delay: -9s; }
+:root[data-movimiento] .nm-noche__tuya { animation: nm-noche-vuela 9s var(--nm-latido-paso) infinite; }
+@keyframes nm-noche-late { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+@keyframes nm-noche-vuela { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+/* Stillness (`stillness.ts`): with the window unfocused or hidden (`data-quieto`), nothing decorative that beats endlessly
+   keeps painting. On return it resumes where it left off. */
+:root[data-quieto] .nm-luz:not(.nm-luz--trabaja),
+:root[data-quieto] .nm-noche__luz,
+:root[data-quieto] .nm-noche__tuya { animation-play-state: paused; }
+/* The three wait indicators only stop with the window hidden (`data-oculta`), not on losing focus:
+   visible but unfocused, they must keep saying the app is working. */
+:root[data-oculta] .nm-luz--trabaja,
+:root[data-oculta] .nm-fila__gira,
+:root[data-oculta] .nm-espera__gira { animation-play-state: paused; }
+/* The form enters with a short fade on mounting each step; without blocking clicks, focus or typing. */
+.nm-portada__caja { animation: nm-portada-entra 220ms ease-out backwards; }
+@keyframes nm-portada-entra { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.nm-portada__panel { display: grid; place-items: center; min-block-size: 0; overflow: auto; padding: 2.5rem; background: var(--background-norm); }
+.nm-portada__caja { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.25rem; inline-size: 100%; max-inline-size: 27rem; }
+.nm-portada__titulo { font-size: 2rem; font-weight: var(--nm-font-weight-bold); line-height: 1.15; letter-spacing: -0.015em; }
+.nm-portada__titulo--s { font-size: 1.5rem; letter-spacing: -0.01em; }
+.nm-portada__caja > p { color: var(--text-weak); font-size: 0.9375rem; line-height: 1.55; }
+/* With the box in front: it weighs (0,2,0) and wins over `.nm-portada__caja > p` (0,1,1), which would otherwise override it. */
+.nm-portada__caja > .nm-portada__pie { color: var(--text-hint); font-size: 0.8125rem; }
+.nm-volver { justify-self: start; margin-inline-start: -0.75rem; }
+/* "Elige un perfil": one row per account, its name and creation day on the left and "Abierto ahora" on the right. */
+.nm-cuentas { display: grid; gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
+.nm-cuenta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex: 1;
+  align-self: stretch;
+  min-inline-size: 0;
+  padding: 0.75rem 0.5rem 0.75rem 1rem;
+  border: 0;
+  border-radius: var(--border-radius-md);
+  background: transparent;
+  color: var(--text-norm);
+  text-align: start;
+  cursor: pointer;
+}
+.nm-cuenta__txt { display: grid; gap: 0.125rem; min-inline-size: 0; }
+.nm-cuenta__nombre { font-weight: var(--nm-font-weight-semibold); overflow-wrap: anywhere; }
+.nm-cuenta__fecha { color: var(--text-weak); font-size: 0.8125rem; }
+/* The box is the row itself (border and hover on it): the choose button fills it and the trash can sits to the right,
+   inside, in its own space after the button, so the two clickable areas never overlap (deleting that profile from this computer). */
+.nm-cuentas__fila {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding-inline-end: 0.5rem;
+  border: 1px solid var(--border-weak);
+  border-radius: var(--border-radius-md);
+  background: var(--background-norm);
+}
+.nm-cuentas__fila:hover { border-color: var(--border-norm); background: var(--interaction-default-hover); }
+.nm-cuentas__fila:has(.nm-cuenta[aria-current]) { border-color: var(--border-norm); }
+/* The trash can is drawn only over the profile under the pointer, to lighten the screen. At rest it is transparent, NOT
+   display:none or visibility:hidden, so it keeps its space (the box never resizes) and stays reachable with Tab: it shows
+   on row hover, when focus is anywhere in the row (the choose button too) and on its own keyboard focus. It fades with
+   the button's own transition (`.button`: 0.15s on every property, so its hover background keeps fading too), which the
+   base stylesheet (`_media.scss`) removes under `prefers-reduced-motion`. Without hover (touch) it is always visible. */
+.nm-cuenta__borrar { flex: none; opacity: 0; }
+.nm-cuentas__fila:hover .nm-cuenta__borrar,
+.nm-cuentas__fila:focus-within .nm-cuenta__borrar,
+.nm-cuenta__borrar:focus-visible { opacity: 1; }
+@media (hover: none) { .nm-cuenta__borrar { opacity: 1; } }
+/* Language before unlocking: discreet, in the panel's top corner, outside the box's flow. The current one in the text
+   colour and bold; the other muted like a secondary link. */
+.nm-portada__panel { position: relative; }
+.nm-portada__idiomas { position: absolute; inset-block-start: 0.75rem; inset-inline-end: 1rem; display: flex; gap: 0.125rem; }
+.nm-portada__idioma { color: var(--text-weak); }
+.nm-portada__idioma[aria-pressed='true'] { color: var(--text-norm); font-weight: var(--nm-font-weight-bold); }
+
+/* Startup: loading, incomplete configuration, error. */
+/* Positioned: the startup screens' language goes in their top corner, as on the front screen (`.nm-portada__idiomas`). */
+.nm-centro { position: relative; display: grid; place-items: center; block-size: 100%; padding: 2rem; }
+.nm-centro__caja { display: grid; justify-items: center; gap: 1rem; max-inline-size: 30rem; text-align: center; }
+/* The brand symbol (`LogoSymbol`, which picks the light or dark version by the theme in view). */
+.nm-centro__caja > img { display: block; inline-size: 3rem; block-size: 3rem; }
+.nm-centro__caja > p { color: var(--text-weak); }
+.nm-centro__titulo { font-size: 1.25rem; font-weight: var(--nm-font-weight-bold); }
+.nm-centro .nm-aviso { text-align: start; }
+
+/* ------------------------------------------------------------------ finishing touches */
+.nm-semilla--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.nm-cupo__dato--ancho { grid-column: 1 / -1; }
+.nm-lista__tit { min-inline-size: 0; }
+.nm-pliegue__nota { margin-block-start: 0.5rem; }
+.nm-pagina__arriba { margin-block-end: 1.25rem; }
+/* Foldable with a card look ("Comprar otro bono"). */
+.nm-raiz details.nm-pliegue--tarjeta { border: 1px solid var(--border-weak); border-radius: var(--border-radius-lg); background: var(--background-norm); }
+.nm-pliegue--tarjeta > summary { padding: 1rem 1.25rem; font-size: 0.875rem; }
+.nm-pliegue--tarjeta > .nm-pliegue__cuerpo { max-block-size: none; }
+.nm-raiz .meter-bar, .nm-raiz .meter-bar-thumb { display: block; }
+.nm-filas__dir { font-size: 0.8125rem; overflow-wrap: anywhere; }
+.nm-filas__sub.nm-fila { gap: 0.375rem 0.5rem; }
+
+/* Views that are not shown stay mounted (Main.tsx): `hidden` must win over the `display` of `.nm-paneles`,
+   `.nm-lista`... (the base `[hidden]` weighs the same as a class and comes earlier). */
+.nm-raiz [hidden] { display: none; }
+/* Strip of global notices over the panels: it does not eat their height; the notices carry their own padding and bottom line, edge to edge. */
+.nm-main__avisos { flex: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; max-block-size: 40%; overflow: auto; padding: 0; }
+.nm-main__avisos:empty { display: none; }
+
+.nm-pagina__estrecha { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.25rem; max-inline-size: 46rem; }
+.nm-raiz fieldset.nm-ajuste { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.875rem; min-inline-size: 0; margin: 0; padding: 0; border: 0; }
+.nm-ajuste > legend { padding: 0; margin-block-end: 0.875rem; }
+.nm-elecciones { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+.nm-elecciones--tres { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+/* An option: native radio + text + drawing. The chosen one carries the class; the focus ring uses :has() only for the keyboard (WebKitGTK 2.52 supports it). */
+.nm-eleccion {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.625rem;
+  align-items: start;
+  padding: 0.875rem;
+  border: 1px solid var(--border-norm);
+  border-radius: var(--border-radius-md);
+  cursor: pointer;
+}
+.nm-eleccion:hover { border-color: var(--field-hover); }
+.nm-eleccion--activa, .nm-eleccion--activa:hover { border-color: var(--interaction-norm); }
+.nm-eleccion:has(input:focus-visible) { outline: 2px solid var(--focus-outline); outline-offset: 2px; }
+/* Hand-drawn radio: the base stylesheet hides the native one (opacity: 0, it uses a fake) so this looks the same in both themes. */
+.nm-eleccion input { -webkit-appearance: none; appearance: none; opacity: 1; flex: none; inline-size: 1rem; block-size: 1rem; margin: 0.125rem 0 0; border: 1px solid var(--field-norm); border-radius: 50%; background: var(--background-norm); outline: 0; }
+.nm-eleccion input:checked { border-color: var(--interaction-norm); background: var(--interaction-norm); box-shadow: inset 0 0 0 3px var(--background-norm); }
+.nm-eleccion__cuerpo { display: grid; gap: 0.125rem; min-inline-size: 0; }
+.nm-eleccion__titulo { font-weight: var(--nm-font-weight-semibold); }
+.nm-eleccion__texto { color: var(--text-weak); font-size: 0.8125rem; }
+.nm-eleccion > .nm-esquema, .nm-eleccion > .nm-muestra, .nm-eleccion > .nm-letra { grid-column: 1 / -1; }
+/* Layout drawing: three or two boxes. */
+.nm-esquema { display: grid; gap: 3px; block-size: 3.5rem; padding: 4px; border-radius: var(--border-radius-sm); background: var(--background-strong); }
+.nm-esquema--tres { grid-template-columns: 1fr 1.4fr 2.6fr; }
+.nm-esquema--dos { grid-template-columns: 1fr 4fr; }
+.nm-esquema > i { border-radius: 3px; background: var(--background-norm); }
+.nm-esquema > i:first-child { background: var(--background-weak); }
+/* Theme sample: uses the primitives (they do not change with the active theme). */
+.nm-muestra { display: grid; grid-template-columns: 1fr 1fr; block-size: 2.5rem; border: 1px solid var(--border-norm); border-radius: var(--border-radius-sm); overflow: hidden; }
+.nm-muestra--claro > i { background: var(--nm-alba-0); }
+.nm-muestra--claro > i:first-child { background: var(--nm-alba-100); }
+.nm-muestra--oscuro > i { background: var(--nm-noche-900); }
+.nm-muestra--oscuro > i:first-child { background: var(--nm-noche-800); }
+.nm-muestra--sistema > i { background: var(--nm-noche-900); }
+.nm-muestra--sistema > i:first-child { background: var(--nm-alba-100); }
+/* Size sample: "Aa" at each option's scale (set by Settings.tsx). */
+.nm-letra { display: grid; place-items: center; block-size: 3.5rem; border-radius: var(--border-radius-sm); background: var(--background-strong); font-weight: var(--nm-font-weight-semibold); line-height: 1; }
+
+/* The list is a region with focus (tabindex="0"): it shows where it is, as the rows do. */
+.nm-msgs:focus-visible {
+  outline: 2px solid var(--focus-outline);
+  outline-offset: -2px;
+  box-shadow: 0 0 0 0.1875rem var(--focus-ring);
+}
+
+/* The subject is written by the sender and may take many lines: if the reader does not fit its panel, it scrolls as a whole
+   (the bar and the mail are never out of reach). */
+.nm-lector { overflow: auto; }
+/* The reader receives focus when opened (keyboard and screen readers) and shows it like the rest of the app. */
+.nm-lector:focus-visible { outline: 2px solid var(--focus-outline); outline-offset: -2px; }
+/* An error with no header above it (the message did not load) does not stick to the bar. */
+.nm-lector__barra + .nm-lector__aviso { margin-block-start: 0.75rem; }
+
+/* Two panels: sidebar + a single panel. The list fills it all; when a message opens, the reader replaces it (the list stays
+   mounted with `hidden`: `.nm-raiz [hidden]`). */
+.nm-paneles--dos { grid-template-columns: minmax(0, 1fr); }
+.nm-paneles--dos > .nm-lista { border-inline-end: 0; }
+/* The same rows, in columns: who and to which address | subject and summary | time. Only if the panel is wide (34 rem):
+   narrower, the rows stay as in three panels, one under another. */
+@container nm-main (min-width: 34rem) {
+  .nm-paneles--dos .nm-msg {
+    grid-template-columns: minmax(11rem, 17rem) minmax(0, 1fr) auto;
+    column-gap: 1.25rem;
+    row-gap: 0.125rem;
+    align-items: baseline;
+  }
+  .nm-paneles--dos .nm-msg__de { display: contents; }
+  .nm-paneles--dos .nm-msg__de > span:first-child { grid-column: 1; grid-row: 1; }
+  .nm-paneles--dos .nm-msg__para { grid-column: 1; grid-row: 2; margin-block-start: 0; min-inline-size: 0; overflow: hidden; white-space: nowrap; }
+  .nm-paneles--dos .nm-msg__asunto { grid-column: 2; grid-row: 1; }
+  .nm-paneles--dos .nm-msg__resumen { grid-column: 2; grid-row: 2; }
+  .nm-paneles--dos .nm-msg__hora { grid-column: 3; grid-row: 1; }
+  .nm-paneles--dos .nm-msg__estado { grid-column: 3; grid-row: 2; justify-self: end; }
+}
+/* A mail's text does not read well at 900 px wide: maximum measure, centred. */
+.nm-paneles--dos .nm-texto { padding-inline: max(1.25rem, calc((100% - 46rem) / 2)); }
+/* Reader bar with "<- Bandeja" (Reader.tsx, `BackToList`): the button is last in the document (the last Tab stop
+   before the paper) and is seen first, followed by the separator; the rest (text/HTML) goes to the right. */
+.nm-lector__sep { align-self: stretch; inline-size: 1px; margin-block: 0.125rem; background: var(--border-norm); }
+.nm-lector__barra--volver > .nm-lector__volver { order: -2; margin-inline-start: 0; }
+.nm-lector__barra--volver > .nm-lector__sep { order: -1; }
+.nm-lector__barra--volver > .nm-fila { margin-inline-start: auto; }
+
+/* Reader footer: "Enlaces" and "Adjuntos" folded under the paper, at their height (each body capped at 15rem). */
+.nm-lector > .nm-pliegue { flex: none; }
+/* Link row: the sender's text can be cut with "..."; the destination is NEVER hidden (it wraps if it does not fit). */
+.nm-enlaces__txt { display: flex; flex-wrap: wrap; column-gap: 0.25rem; white-space: normal; }
+.nm-enlaces__texto { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nm-enlaces__destino { flex: 0 1 auto; min-inline-size: 0; overflow-wrap: anywhere; }
+/* Name of an attachment (written by the sender): wrapped if it does not fit, never cut (it already arrives shortened in the middle). */
+.nm-adjuntos__nombre { min-inline-size: 0; overflow-wrap: anywhere; }
+/* The URL in the open-link dialog, capped: a long URL does not push the host and the notices out of view. */
+.nm-dialogo .nm-copiable { max-block-size: 8rem; overflow: auto; }
+
+/* Empty archive (Archive.tsx): one line in the place of the rows, like the list's help. */
+.nm-lista__vacia { padding: 0.25rem 1.125rem; color: var(--text-weak); font-size: 0.8125rem; }
+
+/* Front screen with the postponed-exit notice: the strip on top and the front screen fills the rest (without covering the footer). */
+.nm-cierre { display: flex; flex-direction: column; block-size: 100%; }
+.nm-cierre > .nm-raiz { flex: 1; min-block-size: 0; block-size: auto; }
+.nm-cierre > .nm-cierre__aviso { flex: none; background: transparent; }
+
+/* Multi-message selection */
+/* Hand-drawn checkbox (Inbox.tsx, `Casilla`): the base stylesheet leaves the native one at opacity 0; here the native one sits on top of the
+   box, the same size, for the click and the screen reader. It shows in both themes with the field tokens. */
+.nm-casilla { display: inline-flex; align-items: center; gap: 0.625rem; min-inline-size: 0; cursor: pointer; }
+.nm-casilla__caja { position: relative; flex: none; display: grid; place-items: center; inline-size: 1rem; block-size: 1rem; border: 1px solid var(--field-norm); border-radius: var(--border-radius-sm); background: var(--background-norm); }
+.nm-casilla__caja > input { position: absolute; inset: -1px; inline-size: 1rem; block-size: 1rem; margin: 0; opacity: 0; cursor: pointer; }
+.nm-casilla__caja > .nm-ic { inline-size: 0.75rem; block-size: 0.75rem; color: var(--interaction-norm-contrast, #fff); pointer-events: none; }
+.nm-casilla__caja--si { border-color: var(--interaction-norm); background: var(--interaction-norm); }
+.nm-casilla:hover .nm-casilla__caja:not(.nm-casilla__caja--si) { border-color: var(--field-hover); }
+.nm-casilla:has(input:focus-visible) .nm-casilla__caja { outline: 2px solid var(--focus-outline); outline-offset: 2px; box-shadow: 0 0 0 0.1875rem var(--focus-ring); }
+/* Selection bar, between the header and the rows: the same height with and without buttons (the list does not jump). */
+.nm-lista__acciones { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.25rem 0.5rem; min-block-size: 2.5rem; padding: 0.25rem 0.75rem 0.25rem 1.5rem; border-block-start: 1px solid var(--border-weak); }
+.nm-lista__cuenta { color: var(--text-weak); font-size: 0.8125rem; white-space: nowrap; }
+.nm-lista__cuenta--si { color: var(--text-norm); font-weight: var(--nm-font-weight-semibold); }
+.nm-lista__botones { gap: 0.25rem; }
+/* Each row's checkbox: in the place of the "new" dot, visible on hover, with focus on the row or
+   while anything is chosen. Hidden it is still there (opacity), so the click does not land on the row's button. */
+.nm-msgs__fila { position: relative; }
+.nm-casilla--fila { position: absolute; z-index: 1; inset-inline-start: 0.3125rem; inset-block-start: 0.8125rem; opacity: 0; }
+.nm-msgs__fila:hover > .nm-casilla--fila,
+.nm-msgs__fila:focus-within > .nm-casilla--fila,
+.nm-msgs--eligiendo .nm-casilla--fila { opacity: 1; }
+.nm-msgs__fila:hover > .nm-msg--nuevo::before,
+.nm-msgs__fila:focus-within > .nm-msg--nuevo::before,
+.nm-msgs--eligiendo .nm-msg--nuevo::before { visibility: hidden; }
+/* Chosen row: its own tint, different from "open" (which also carries its stripe on the left). */
+.nm-msg.nm-msg--elegido { background: var(--interaction-default-active); }
+.nm-msg--elegido .nm-msg__para { color: var(--text-weak); }
+/* What was done in bulk ("12 mensajes borrados."): one line under the bar, with the done mark. */
+.nm-lista__hecho { display: flex; align-items: center; gap: 0.5rem; padding: 0.375rem 1.125rem 0.5rem 1.5rem; color: var(--text-weak); font-size: 0.8125rem; }
+.nm-lista__hecho > .nm-ic { color: var(--signal-success); }
+
+/* Writing a message (Compose.tsx): the form fills the panel, the body takes the free height. Fields with the
+   app's own classes (`nm-campo`, the base `.field` and `.textarea`). */
+.nm-redactar { flex: 1; min-block-size: 0; overflow: auto; display: flex; flex-direction: column; background: var(--background-norm); }
+.nm-redactar__cab { padding: 1rem 1.25rem 0.75rem; border-block-end: 1px solid var(--border-weak); }
+.nm-redactar__titulo { font-size: 1.25rem; font-weight: var(--nm-font-weight-bold); line-height: 1.3; }
+.nm-redactar__form { flex: 1; display: flex; flex-direction: column; gap: 0.875rem; inline-size: 100%; max-inline-size: 52rem; min-block-size: 0; padding: 1rem 1.25rem 1.25rem; }
+/* Addresses in monospace, as everywhere in the app. */
+.nm-redactar__de, .nm-redactar__para { font-family: var(--nm-font-mono); font-feature-settings: var(--nm-font-mono-features); font-size: 0.8125rem; }
+.nm-redactar__de { cursor: pointer; }
+.nm-redactar__cuerpo { flex: 1; grid-template-rows: auto minmax(0, 1fr); min-block-size: 14rem; }
+/* The body is prose, not a code: the interface font, like a text mail in the reader. */
+.nm-redactar__cuerpo .textarea { block-size: 100%; min-block-size: 10rem; font-family: var(--nm-font-sans); font-size: 0.9375rem; line-height: 1.6; resize: none; }
+.nm-redactar__cuerpo .nm-campo__ayuda { justify-self: end; }
+.nm-redactar__pie { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; }
+.nm-redactar__atajo { color: var(--text-hint); font-size: 0.8125rem; }
+.nm-btn--espera { cursor: progress; }
+
+/* "Enviados" (Sent.tsx): the same rows as the inbox, with the delivery state under the subject. Never the colour
+   alone: icon and word. Not delivered goes in the danger colour. */
+.nm-msg__estado, .nm-envio { display: inline-flex; align-items: center; gap: 0.375rem; color: var(--text-weak); font-size: 0.75rem; }
+.nm-msg__estado .nm-ic, .nm-envio .nm-ic { inline-size: 0.875rem; block-size: 0.875rem; }
+.nm-msg__estado--failed, .nm-envio--failed { color: var(--signal-danger); font-weight: var(--nm-font-weight-semibold); }
+.nm-envio { font-size: inherit; }
+
+/* Narrow windows and large fonts */
+/* The breakpoints are in container rem, which follow the font size: at 200 % a 960 px window is 30 rem
+   (10 rem bar and 20 rem for the rest). @media does not work: there a rem is always 16 px. How many panels
+   show is decided by `effectiveLayout` (prefs.ts). */
+/* Pages (addresses, plan, settings): less margin, and cards and options one under another. */
+@container nm-main (max-width: 48rem) {
+  .nm-cols { grid-template-columns: minmax(0, 1fr); }
+}
+@container nm-main (max-width: 40rem) {
+  .nm-elecciones--tres { grid-template-columns: minmax(0, 1fr); }
+}
+@container nm-main (max-width: 34rem) {
+  .nm-pagina { padding: 1rem 1rem 1.5rem; }
+  .nm-redactar__cab, .nm-redactar__form { padding-inline: 1rem; }
+  .nm-redactar__atajo { display: none; }
+  .nm-elecciones, .nm-cupos { grid-template-columns: minmax(0, 1fr); }
+}
+/* Narrow front screen: the night panel becomes a strip on top with the logo (no slogans or drawing) and the
+   form fills the full width below. */
+.nm-raiz:has(> .nm-portada) { container: nm-portada / inline-size; }
+@container nm-portada (max-width: 46rem) {
+  .nm-portada { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .nm-portada__noche { border-inline-end: 0; border-block-end: 1px solid var(--border-weak); }
+  .nm-portada__lemas, .nm-portada__noche > svg { display: none; }
+  .nm-portada__marca { padding: 1rem 1.25rem; }
+  .nm-portada__panel { padding: 3rem 1.25rem 1.5rem; }
+}
+/* Narrow sidebar (below 13.5 rem, with a large font): less padding on the rows and the quota in one
+   column (the two figures overlapped). */
+@container nm-side (max-width: 13.5rem) {
+  .nm-nav__item, .nm-dir { gap: 0.5rem; padding-inline-start: 0.375rem; }
+  .nm-side__titulo { margin-inline: 0.375rem; }
+  .nm-cupo { grid-template-columns: minmax(0, 1fr); padding-inline: 0.5rem; }
+  /* Narrow bar: menu labels wrap to two lines instead of being cut with "...", and the centre reserves more
+     height so the menu, "Tus direcciones" (which may wrap to two lines) and the first address fit whole. */
+  .nm-side__centro { min-block-size: 21rem; }
+  .nm-nav__txt, .nm-nav__item .nm-fila__txt { white-space: normal; overflow-wrap: anywhere; line-height: 1.15; }
+  /* "Actualizar" and the badge drop to their own row under the name (otherwise the name has no room). */
+  .nm-nav__item { block-size: auto; min-block-size: 2.25rem; padding-block: 0.375rem; }
+  .nm-fila__ir, .nm-fila--num .nm-fila__ir { padding-inline-end: 0.5rem; padding-block-end: 2rem; }
+  .nm-fila__fin { inset-block: auto 0.25rem; }
+}

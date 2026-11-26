@@ -1,0 +1,41 @@
+{
+  "note": "Generated with the compiled contract: today they are a regression snapshot. They will become cross vectors when the Rust core, the server and the sidecar check them with their own implementation.",
+  "inputs": {
+    "contractAddress": "adadadadadadadadadadadadadadadadadadadadadadadadadadadadadadadad",
+    "s": "5151515151515151515151515151515151515151515151515151515151515151",
+    "k": "1",
+    "encPk": "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
+    "authPk": "a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7",
+    "salt": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "operatorSk": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+    "name": "juan.perez (UTF-8, zero-padded to 64 bytes)",
+    "mailboxSlot": "3",
+    "gen": "0"
+  },
+  "noExpiry": "4294967295",
+  "oldPriceGrace": {
+    "minSeconds": "900",
+    "maxSeconds": "1200"
+  },
+  "limits": {
+    "free": {
+      "mailbox": 1,
+      "alias": 2
+    },
+    "paid": {
+      "mailbox": 5,
+      "alias": 20
+    }
+  },
+  "ctx": "adadadadadadadadadadadadadadadadadadadadadadadadadadadadadadadad",
+  "operatorPk": "dcaf06d0fd6af6f71e2fc5c1079e7e5827a3a9b907a3d6b03d2966f378af2428",
+  "bonoId": "251036843701b78fad376cfe904f789831d07c0aee6f56abe0cc0a9b529637be",
+  "bonoLeafFree": "1ab1c4e9ba99277cbde9dfa89707cdfb0791f9e74e0b5e34ce1fe60430c7ef2a",
+  "bonoLeafPaid": "071f7433d23443b8bebca70adf67901ff6bc76fc1af016a71f6f1dd3ec85a289",
+  "slotNullifierMailbox3": "d16cd513a552583fe5c1f718aa72a50f24a50fa2341a380a42a2e080008a95ec",
+  "slotNullifierAlias3": "5f1cf3b9e2515b8b450a241d37d988943a89fae05b1cd4d78b8a7956adee403e",
+  "slotNullifierMailbox3Gen1": "ba294c2dfe8ef1ea8c1d4d6ad6664f474aa4961c04606a6fd6a84307d100eba5",
+  "addressKey": "621068aeef170d87aab62215f32c563c6ef3d198cf39b86a0fb109c4d2046c54",
+  "aliasKey": "8b1353356240f350c37992b8f2e30229039937485f6ef9a8c764994702ae7979",
+  "nameCommit": "2ca50a6c52377d4da657691710fdcd2c9f37473a0f261ce874acf78b00f4f855"
+}

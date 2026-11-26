@@ -1,0 +1,26 @@
+{
+  "name": "@nightmail/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NightMail Compact contracts (NightMailRegistry and TestToken) and their simulator tests",
+  "type": "module",
+  "engines": {
+    "node": ">=24.12.0 <25"
+  },
+  "config": {
+    "compact": "+0.36.1"
+  },
+  "scripts": {
+    "compile": "for c in NightMailRegistry:registry TestToken:token; do compact compile ${npm_package_config_compact:?} src/${c%%:*}.compact managed/${c##*:} || exit 1; done",
+    "compile:sim": "for c in NightMailRegistry:registry TestToken:token; do compact compile ${npm_package_config_compact:?} --skip-zk src/${c%%:*}.compact managed/${c##*:}-sim || exit 1; done",
+    "test": "npm run compile:sim --silent && node --test \"test/*.test.ts\"",
+    "test:mutants": "npm run compile:sim --silent && node scripts/mutate.ts",
+    "vectors": "npm run compile:sim --silent && node scripts/vectors.ts"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/compact-runtime": "0.21.0"
+  },
+  "devDependencies": {
+    "@midnightntwrk/ledger-v9": "1.0.2"
+  }
+}

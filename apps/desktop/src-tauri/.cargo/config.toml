@@ -1,0 +1,5 @@
+# ts-rs: protocol types (src/protocol.rs) are exported to the sidecar when running `cargo test`.
+[env]
+TS_RS_EXPORT_DIR = { value = "../../midnight-sidecar/src/protocol", relative = true }
+# The sidecar runs TypeScript on Node (type stripping), so imports need the .ts extension.
+TS_RS_IMPORT_EXTENSION = "ts"

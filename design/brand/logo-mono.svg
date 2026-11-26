@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-labelledby="t">
+  <title id="t">NightMail</title>
+  <!-- A single ink: inherits the text colour (currentColor). The gaps between the three pieces act as separation. -->
+  <path fill="currentColor" d="M23.31 22.02 19.41 10.37A5.6 5.6 0 1 1 29.55 11.43zM25.98 24.69 36.57 18.45A5.6 5.6 0 1 1 37.63 28.59z"/>
+  <circle cx="13.5" cy="34.5" r="10.5" fill="currentColor"/>
+</svg>

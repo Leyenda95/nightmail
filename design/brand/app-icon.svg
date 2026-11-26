@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="t">
+  <title id="t">NightMail</title>
+  <defs>
+    <linearGradient id="noche" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1e3650"/>
+      <stop offset="1" stop-color="#050d18"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="396.5" cy="627.5" r="300" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffcf5c" stop-opacity=".5"/>
+      <stop offset=".45" stop-color="#ffcf5c" stop-opacity=".16"/>
+      <stop offset="1" stop-color="#ffcf5c" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- Centred 824 × 824 slab (100 margin), radius 200: the night. -->
+  <rect x="100" y="100" width="824" height="824" rx="200" fill="url(#noche)"/>
+  <!-- Inner hairline: separates the slab from dark taskbars and docks. -->
+  <rect x="104" y="104" width="816" height="816" rx="196" fill="none" stroke="#2a4563" stroke-width="8"/>
+  <!-- Two other lights, far away and each on its own (uneven sizes and distances). -->
+  <circle cx="752" cy="742" r="15" fill="#ffcf5c" fill-opacity=".55"/>
+  <circle cx="268" cy="276" r="9" fill="#ffcf5c" fill-opacity=".35"/>
+  <!-- Lantern halo. -->
+  <circle cx="396.5" cy="627.5" r="300" fill="url(#halo)"/>
+  <!-- Symbol at scale 11 (528 × 528), centred: origin at (248,248). -->
+  <path fill="#f5f0e4" d="M504.41 490.22 461.51 362.07A61.6 61.6 0 1 1 573.05 373.73z"/>
+  <path fill="#f5f0e4" d="M533.78 519.59 650.27 450.95A61.6 61.6 0 1 1 661.93 562.49z"/>
+  <circle cx="396.5" cy="627.5" r="115.5" fill="#ffcf5c"/>
+</svg>

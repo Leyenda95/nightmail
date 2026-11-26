@@ -1,0 +1,47 @@
+{
+  "name": "@nightmail/server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NightMail operator server: SMTP, mailboxes, relayer, bono (plan) issuance",
+  "type": "module",
+  "engines": {
+    "node": ">=24.12.0 <25"
+  },
+  "scripts": {
+    "operator-wallet": "node --max-old-space-size=4096 src/bin/operator-wallet.ts",
+    "deploy-contracts": "node --max-old-space-size=4096 src/bin/deploy-contracts.ts",
+    "fund-night": "node --max-old-space-size=4096 src/bin/fund-night.ts",
+    "send-night": "node --max-old-space-size=4096 src/bin/send-night.ts",
+    "mail-server": "node src/bin/mail-server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/*.test.ts\"",
+    "test:devnet": "node --max-old-space-size=4096 --test --test-concurrency=1 --test-timeout=3600000 \"test-devnet/*.devnet.ts\"",
+    "test:e2e": "node --max-old-space-size=4096 --test --test-concurrency=1 --test-timeout=3600000 \"test-e2e/*.e2e.ts\""
+  },
+  "dependencies": {
+    "@midnight-ntwrk/compact-js": "3.0.2",
+    "@midnight-ntwrk/compact-runtime": "0.21.0",
+    "@midnight-ntwrk/midnight-js-contracts": "5.0.1",
+    "@midnight-ntwrk/midnight-js-http-client-proof-provider": "5.0.1",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "5.0.1",
+    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "5.0.1",
+    "@midnight-ntwrk/midnight-js-types": "5.0.1",
+    "@midnightntwrk/ledger-v9": "1.0.2",
+    "@midnightntwrk/wallet-sdk": "2.0.1",
+    "@midnightntwrk/wallet-sdk-capabilities": "4.0.1",
+    "@midnightntwrk/wallet-sdk-dust-wallet": "5.1.0",
+    "@nightmail/core-ts": "0.1.0",
+    "@nightmail/midnight": "0.1.0",
+    "effect": "3.22.4",
+    "graphql-ws": "6.4.2",
+    "smtp-server": "3.21.6",
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/mailparser": "^3.4.6",
+    "@types/node": "^24.19.2",
+    "@types/ws": "^8.5.0",
+    "mailparser": "3.9.0",
+    "typescript": "~5.9.3"
+  }
+}

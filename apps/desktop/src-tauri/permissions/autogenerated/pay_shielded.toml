@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pay-shielded"
+description = "Enables the pay_shielded command without any pre-configured scope."
+commands.allow = ["pay_shielded"]
+
+[[permission]]
+identifier = "deny-pay-shielded"
+description = "Denies the pay_shielded command without any pre-configured scope."
+commands.deny = ["pay_shielded"]

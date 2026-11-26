@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" role="img" aria-labelledby="t">
+  <title id="t">Una luciérnaga en vuelo entre otras luces lejanas</title>
+  <defs>
+    <radialGradient id="halo" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#ffcf5c" stop-opacity=".45"/>
+      <stop offset=".5" stop-color="#ffcf5c" stop-opacity=".12"/>
+      <stop offset="1" stop-color="#ffcf5c" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- Grass: stems of uneven heights, in a tone barely lighter than the night. -->
+  <path fill="none" stroke="#1e3650" stroke-width="3" stroke-linecap="round" d="M14 180v-22M31 180v-36M47 180v-15M70 180v-28M96 180v-12M118 180v-31M139 180v-18M171 180v-25M190 180v-13M214 180v-34M236 180v-20M262 180v-27M283 180v-14M305 180v-30"/>
+  <!-- Other people's lights: uneven sizes and distances, not aligned. Each with its halo. -->
+  <circle cx="52" cy="46" r="18" fill="url(#halo)"/><circle cx="52" cy="46" r="3.5" fill="#ffcf5c" fill-opacity=".7"/>
+  <circle cx="262" cy="34" r="12" fill="url(#halo)"/><circle cx="262" cy="34" r="2.2" fill="#ffcf5c" fill-opacity=".5"/>
+  <circle cx="286" cy="112" r="24" fill="url(#halo)"/><circle cx="286" cy="112" r="4.8" fill="#ffcf5c" fill-opacity=".85"/>
+  <circle cx="108" cy="126" r="10" fill="url(#halo)"/><circle cx="108" cy="126" r="1.8" fill="#ffcf5c" fill-opacity=".45"/>
+  <circle cx="206" cy="150" r="15" fill="url(#halo)"/><circle cx="206" cy="150" r="2.8" fill="#ffcf5c" fill-opacity=".6"/>
+  <!-- Yours: the symbol (48 × 48) at scale 1.5, with origin at (124,40). -->
+  <circle cx="144.25" cy="91.75" r="52" fill="url(#halo)"/>
+  <path fill="#f5f0e4" d="M158.97 73.03 153.12 55.56A8.4 8.4 0 1 1 168.33 57.15zM162.97 77.04 178.86 67.68A8.4 8.4 0 1 1 180.45 82.89z"/>
+  <circle cx="144.25" cy="91.75" r="15.75" fill="#ffcf5c"/>
+</svg>

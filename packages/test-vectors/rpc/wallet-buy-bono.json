@@ -1,0 +1,12 @@
+{
+  "note": "wallet.buyBono: amount is the price accepted by the user (decimal).",
+  "params": {
+    "contractAddress": "adadadadadadadadadadadadadadadadadadadadadadadadadadadadadadadad",
+    "id": "2525252525252525252525252525252525252525252525252525252525252525",
+    "amount": "1000000"
+  },
+  "result": {
+    "blockHeight": 1234,
+    "alreadyIncluded": false
+  }
+}

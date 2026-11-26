@@ -1,0 +1,27 @@
+pragma language_version >= 0.28;
+import CompactStandardLibrary;
+
+// TestToken: shielded test token used to pay for the plan in the demo (devnet and preprod only).
+// It is a faucet: anyone mints any amount for themselves, so it must never back a real payment.
+// NightMailRegistry charges in this token because its color is fixed when the registry is deployed
+// (paymentColor = colorOf(token address)).
+//
+// The minter picks the coin nonce (random), so there is no shared counter and two mints in the same
+// block do not conflict. Minting makes the amount and nonce public: anyone holding a candidate key can
+// check whether it minted (acceptable for a test faucet). A bono purchase cannot be linked to the
+// mint because buyBono pays with another fresh coin.
+
+export pure circuit domain(): Bytes<32> {
+  return pad(32, "nightmail:test-token:");
+}
+
+// Color of the token deployed at `self` (passed as paymentColor when deploying the registry).
+export pure circuit colorOf(self: ContractAddress): Bytes<32> {
+  return tokenType(domain(), self);
+}
+
+// Testnet only. No access control: mints `amount` units to the caller's shielded key.
+export circuit mint(amount: Uint<64>, nonce: Bytes<32>): ShieldedCoinInfo {
+  return mintShieldedToken(domain(), disclose(amount), disclose(nonce),
+    left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey()));
+}

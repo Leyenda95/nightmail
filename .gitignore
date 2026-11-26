@@ -1,0 +1,57 @@
+node_modules/
+dist/
+target/
+logs/
+coverage/
+.metrics/
+
+# Local environment variables (the .env.example template is versioned)
+.env
+.env.*
+!.env.example
+
+# Keys and certificates
+*.key
+*.pem
+
+# Local logs and backups
+/*.log
+*.bak-*
+
+# Internal documentation and experiments (not published for now)
+docs/
+spikes/
+
+# Local configuration of the development assistant
+.claude/
+
+# Compiled contracts: regenerated with the pinned compiler (0.36.1)
+contracts/managed/
+
+# Secrets and local state of wallets (operator, demo)
+.operator-wallet-seed-*
+.operator-wallet-state-*
+.wallet-seed-*
+.wallet-state-*
+*.sqlite
+*.sqlite-*
+midnight-level-db/
+
+# Tauri / Rust
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/bindings/
+
+# Base stylesheet (tools/vendor-base-styles.sh)
+vendor/base-styles/
+
+# Local operator data (seed and wallet state)
+.data/
+
+# Design notes and generated previews (kept locally, not published)
+design/brand/BRAND.md
+design/brand/preview.html
+design/icons/README.md
+design/icons/preview.html
+design/icons/preview.png
+design/sounds/README.md

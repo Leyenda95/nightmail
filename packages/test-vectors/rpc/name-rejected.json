@@ -1,0 +1,19 @@
+{
+  "note": "contract.hashes (normalizeName/addrKey) error with an unusable mailbox name: fixed message and reason in data.reason. Example: \"juan.perez.abcdefghijkl\" has the form of an alias.",
+  "request": {
+    "op": "addrKey",
+    "name": "juan.perez.abcdefghijkl"
+  },
+  "error": {
+    "code": -32008,
+    "message": "Name rejected",
+    "data": {
+      "reason": "alias-form"
+    }
+  },
+  "reasons": [
+    "invalid",
+    "alias-form",
+    "reserved"
+  ]
+}

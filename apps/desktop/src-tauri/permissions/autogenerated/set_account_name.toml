@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-account-name"
+description = "Enables the set_account_name command without any pre-configured scope."
+commands.allow = ["set_account_name"]
+
+[[permission]]
+identifier = "deny-set-account-name"
+description = "Denies the set_account_name command without any pre-configured scope."
+commands.deny = ["set_account_name"]

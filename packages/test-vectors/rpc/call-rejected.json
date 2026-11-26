@@ -1,0 +1,31 @@
+{
+  "note": "contract.proveCall error when the circuit, run locally, fails a contract check: fixed message and reason in data.reason. Example: a slot outside the plan quota (\"No slots left\"). reasons: every reason, with the contract message each one corresponds to in asserts (\"other\": anything else).",
+  "error": {
+    "code": -32009,
+    "message": "Call rejected",
+    "data": {
+      "reason": "no-slots-left"
+    }
+  },
+  "reasons": [
+    "not-a-bono",
+    "no-slots-left",
+    "slot-already-used",
+    "stale-round",
+    "not-reserved",
+    "wrong-reveal",
+    "too-early",
+    "address-taken",
+    "other"
+  ],
+  "asserts": {
+    "Not a bono": "not-a-bono",
+    "No slots left": "no-slots-left",
+    "Slot already used": "slot-already-used",
+    "Stale round": "stale-round",
+    "Not reserved": "not-reserved",
+    "Wrong reveal": "wrong-reveal",
+    "Too early": "too-early",
+    "Address taken": "address-taken"
+  }
+}

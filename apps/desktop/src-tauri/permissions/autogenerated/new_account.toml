@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-new-account"
+description = "Enables the new_account command without any pre-configured scope."
+commands.allow = ["new_account"]
+
+[[permission]]
+identifier = "deny-new-account"
+description = "Denies the new_account command without any pre-configured scope."
+commands.deny = ["new_account"]

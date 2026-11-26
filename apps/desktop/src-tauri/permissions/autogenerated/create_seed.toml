@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-seed"
+description = "Enables the create_seed command without any pre-configured scope."
+commands.allow = ["create_seed"]
+
+[[permission]]
+identifier = "deny-create-seed"
+description = "Denies the create_seed command without any pre-configured scope."
+commands.deny = ["create_seed"]

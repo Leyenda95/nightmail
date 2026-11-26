@@ -1,0 +1,5 @@
+# Desktop app
+
+This is the NightMail app you install on your computer, built with Tauri: a Rust core in `src-tauri/` and a React interface in `src/`. The core keeps your keys encrypted with your password, downloads and decrypts your mail into an encrypted local database, and signs and encrypts what you send. The interface only displays things: it has no access to the network or to files, and it asks the core for everything. The app does not use the Midnight SDK itself. It launches the Midnight helper process (`apps/midnight-sidecar`) and talks to it with JSON-RPC over standard input and output, and it talks to the mail server (`apps/server`) over HTTP for the mailbox, delivery, plan and relayer APIs. To set up and open the app, see the [root README](../../README.md).
+
+**Run its tests** (from the repository root): `npm test -w apps/desktop` for the interface, and `cd apps/desktop/src-tauri && cargo test` for the Rust core (some core tests start the real helper process, so Node 24 must be on your `PATH`, `npm ci` must be done and the contracts must be compiled).

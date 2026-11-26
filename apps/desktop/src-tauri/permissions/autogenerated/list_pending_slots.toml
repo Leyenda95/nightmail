@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-pending-slots"
+description = "Enables the list_pending_slots command without any pre-configured scope."
+commands.allow = ["list_pending_slots"]
+
+[[permission]]
+identifier = "deny-list-pending-slots"
+description = "Denies the list_pending_slots command without any pre-configured scope."
+commands.deny = ["list_pending_slots"]

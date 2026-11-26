@@ -1,0 +1,27 @@
+{
+  "name": "@nightmail/midnight",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Midnight logic shared by the server and the sidecar: hashes via the compiled contract pure circuits, NightMailRegistry state reading and address resolution index",
+  "type": "module",
+  "engines": {
+    "node": ">=24.12.0 <25"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "pretest": "node scripts/require-compiled.ts",
+    "test": "node --test \"test/*.test.ts\""
+  },
+  "dependencies": {
+    "@midnight-ntwrk/compact-runtime": "0.21.0",
+    "@nightmail/contracts": "0.1.0",
+    "@scure/bip39": "2.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "~5.9.3"
+  }
+}

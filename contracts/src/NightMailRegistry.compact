@@ -1,0 +1,295 @@
+pragma language_version >= 0.28;
+import CompactStandardLibrary;
+
+// NightMailRegistry: the NightMail address registry.
+//
+// A bono (voucher) is one leaf H(ctx, id, plan, validUntil) of `bonos`, with id = H(ctx, s, k): s is
+// the app's secret, k numbers the leaves of one bono. Each address spends a slot (kind, j < slotLimit)
+// whose nullifier H(ctx, s, kind, j, gen) ignores the leaf, so extra leaves or a plan upgrade never
+// exceed the paid quota. Named mailboxes register in two rounds (reserve a commitment, then reveal)
+// against mempool front-running. Commitments, alias keys and reservations are bound to the slot
+// nullifier, so a replayed transaction never blocks the victim. ctx (the contract address, read per
+// circuit because kernel.self() is zero in the constructor) makes nothing valid across deployments.
+// Hash separation: every preimage has a domain except aliasKey's, and all seven lengths differ
+// (64, 96, 100, 101, 102, 128, 192 bytes). A new hash must never have an undomained 96-byte preimage.
+//
+// Privacy: nobody can link an address to its bono or two addresses of one bono. Public by design:
+// slot nullifiers, address records, name hash, round, commitment, and the coin paid in buyBono.
+// The operator sees issued ids, the server sees traffic, and whoever proves sees s, hence local proving.
+// buyBono always pays with a fresh coin so a previous sender cannot recognise it.
+//
+// Error messages are matched by the app and tests; do not reword them.
+//
+// The field list and struct shapes are final: circuits added later through the maintenance authority
+// cannot change them, and adding any field moves the state paths of the others (a test pins them).
+// Fields for planned expiry/renewal support and spares are therefore reserved now and left empty.
+
+export enum Plan { free, paid }      // limits in slotLimit: free 1 mailbox + 2 aliases; paid 5 + 20
+export enum Kind { mailbox, alias }  // mailbox with a chosen name, or random alias
+
+export struct AddressRecord {
+  encPk: Bytes<32>;       // X25519: the server encrypts mail to this key
+  authPk: Bytes<32>;      // Ed25519: signs requests to the mailbox
+  kind: Kind;
+  // Mailbox name encrypted with a seed-derived key, so it can be recovered on restore
+  // (XChaCha20-Poly1305: 24-byte nonce + 64-byte zero-padded name + 16-byte tag). Zeros for an alias.
+  nameCipher: Bytes<104>;
+  slotNul: Bytes<32>;     // nullifier of the slot that created the address (renewal and recovery)
+}
+
+export struct PendingName {
+  reservedRound: Uint<64>;  // r: can be revealed once round > r
+  commit: Bytes<32>;
+}
+
+// --- State (order is final) -------------------------------------------------------------------------
+// Invariants: every pendingNames key and every addresses[*].slotNul is in slotNullifiers. A
+// reservation is only removed when revealed; it never expires, so if someone else took the name the
+// slot stays spent (cancelling and recycling slots through releasedSlots is planned).
+export ledger operatorPk: Bytes<32>;            // operatorKey(operator sk): issueBono, advanceRound,
+                                                // setPrice. Not sealed, so a circuit added later through
+                                                // the maintenance authority can rotate it if it leaks.
+export sealed ledger paymentColor: Bytes<32>;   // shielded payment token (TestToken in the demo)
+export ledger price: Uint<64>;                  // exact price of the paid bono (token units), changed
+                                                // by the operator with setPrice.
+export ledger bonos: HistoricMerkleTree<20, Bytes<32>>;  // bono leaves (2^20); accepts past roots
+export ledger slotNullifiers: Set<Bytes<32>>;            // spent slots
+export ledger addresses: Map<Bytes<32>, AddressRecord>;  // addrKey -> address record
+export ledger pendingNames: Map<Bytes<32>, PendingName>; // slotNul -> unrevealed mailbox reservation
+export ledger round: Counter;                            // current round (advanced by the operator)
+// Reserved for expiry and slot recycling, empty for now:
+export ledger priceMonthly: Uint<64>;                     // per-period prices (not sealed)
+export ledger priceAnnual: Uint<64>;
+export ledger period: Counter;                            // current period
+export ledger renewNullifiers: Set<Bytes<32>>;            // renewAddress
+export ledger addressPaidUntil: Map<Bytes<32>, Uint<32>>; // addrKey -> last paid period
+export ledger releasedSlots: HistoricMerkleTree<20, Bytes<32>>; // tree: recycle without revealing the slot
+// Spares (fields cannot be added after deployment):
+export ledger spareTree: HistoricMerkleTree<20, Bytes<32>>;
+export ledger spareSet: Set<Bytes<32>>;
+export ledger spareMap: Map<Bytes<32>, Bytes<32>>;
+export ledger spareCounter: Counter;
+// Price grace windows: a purchase started at the previous price is honoured. Maps a replaced price
+// to the block time (Unix seconds, exclusive) until which it is still accepted; written by setPrice.
+// Entries are never deleted: an expired one is simply invalid and is overwritten if that price is
+// replaced again. The key is a coin amount (Uint<128>, like ShieldedCoinInfo.value).
+export ledger oldPrices: Map<Uint<128>, Uint<64>>;         // previous values of `price`
+export ledger oldPricesMonthly: Map<Uint<128>, Uint<64>>;  // reserved: previous values of priceMonthly
+export ledger oldPricesAnnual: Map<Uint<128>, Uint<64>>;   // reserved: previous values of priceAnnual
+
+// opPk = operatorKey(operator sk); color = payment token color (TestToken.colorOf(address) in the
+// demo); bonoPrice = exact price of the paid bono. Checked because a deploy mistake cannot be fixed
+// (paymentColor is sealed, and redeploying changes ctx and invalidates everything).
+constructor(opPk: Bytes<32>, color: Bytes<32>, bonoPrice: Uint<64>) {
+  assert(disclose(bonoPrice > 0), "Price must be positive");
+  assert(disclose(opPk != default<Bytes<32>>), "Missing operator key");
+  assert(disclose(color != default<Bytes<32>>), "Missing payment color");
+  operatorPk = disclose(opPk);
+  paymentColor = disclose(color);
+  price = disclose(bonoPrice);
+}
+
+// --- Witnesses ---------------------------------------------------------------------------------------
+// Supplied by the prover (the app; operatorSecret by the operator process). If they do not match an
+// issued leaf, proving fails ("Path is for another bono" / "Not a bono").
+witness bonoSecret(): Bytes<32>;            // bono secret s
+witness bonoLeafIndex(): Uint<32>;          // k: which leaf of the bono is used
+witness bonoPlan(): Plan;                   // plan of that leaf
+witness bonoValidUntil(): Uint<32>;         // expiry of that leaf (currently noExpiry)
+witness slotIndex(): Uint<8>;               // j: which slot is spent
+witness bonoPath(leaf: Bytes<32>): MerkleTreePath<20, Bytes<32>>; // path of the leaf (current root)
+witness operatorSecret(): Bytes<32>;        // operator sk
+
+// --- Pure functions (also used by the app, the server and the tests) -------------------------------
+// Max Uint<32>. validUntil is not checked on chain yet.
+export pure circuit noExpiry(): Uint<32> { return 4294967295; }
+
+// Grace window of a replaced price, in seconds from the block of the change: at least 15 minutes,
+// at most 20 (slack for the operator's clock and the wait until the block).
+export pure circuit oldPriceGrace(): Uint<64> { return 900; }
+export pure circuit oldPriceGraceMax(): Uint<64> { return 1200; }
+
+// Slot quota per plan and kind: free 1 mailbox + 2 aliases; paid 5 mailboxes + 20 aliases.
+export pure circuit slotLimit(plan: Plan, kind: Kind): Uint<8> {
+  if (plan == Plan.paid) {
+    return kind == Kind.mailbox ? 5 : 20;
+  }
+  return kind == Kind.mailbox ? 1 : 2;
+}
+
+// Deployment ctx: the contract address. No need to hash it (it sits in a fixed 32-byte position after
+// each hash's domain), and skipping that hash keeps createAlias at k14.
+export pure circuit ctxOf(self: ContractAddress): Bytes<32> {
+  return self.bytes;
+}
+
+export pure circuit operatorKey(sk: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "nightmail:operator-pk:"), sk]);
+}
+
+struct BonoIdInput { dom: Bytes<32>; ctx: Bytes<32>; s: Bytes<32>; k: Uint<32>; }
+// id of leaf k of bono s (each leaf has its own, so leaves cannot be linked to each other).
+export pure circuit bonoId(ctx: Bytes<32>, s: Bytes<32>, k: Uint<32>): Bytes<32> {
+  return persistentHash<BonoIdInput>(BonoIdInput { dom: pad(32, "nightmail:bono-id:"), ctx: ctx, s: s, k: k });
+}
+
+struct BonoLeafInput { dom: Bytes<32>; ctx: Bytes<32>; id: Bytes<32>; plan: Plan; validUntil: Uint<32>; }
+export pure circuit bonoLeaf(ctx: Bytes<32>, id: Bytes<32>, plan: Plan, validUntil: Uint<32>): Bytes<32> {
+  return persistentHash<BonoLeafInput>(BonoLeafInput {
+    dom: pad(32, "nightmail:bono-leaf:"), ctx: ctx, id: id, plan: plan, validUntil: validUntil });
+}
+
+struct SlotInput { dom: Bytes<32>; ctx: Bytes<32>; s: Bytes<32>; kind: Kind; j: Uint<8>; gen: Uint<32>; }
+// Nullifier of slot (kind, j) of bono s. gen is the slot generation: always 0 for now, to be bumped
+// when a released slot is recycled.
+export pure circuit slotNullifier(ctx: Bytes<32>, s: Bytes<32>, kind: Kind, j: Uint<8>, gen: Uint<32>): Bytes<32> {
+  return persistentHash<SlotInput>(SlotInput { dom: pad(32, "nightmail:bono-slot:"), ctx: ctx, s: s, kind: kind, j: j, gen: gen });
+}
+
+// Mailbox addrKey: H("nightmail:addr:", normalized name zero-padded to 64 bytes).
+// Normalization (and rejecting reserved or too-short names) is up to the app.
+export pure circuit addressKey(name: Bytes<64>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<64>>>([pad(64, "nightmail:addr:"), name]);
+}
+
+// Alias key: H(encPk, authPk, slotNul). Including the slot nullifier means copying the keys yields a
+// different address. No domain string, so createAlias fits in k14: it is the only 96-byte preimage in
+// the contract (all others have a domain and a different length) and slotNul already has its own.
+export pure circuit aliasKey(encPk: Bytes<32>, authPk: Bytes<32>, slotNul: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<3, Bytes<32>>>([encPk, authPk, slotNul]);
+}
+
+// Mailbox commitment. Including the slot nullifier means only the reserver can reveal it. The salt
+// (32 random seed-derived bytes) keeps it unguessable even when the name is guessable.
+export pure circuit nameCommit(addrKey: Bytes<32>, encPk: Bytes<32>, authPk: Bytes<32>, salt: Bytes<32>,
+                               slotNul: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<6, Bytes<32>>>([pad(32, "nightmail:name-commit:"), addrKey, encPk, authPk, salt, slotNul]);
+}
+
+// --- Internal --------------------------------------------------------------------------------------
+circuit ctx(): Bytes<32> {
+  return ctxOf(kernel.self());
+}
+
+circuit assertOperator(): [] {
+  assert(disclose(operatorKey(operatorSecret()) == operatorPk), "Not the operator");
+}
+
+// Membership proof of the bono leaf plus slot check. Read-only: returns the nullifier (disclosed, it
+// is public anyway) without spending it, so the caller finishes all its checks before writing.
+circuit checkSlot(kind: Kind): Bytes<32> {
+  const c = ctx();
+  const s = bonoSecret();
+  const plan = bonoPlan();
+  const j = slotIndex();
+  const leaf = bonoLeaf(c, bonoId(c, s, bonoLeafIndex()), plan, bonoValidUntil());
+  const path = bonoPath(leaf);
+  assert(disclose(path.leaf == leaf), "Path is for another bono");
+  assert(bonos.checkRoot(disclose(merkleTreePathRootNoLeafHash<20>(path))), "Not a bono");
+  assert(disclose(j < slotLimit(plan, kind)), "No slots left");
+  const nul = disclose(slotNullifier(c, s, kind, j, 0)); // gen 0: first generation of the slot
+  assert(!slotNullifiers.member(nul), "Slot already used");
+  return nul;
+}
+
+// Inserts a bono leaf. Single place that fixes plan and expiry, so finite-expiry versions of
+// issueBono and buyBono only need to change this.
+circuit insertBono(id: Bytes<32>, plan: Plan): [] {
+  bonos.insertHash(disclose(bonoLeaf(ctx(), id, plan, noExpiry())));
+}
+
+// --- Bonos -----------------------------------------------------------------------------------------
+// Operator only. Issues a bono leaf: free plan (after the CAPTCHA) or paid by simulated card (demo).
+// id = bonoId(ctx, s, k), computed by the app. Effect: one more leaf in `bonos`.
+export circuit issueBono(id: Bytes<32>, plan: Plan): [] {
+  assertOperator();
+  insertBono(id, plan);
+}
+
+// Anyone. Buys a paid leaf with a fresh coin of paymentColor (its color, amount and nonce become
+// public). The amount must equal `price` or an old price still in its grace window. Funds stay in the
+// contract (no withdrawal circuit yet). The block-time check only runs for old prices, against a
+// public window end, so it leaks nothing about the prover's clock.
+export circuit buyBono(coin: ShieldedCoinInfo, id: Bytes<32>): [] {
+  const c = disclose(coin);
+  assert(c.color == paymentColor, "Wrong token");
+  if (c.value != price) {
+    assert(oldPrices.member(c.value), "Wrong amount");
+    assert(blockTimeLt(oldPrices.lookup(c.value)), "Old price expired");
+  }
+  receiveShielded(c);
+  insertBono(id, Plan.paid);
+}
+
+// --- Two-step mailbox ------------------------------------------------------------------------------
+// Bono holders. Spends a mailbox slot and stores the reservation keyed by its (always new) nullifier,
+// so a commitment copied from the mempool cannot block the victim. r is the app's current round + 1,
+// accepted while round <= r so an advanceRound before inclusion does not invalidate it. r = max
+// Uint<64> overflows and fails on purpose (it could never be revealed).
+export circuit reserveMailbox(commit: Bytes<32>, r: Uint<64>): [] {
+  const rr = disclose(r);
+  assert(round.lessThan((rr + 1) as Uint<64>), "Stale round");
+  const nul = checkSlot(Kind.mailbox);
+  slotNullifiers.insert(nul);
+  pendingNames.insert(nul, PendingName { reservedRound: rr, commit: disclose(commit) });
+}
+
+// Anyone with the commitment data (in practice, the reserver). name: normalized 64-byte name (not
+// published, only its hash); salt: the commitment salt; slotNul: that of the reserved slot.
+// Requires: the reservation exists, the commitment matches, it is from an earlier round (round > r)
+// and the name is free. Effects: addresses[addressKey(name)] = record (with slotNul); the
+// reservation is removed.
+export circuit revealMailbox(name: Bytes<64>, encPk: Bytes<32>, authPk: Bytes<32>, salt: Bytes<32>,
+                             slotNul: Bytes<32>, nameCipher: Bytes<104>): [] {
+  const nul = disclose(slotNul);
+  const key = disclose(addressKey(name));
+  assert(pendingNames.member(nul), "Not reserved");
+  const p = pendingNames.lookup(nul);
+  assert(disclose(nameCommit(key, encPk, authPk, salt, nul) == p.commit), "Wrong reveal");
+  assert(!round.lessThan((p.reservedRound + 1) as Uint<64>), "Too early");
+  assert(!addresses.member(key), "Address taken");
+  addresses.insert(key, AddressRecord {
+    encPk: disclose(encPk), authPk: disclose(authPk), kind: Kind.mailbox,
+    nameCipher: disclose(nameCipher), slotNul: nul });
+  pendingNames.remove(nul);
+}
+
+// --- Aliases ---------------------------------------------------------------------------------------
+// Bono holders. Spends an alias slot and registers aliasKey(encPk, authPk, slotNul), so copied keys
+// yield a different address. No free-key check needed: the key includes a slot nullifier just verified
+// as unused, so a clash would require a hash collision.
+export circuit createAlias(encPk: Bytes<32>, authPk: Bytes<32>): [] {
+  const nul = checkSlot(Kind.alias);
+  const key = disclose(aliasKey(encPk, authPk, nul));
+  slotNullifiers.insert(nul);
+  addresses.insert(key, AddressRecord {
+    encPk: disclose(encPk), authPk: disclose(authPk), kind: Kind.alias,
+    nameCipher: default<Bytes<104>>, slotNul: nul });
+}
+
+// --- Price -----------------------------------------------------------------------------------------
+// Operator only. Changes the price; buyBono keeps accepting the old one until `oldPriceUntil`.
+// Circuits can only compare against block time, so the operator supplies the end and the contract
+// bounds it to 15-20 minutes after the block of the change. Each replaced price keeps its own window,
+// guaranteed for 15 minutes after it last stopped being current (re-replacing a price overwrites its
+// end). An unchanged price is rejected since it would only overwrite a window. Any setPrice invalidates
+// purchases proven but not yet included (both buyBono branches read `price`); the node rejects them
+// without charging and the app re-proves.
+export circuit setPrice(newPrice: Uint<64>, oldPriceUntil: Uint<64>): [] {
+  assertOperator();
+  const p = disclose(newPrice);
+  const until = disclose(oldPriceUntil);
+  assert(p > 0, "Price must be positive");
+  assert(p != price, "Price unchanged");
+  assert(blockTimeLte(until - oldPriceGrace()), "Grace too short");   // block + 15 min <= until
+  assert(blockTimeGte(until - oldPriceGraceMax()), "Grace too long"); // until <= block + 20 min
+  oldPrices.insert(price, until);
+  price = p;
+}
+
+// --- Rounds ----------------------------------------------------------------------------------------
+// Operator only (every ~30 s). Advances the round so reservations from earlier rounds can be revealed.
+export circuit advanceRound(): [] {
+  assertOperator();
+  round.increment(1);
+}

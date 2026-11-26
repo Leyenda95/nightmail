@@ -1,0 +1,31 @@
+{
+  "note": "wallet.* errors: fixed message and reason in data.",
+  "walletUnavailable": {
+    "code": -32013,
+    "message": "Wallet unavailable",
+    "data": {
+      "reason": "not-synced"
+    }
+  },
+  "walletReasons": [
+    "not-open",
+    "already-open",
+    "in-use",
+    "not-synced"
+  ],
+  "insufficientFunds": {
+    "code": -32014,
+    "message": "Insufficient funds",
+    "data": {
+      "asset": "dust"
+    }
+  },
+  "assets": [
+    "token",
+    "dust"
+  ],
+  "txRejected": {
+    "code": -32015,
+    "message": "Transaction rejected"
+  }
+}

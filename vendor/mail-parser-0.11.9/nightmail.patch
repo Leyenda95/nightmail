@@ -1,0 +1,255 @@
+--- a/src/decoders/base64.rs	2006-07-24 03:21:28.000000000 +0200
++++ b/src/decoders/base64.rs	2026-11-20 15:53:17.199812519 +0100
+@@ -267,8 +267,12 @@
+         let mut chunk: u32 = 0;
+         let mut byte_count: u8 = 0;
+         let mut buf = Vec::with_capacity(64);
++        let start = self.offset(); // NightMail
+ 
+         while let Some(&ch) = self.next() {
++            if self.offset() - start > super::encoded_word::MAX_ENCODED_WORD {
++                break; // NightMail
++            }
+             match ch {
+                 b'=' => {
+                     match byte_count {
+--- a/src/decoders/encoded_word.rs	2006-07-24 03:21:28.000000000 +0200
++++ b/src/decoders/encoded_word.rs	2026-11-20 15:53:17.049447213 +0100
+@@ -7,6 +7,10 @@
+ use super::DecodeWordFnc;
+ use crate::{decoders::charsets::map::charset_decoder, parsers::MessageStream};
+ 
++// NightMail (README-NIGHTMAIL.md): bytes de entrada que puede recorrer el texto de una palabra codificada (la norma
++// dice 75). Sin tope, una palabra que no se cierra se recorría hasta el final del campo en cada `=?` (cuadrático).
++pub(crate) const MAX_ENCODED_WORD: usize = 1024;
++
+ enum Rfc2047State {
+     Init,
+     Charset,
+--- a/src/decoders/quoted_printable.rs	2006-07-24 03:21:28.000000000 +0200
++++ b/src/decoders/quoted_printable.rs	2026-11-20 15:53:17.139666399 +0100
+@@ -197,11 +197,15 @@
+ 
+     pub fn decode_quoted_printable_word(&mut self) -> Option<Vec<u8>> {
+         let mut buf = Vec::with_capacity(64);
++        let start = self.offset(); // NightMail
+ 
+         let mut state = QuotedPrintableState::None;
+         let mut hex1 = 0;
+ 
+         while let Some(&ch) = self.next() {
++            if self.offset() - start > super::encoded_word::MAX_ENCODED_WORD {
++                break; // NightMail
++            }
+             match ch {
+                 b'=' => {
+                     if let QuotedPrintableState::None = state {
+--- a/src/parsers/message.rs	2006-07-24 03:21:28.000000000 +0200
++++ b/src/parsers/message.rs	2026-11-19 17:40:57.651307966 +0100
+@@ -15,6 +15,37 @@
+ use super::MessageStream;
+ 
+ const MAX_NESTED_ENCODED: usize = 3;
++// NightMail (vendor/mail-parser-0.11.9/README-NIGHTMAIL.md): cotas donde se construye el árbol.
++/// Niveles anidados (multipart o message/rfc822 sin codificar) como mucho; más hondo, la parte queda como binaria.
++const MAX_DEPTH: usize = 32;
++/// Partes como mucho, contando TODOS los niveles; al pasarse se deja de analizar (lo leído se conserva).
++const MAX_PARTS: usize = 1000;
++/// Cabeceras de una parte interior como mucho; si no acaban antes, se deja de analizar (el primer nivel lo acota
++/// quien llama).
++const MAX_PART_HEADER_BYTES: usize = 256 * 1024;
++/// Separadores de multipart buscados sin éxito como mucho (cada búsqueda fallida recorre hasta el final).
++const MAX_FAILED_SEEKS: usize = 8;
++/// Bytes de cabeceras de TODAS las partes como mucho (128 partes × 256 KiB de `a:` serían ~1 GB en memoria).
++const MAX_TOTAL_HEADER_BYTES: usize = 1024 * 1024;
++
++/// NightMail: ¿acaba el bloque de cabeceras que empieza en `data[0]` (una línea vacía) dentro del tope? Si `data` se
++/// acaba antes del tope, el bloque está acotado de todos modos.
++fn part_headers_fit(data: &[u8]) -> bool {
++    if data.len() <= MAX_PART_HEADER_BYTES {
++        return true;
++    }
++    // Una sola pasada de salto de línea en salto de línea: ¿empieza alguna línea vacía?
++    let mut rest = &data[..MAX_PART_HEADER_BYTES];
++    loop {
++        if rest.starts_with(b"\n") || rest.starts_with(b"\r\n") {
++            return true;
++        }
++        match rest.iter().position(|&b| b == b'\n') {
++            Some(newline) => rest = &rest[newline + 1..],
++            None => return false,
++        }
++    }
++}
+ 
+ #[derive(Debug, PartialEq, Default)]
+ enum MimeType {
+@@ -135,18 +166,49 @@
+         let mut state_stack = Vec::with_capacity(4);
+ 
+         let mut part_headers = Vec::new();
++        // NightMail: partes vistas en todos los niveles.
++        let mut total_parts = 0usize;
++        // NightMail: búsquedas de separador fallidas.
++        let mut failed_seeks = 0usize;
++        // NightMail: alguna cota recortó el análisis (se avisa con `is_encoding_problem` en la parte 0).
++        let mut cut = false;
++        // NightMail: bytes de cabeceras leídos en todas las partes.
++        let mut header_bytes = 0usize;
+ 
+         'outer: loop {
+             // Parse headers
+             state.offset_header = stream.offset();
++            // NightMail: cabeceras de una parte interior sin final cercano → se deja de analizar (CPU
++            // cuadrática al unir continuaciones y memoria ×40 con millones de cabeceras).
++            if total_parts > 0 && !part_headers_fit(stream.data.get(stream.offset()..).unwrap_or_default()) {
++                cut = true;
++                break 'outer;
++            }
+             if !stream.parse_headers(self, &mut part_headers) {
+                 break;
+             }
++            // NightMail: tope total de cabeceras.
++            header_bytes += stream.offset().saturating_sub(state.offset_header);
++            if header_bytes > MAX_TOTAL_HEADER_BYTES {
++                cut = true;
++                part_headers.clear();
++                break 'outer;
++            }
+             state.offset_body = stream.offset();
+             if skip_body {
+                 break;
+             }
+ 
++            // NightMail: tope de partes en todos los niveles.
++            total_parts += 1;
++            if total_parts > MAX_PARTS {
++                cut = true;
++                part_headers.clear();
++                break 'outer;
++            }
++            // NightMail: tope de profundidad (multipart y message/rfc822 sin codificar).
++            let too_deep = state_stack.len() >= MAX_DEPTH;
++
+             state.parts += 1;
+             state.sub_part_ids.push(message.parts.len() as u32);
+ 
+@@ -157,10 +219,18 @@
+             let (is_multipart, mut is_inline, mut is_text, mut mime_type) =
+                 mime_type(content_type, &state.mime_type);
+ 
+-            if is_multipart
++            if is_multipart && (too_deep || failed_seeks >= MAX_FAILED_SEEKS) {
++                // NightMail: demasiado hondo, o ya se buscaron demasiados separadores en vano (cada búsqueda
++                // fallida recorre hasta el final); se lee como una parte opaca.
++                cut = true;
++                mime_type = MimeType::Other;
++                is_text = false;
++            } else if is_multipart
+                 && let Some(mime_boundary) = content_type.and_then(|f| f.attribute("boundary"))
+             {
+-                if stream.seek_next_part(mime_boundary.as_bytes()) {
++                let found = stream.seek_next_part(mime_boundary.as_bytes());
++                failed_seeks += usize::from(!found);
++                if found {
+                     let part_id = message.parts.len();
+                     let new_state = MessageParserState {
+                         in_alternative: state.in_alternative
+@@ -211,6 +281,13 @@
+                 _ => (Encoding::None, MessageStream::mime_part),
+             };
+ 
++            if mime_type == MimeType::Message && too_deep {
++                // NightMail: un message/rfc822 demasiado hondo no se abre (rama binaria de abajo).
++                cut = true;
++                mime_type = MimeType::Other;
++                is_text = false;
++            }
++
+             if mime_type == MimeType::Message && encoding == Encoding::None {
+                 let new_state = MessageParserState {
+                     mime_type: MimeType::Message,
+@@ -242,7 +319,7 @@
+             );
+ 
+             // Attempt to recover contents of an invalid message
+-            let mut is_encoding_problem = offset_end == usize::MAX;
++            let is_encoding_problem = offset_end == usize::MAX;
+             if is_encoding_problem {
+                 encoding = Encoding::None;
+                 if mime_type != MimeType::TextPlain {
+@@ -353,27 +430,11 @@
+             } else {
+                 message.attachments.push(message.parts.len() as u32);
+ 
+-                if depth != 0 {
+-                    if let Some(nested_message) = self.parse_(bytes.as_ref(), depth - 1, false) {
+-                        PartType::Message(Message {
+-                            html_body: nested_message.html_body,
+-                            text_body: nested_message.text_body,
+-                            attachments: nested_message.attachments,
+-                            parts: nested_message
+-                                .parts
+-                                .into_iter()
+-                                .map(|p| p.into_owned())
+-                                .collect(),
+-                            raw_message: bytes.into_owned().into(),
+-                        })
+-                    } else {
+-                        is_encoding_problem = true;
+-                        PartType::Binary(bytes)
+-                    }
+-                } else {
+-                    is_encoding_problem = true;
+-                    PartType::Binary(bytes)
+-                }
++                // NightMail: un message/rfc822 CODIFICADO (base64/quoted-printable) no se analiza: queda como
++                // adjunto binario. Analizarlo copiaba su raw_message en cada nivel (N × tamaño) y el
++                // `into_owned` recursivo podía desbordar la pila; MAX_NESTED_ENCODED (`depth`) ya no se usa.
++                let _ = depth;
++                PartType::Binary(bytes)
+             };
+ 
+             // Add part
+@@ -550,6 +611,8 @@
+ 
+         if !message.is_empty() {
+             message.parts[0].offset_end = message.raw_message.len() as u32;
++            // NightMail
++            message.parts[0].is_encoding_problem |= cut;
+             Some(message)
+         } else if !part_headers.is_empty() {
+             // Message without a body
+--- a/Cargo.toml	2006-07-24 03:21:28.000000000 +0200
++++ b/Cargo.toml	2026-11-19 16:45:21.912866098 +0100
+@@ -50,30 +50,6 @@
+ path = "src/lib.rs"
+ doctest = false
+ 
+-[[example]]
+-name = "custom_parser"
+-path = "examples/custom_parser.rs"
+-
+-[[example]]
+-name = "mailbox_iterate_maildir"
+-path = "examples/mailbox_iterate_maildir.rs"
+-
+-[[example]]
+-name = "mailbox_parse_mbox"
+-path = "examples/mailbox_parse_mbox.rs"
+-
+-[[example]]
+-name = "message_parse"
+-path = "examples/message_parse.rs"
+-
+-[[example]]
+-name = "message_write_attachments"
+-path = "examples/message_write_attachments.rs"
+-
+-[[test]]
+-name = "integration_test"
+-path = "tests/integration_test.rs"
+-
+ [dependencies.encoding_rs]
+ version = "0.8"
+ optional = true

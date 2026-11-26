@@ -1,0 +1,106 @@
+[package]
+name = "nightmail-desktop"
+version = "0.1.0"
+description = "NightMail: private email provider on Midnight (desktop app)"
+authors = ["NightMail"]
+publish = false
+repository = "https://github.com/Leyenda95/nightmail"
+edition = "2024"
+rust-version = "1.90"
+
+[lib]
+name = "nightmail_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+# Pinned to Tauri 2: the newest published crate is already a 3.0 alpha.
+tauri = { version = "2.12.5", features = [] }
+tauri-plugin-log = "2"
+# Opens links in the system browser from Rust only (`open_link`): no plugin, IPC command or webview permission.
+# `shellexecute-on-windows` uses `ShellExecuteExW` instead of going through `cmd`.
+open = { version = "5.4.5", features = ["shellexecute-on-windows"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = "0.4"
+tokio = { version = "1", features = ["process", "io-util", "sync", "time", "macros", "rt-multi-thread"] }
+zeroize = "1.9.1"
+ts-rs = "12.0.1"
+rusqlite = { version = "0.43.0", features = ["bundled-sqlcipher-vendored-openssl"] }
+libc = "0.2"
+# The RustCrypto/dalek versions that reproduced the 228 test vectors. Unused default features are disabled
+# (aead's getrandom, bip39's std…).
+bip39 = { version = "2.2.2", default-features = false, features = ["alloc", "zeroize"] }
+argon2 = { version = "0.5.3", default-features = false, features = ["zeroize"] }
+hkdf = "0.12.4"
+sha2 = "0.10.9"
+aes-gcm = { version = "0.10.3", default-features = false, features = ["aes", "alloc", "zeroize"] }
+# Direct dependency only to enable its `zeroize` feature (expanded AES keys are wiped on drop).
+aes = { version = "0.8.4", features = ["zeroize"] }
+chacha20poly1305 = { version = "0.10.1", default-features = false }
+x25519-dalek = { version = "2.0.1", features = ["static_secrets", "zeroize"] }
+ed25519-dalek = { version = "2.2.0", default-features = false, features = ["fast", "zeroize"] }
+url = "2.5.8"
+getrandom = "0.3.4"
+hex = "0.4.3"
+# Inline (`cid:`) images are handed to the UI as `data:` URLs.
+base64 = "0.23.1"
+# Password NFC normalisation before Argon2id.
+unicode-normalization = "0.1.26"
+# HTTP/1.1 only over rustls (`ring` provider: builds without cmake/NASM on all three platforms); no cookies,
+# environment proxies or decompression. Own ClientConfig (no resumption) with the platform verifier.
+# mail-parser 1.x needs rustc 1.98, so 0.11 is pinned (with `full_encoding` for CJK and other charsets).
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+httpdate = "1.0.3"
+# mail-parser is built patched from vendor/ (depth and part limits; see [patch.crates-io] below).
+# Do not set `panic = "abort"` in any profile: it would defeat the parser's `catch_unwind` (src/mail/parser.rs).
+mail-parser = { version = "0.11.9", features = ["full_encoding"] }
+rustls-platform-verifier = "0.7.1"
+
+# Private profile directory permissions on Windows (DACL, see `fsutil`). 0.61 was already in the lockfile via
+# tokio/mio, so no new crate is pulled in. Windows only: nothing extra builds on Linux or macOS.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_Media_Audio",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+# Fake HTTP server for tests (TcpListener).
+tokio = { version = "1", features = ["net"] }
+
+# Crypto and hashes optimised in debug too. Not enough for the 32 MiB envelope tests, because the hot code is
+# generic (AES-GCM, GHASH) and monomorphised inside our crate; the `nightmail-desktop` test profile below covers that.
+[profile.dev.package.aes]
+opt-level = 3
+[profile.dev.package.aes-gcm]
+opt-level = 3
+[profile.dev.package.ghash]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+# MIME parser optimised in debug too (the limit tests measure timings as in the app).
+[profile.dev.package.mail-parser]
+opt-level = 3
+# Unoptimised Argon2id (64 MiB, t = 3) takes seconds in debug.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
+# Only for `cargo test`, not `tauri dev`. Sealing and opening the 32 MiB envelopes: 41 s at opt 0, 33 s at opt 1,
+# 2.3 s at opt 2.
+[profile.test.package.nightmail-desktop]
+opt-level = 2
+
+# mail-parser 0.11.9 with depth and part limits, and no parsing of encoded message/rfc822 parts
+# (rationale in vendor/mail-parser-0.11.9/README-NIGHTMAIL.md, exact diff in vendor/mail-parser-0.11.9/nightmail.patch).
+[patch.crates-io]
+mail-parser = { path = "../../../vendor/mail-parser-0.11.9" }

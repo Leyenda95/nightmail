@@ -1,0 +1,48 @@
+{
+  "note": "Signed Issuer receipt (P4), version 2. Generated with apps/server/src/issuer/receipt.ts (node:crypto Ed25519, RFC 8032). Lowercase hex without 0x; insertBy in decimal (u64, Unix seconds). Verifiers (the Rust core, the client) must reproduce `message` of every `valid` entry and accept its `signature` with `publicKey`.",
+  "constants": {
+    "domain": "nightmail/bono-receipt/v2",
+    "layout": "utf8(domain) || 0x00 || contract (32 bytes) || id (32 bytes) || planByte || periodByte || insertBy (u64 big-endian)",
+    "planByte": {
+      "free": 0,
+      "paid": 1
+    },
+    "periodByte": {
+      "none": 0,
+      "monthly": 1,
+      "annual": 2
+    },
+    "signature": "Ed25519 over the whole message (no prehash), 64 bytes"
+  },
+  "seed": "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+  "publicKey": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+  "valid": [
+    {
+      "contract": "0a739f6611111111111111111111111111111111111111111111111111111111",
+      "id": "0101010101010101010101010101010101010101010101010101010101010101",
+      "plan": "free",
+      "period": "none",
+      "insertBy": "1800003960",
+      "message": "6e696768746d61696c2f626f6e6f2d726563656970742f7632000a739f661111111111111111111111111111111111111111111111111111111101010101010101010101010101010101010101010101010101010101010101010000000000006b49e178",
+      "signature": "2e3d99e53aa57ee42e6ed7118b6ff4345e7bea1c3cfc55b28f0f2fb05f16f2e1f175c9a3b44f9d24e98255058703b11c1d7d2aa6f6537a7b764f9dfd06cccf0b"
+    },
+    {
+      "contract": "0a739f6611111111111111111111111111111111111111111111111111111111",
+      "id": "abababababababababababababababababababababababababababababababab",
+      "plan": "paid",
+      "period": "monthly",
+      "insertBy": "1800007200",
+      "message": "6e696768746d61696c2f626f6e6f2d726563656970742f7632000a739f6611111111111111111111111111111111111111111111111111111111abababababababababababababababababababababababababababababababab0101000000006b49ee20",
+      "signature": "5c6b59740a7d8e8f3dc02a11f6723214b613d17c1ab7d41913f514d4a84a09dc7f59a7457e0acf25e9648f052ddd236996ef9b19c82dde3e0a0547ec67405e0b"
+    },
+    {
+      "contract": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "id": "fefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefe",
+      "plan": "paid",
+      "period": "annual",
+      "insertBy": "18446744073709551615",
+      "message": "6e696768746d61696c2f626f6e6f2d726563656970742f763200fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefe0102ffffffffffffffff",
+      "signature": "15e40208f029d107dc2229671496c4ed38c66fbba70fc8ddcf34dd5fad95121f825398e7042df33b19901c22124ac17b903c95c088f80e0ae41a2fd21746d00a"
+    }
+  ]
+}

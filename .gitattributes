@@ -1,0 +1,30 @@
+# Normalize text files by default (LF in the repository).
+* text=auto
+
+# Files that must keep LF on every platform, even on Windows with
+# core.autocrlf=true. A CRLF here breaks the shebang or the parser.
+*.sh   text eol=lf
+*.py   text eol=lf
+*.yml  text eol=lf
+*.toml text eol=lf
+*.rs   text eol=lf
+*.ts   text eol=lf
+*.tsx  text eol=lf
+*.json text eol=lf
+*.compact text eol=lf
+.env.example text eol=lf
+
+# PowerShell 5.1 reads LF scripts fine, so *.ps1 follows the default
+# (text=auto) and is not forced to CRLF.
+
+# Vendored crates must stay byte-exact (cargo checksums, patches).
+vendor/** -text
+*.patch -text
+
+# Binary files that git might misdetect.
+*.png   binary
+*.ico   binary
+*.icns  binary
+*.wav   binary
+*.woff2 binary
+*.ttf   binary

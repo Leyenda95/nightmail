@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-sent"
+description = "Enables the list_sent command without any pre-configured scope."
+commands.allow = ["list_sent"]
+
+[[permission]]
+identifier = "deny-list-sent"
+description = "Denies the list_sent command without any pre-configured scope."
+commands.deny = ["list_sent"]
