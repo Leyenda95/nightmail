@@ -66,9 +66,6 @@ test('profiles: the same words in both languages, "perfil" and never "cuenta"', 
   assert.equal(en.accounts.soon, 'Soon');
   assert.equal(es.accounts.backToAccounts, 'Volver a mis perfiles');
   assert.equal(en.accounts.backToAccounts, 'Back to my profiles');
-  assert.equal(es.accounts.openingTitle, 'Abriendo el perfil…');
-  assert.equal(en.accounts.openingTitle, 'Opening the profile…');
-  assert.equal(es.accounts.openingText, 'NightMail se cerrará y se abrirá de nuevo con el perfil elegido.');
   assert.equal(es.accounts.failed, 'No se ha podido cambiar de perfil. Vuelve a intentarlo.');
   assert.equal(es.startup.chooseOther, 'Elegir otro perfil');
   assert.equal(en.startup.chooseOther, 'Choose another profile');

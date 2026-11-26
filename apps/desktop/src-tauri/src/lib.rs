@@ -37,26 +37,24 @@ mod store;
 mod supervisor;
 mod transport;
 
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use accounts::{Accounts, WindowPlace};
+use accounts::Accounts;
 use app::{App, AppEvent, CoreError};
-use commands::AppState;
+use commands::{AppState, Profile};
 use instance::ProfileLock;
 use protocol::InitializeParams;
 use supervisor::{SidecarConfig, SidecarSupervisor};
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, RunEvent, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent};
 
 /// Name of the single core-to-UI event (payload: `AppEvent`).
 const EVENT: &str = "nightmail";
 /// How often to check whether the payment delaying shutdown has finished.
 const EXIT_POLL: Duration = Duration::from_secs(1);
-/// Label of the app's only window (`tauri.conf.json`).
-const MAIN_WINDOW: &str = "main";
-/// How long startup keeps trying to take an account that is in use (the previous process finishing after a switch).
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
+/// How long startup keeps trying to take an account that is in use (the previous run of the app may still be
+/// finishing).
 const LOCK_WAIT: Duration = Duration::from_secs(3);
 
 /// Debug builds (devnet): profile, configuration and deployment come from the environment and the repository.
@@ -85,29 +83,30 @@ mod dev {
 
 /// The profile folder that holds the accounts (`accounts`). Release builds have none yet.
 #[cfg(debug_assertions)]
-fn profile_root(app: &tauri::App) -> Option<std::path::PathBuf> {
+fn profile_root(app: &tauri::App) -> Option<PathBuf> {
     dev::profile_dir(app)
 }
 
 #[cfg(not(debug_assertions))]
-fn profile_root(_app: &tauri::App) -> Option<std::path::PathBuf> {
+fn profile_root(_app: &tauri::App) -> Option<PathBuf> {
     None
 }
 
-/// The app on the account opened at startup, with its folder locked (see `instance`), or the error every command will
-/// return: `profileInUse` when another live instance holds the account, `badConfig` when settings are missing.
+/// The app on the open account, with its folder locked (see `instance`), or the error every command will return:
+/// `profileInUse` when another live instance holds the account, `badConfig` when settings are missing. `lock_wait`: how
+/// long to keep trying while the account is in use.
 #[cfg(debug_assertions)]
 fn build_app(
-    app: &tauri::App,
+    handle: &AppHandle,
     sidecar: Arc<SidecarSupervisor>,
     accounts: Option<&Accounts>,
+    lock_wait: Duration,
 ) -> Result<(Arc<App>, ProfileLock), CoreError> {
     use app::EventSink;
     use transport::{Transport, TransportConfig};
     let profile = accounts.ok_or(CoreError::BadConfig)?.current_dir();
-    // Lock first: while another instance owns the profile, none of its files may be touched. After switching accounts
-    // the previous process may still be finishing, so it is given a moment.
-    let lock = ProfileLock::acquire_waiting(&profile, LOCK_WAIT).map_err(|e| {
+    // Lock first: while another instance owns the profile, none of its files may be touched.
+    let lock = ProfileLock::acquire_waiting(&profile, lock_wait).map_err(|e| {
         log::error!("[app] could not take the profile {}: {e:?}", profile.display());
         e.core_error()
     })?;
@@ -117,7 +116,7 @@ fn build_app(
             CoreError::BadConfig
         })?;
     let transport = Arc::new(Transport::direct(&TransportConfig::default()).map_err(|_| CoreError::BadConfig)?);
-    let handle = app.handle().clone();
+    let handle = handle.clone();
     let sink: EventSink = Arc::new(move |event| {
         let _ = handle.emit(EVENT, event);
     });
@@ -128,9 +127,10 @@ fn build_app(
 /// is not defined yet, so release builds neither start the sidecar nor open the app.
 #[cfg(not(debug_assertions))]
 fn build_app(
-    _app: &tauri::App,
+    _handle: &AppHandle,
     _sidecar: Arc<SidecarSupervisor>,
     _accounts: Option<&Accounts>,
+    _lock_wait: Duration,
 ) -> Result<(Arc<App>, ProfileLock), CoreError> {
     log::error!("[app] release configuration pending");
     Err(CoreError::BadConfig)
@@ -148,52 +148,34 @@ fn exit_when_idle(handle: &AppHandle, core: Arc<App>, finish: impl FnOnce() + Se
 }
 
 fn busy_core(handle: &AppHandle) -> Option<Arc<App>> {
-    handle.state::<AppState>().app.as_ref().ok().filter(|core| core.wallet_busy()).cloned()
+    handle.state::<AppState>().busy_core()
 }
 
-/// Restarts the app to open another account (`current-account` is already written). The normal exit runs first
-/// (`RunEvent::Exit`: `core.shutdown()`), then Tauri starts the same executable with the same arguments, environment
-/// and working directory. The window's size and position are saved so the new process opens it in the same place.
-pub(crate) fn restart_for_account(handle: &AppHandle, root: &Path) {
-    if let Some(window) = handle.get_webview_window(MAIN_WINDOW) {
-        let place = WindowPlace {
-            // Wayland does not report positions: then only the size is kept.
-            position: window.outer_position().ok().map(|p| (p.x, p.y)),
-            size: window.inner_size().ok().map(|s| (s.width, s.height)),
-            maximized: window.is_maximized().unwrap_or(false),
-        };
-        if let Err(e) = accounts::save_window_place(root, place) {
-            log::warn!("[accounts] could not save the window place: {e}");
-        }
-    }
-    handle.request_restart();
-}
-
-/// Puts the window where it was before restarting for another account (only then is there a saved place).
-fn restore_window_place(app: &tauri::App, root: &Path) {
-    let (Some(place), Some(window)) = (accounts::take_window_place(root), app.get_webview_window(MAIN_WINDOW)) else {
-        return;
+/// Opens the account that `current-account` names under `root` (release builds have no profile folder yet): the
+/// accounts as they are now, a Midnight of its own (started lazily, warmed up in the background) and the app on that
+/// account, with its folder locked. At startup and each time another account opens in the same window
+/// (`commands::reopen`). Also returns whether the profile list goes first (`accounts::take_show_accounts`).
+pub(crate) fn open_profile(handle: &AppHandle, root: Option<PathBuf>, lock_wait: Duration) -> (Profile, bool) {
+    // Local devnet for now; the network (devnet/preprod) will become a core setting.
+    let sidecar = Arc::new(SidecarSupervisor::new(
+        SidecarConfig::resolve(),
+        InitializeParams::devnet(cfg!(debug_assertions)),
+    ));
+    let accounts = root.map(Accounts::at_startup);
+    let show_accounts = accounts.as_ref().is_some_and(|a| accounts::take_show_accounts(a.root()));
+    let (app, profile_lock) = match build_app(handle, Arc::clone(&sidecar), accounts.as_ref(), lock_wait) {
+        Ok((core, lock)) => (Ok(core), Some(lock)),
+        Err(e) => (Err(e), None),
     };
-    // Only onto a screen that is there now (several monitors: one may have been unplugged).
-    let screens: Vec<accounts::ScreenRect> = window
-        .available_monitors()
-        .unwrap_or_default()
-        .iter()
-        .map(|m| ((m.position().x, m.position().y), (m.size().width, m.size().height)))
-        .collect();
-    let position = place.position.filter(|&p| accounts::reachable(p, &screens));
-    // Maximised, the saved size is the whole screen's: moving to that screen and maximising again is enough.
-    if !place.maximized
-        && let Some((width, height)) = place.size
-    {
-        let _ = window.set_size(PhysicalSize::new(width, height));
+    // If another instance owns the profile, start nothing: the UI only explains the situation. Otherwise warm up in the
+    // background so the front screen does not wait for Midnight.
+    if app.as_ref().err() != Some(&CoreError::ProfileInUse) {
+        let warm = Arc::clone(&sidecar);
+        tauri::async_runtime::spawn(async move {
+            let _ = warm.client().await;
+        });
     }
-    if let Some((x, y)) = position {
-        let _ = window.set_position(PhysicalPosition::new(x, y));
-    }
-    if place.maximized {
-        let _ = window.maximize();
-    }
+    (Profile { sidecar, app, accounts, profile_lock }, show_accounts)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -206,37 +188,12 @@ pub fn run() {
                 app.handle()
                     .plugin(tauri_plugin_log::Builder::default().level(log::LevelFilter::Info).build())?;
             }
-            // Local devnet for now; the network (devnet/preprod) will become a core setting.
-            let sidecar = Arc::new(SidecarSupervisor::new(
-                SidecarConfig::resolve(),
-                InitializeParams::devnet(cfg!(debug_assertions)),
-            ));
-            // The account to open is fixed here for the whole run (switching restarts the app).
-            let accounts = profile_root(app).map(Accounts::at_startup);
-            let mut show_accounts = false;
-            if let Some(accounts) = &accounts {
-                restore_window_place(app, accounts.root());
-                show_accounts = accounts::take_show_accounts(accounts.root());
-            }
-            let (core, profile_lock) = match build_app(app, Arc::clone(&sidecar), accounts.as_ref()) {
-                Ok((core, lock)) => (Ok(core), Some(lock)),
-                Err(e) => (Err(e), None),
-            };
-            // If another instance owns the profile, start nothing: the UI only explains the situation.
-            let warm_up = core.as_ref().err() != Some(&CoreError::ProfileInUse);
-            app.manage(AppState {
-                sidecar: Arc::clone(&sidecar),
-                app: core,
-                accounts,
-                profile_lock,
-                show_accounts: show_accounts.into(),
-            });
-            // Warm up in the background so startup does not wait for Midnight.
-            if warm_up {
-                tauri::async_runtime::spawn(async move {
-                    let _ = sidecar.client().await;
-                });
-            }
+            // Another account opens in this same window later (`commands::switch_account`), never by restarting.
+            let (profile, show_accounts) = open_profile(app.handle(), profile_root(app), LOCK_WAIT);
+            // On a cold start the profile list always goes first when there is a profile to choose. Only here: opening
+            // another profile from the list in this window lands on its front screen.
+            let show_accounts = show_accounts || profile.accounts.as_ref().is_some_and(Accounts::list_first_at_startup);
+            app.manage(AppState::new(profile, show_accounts));
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -318,13 +275,7 @@ pub fn run() {
         }
         RunEvent::Exit => {
             let state = handle.state::<AppState>();
-            let (sidecar, core) = (Arc::clone(&state.sidecar), state.app.as_ref().ok().cloned());
-            tauri::async_runtime::block_on(async move {
-                match core {
-                    Some(core) => core.shutdown().await,
-                    None => sidecar.shutdown().await,
-                }
-            });
+            tauri::async_runtime::block_on(state.shutdown());
         }
         _ => {}
     });

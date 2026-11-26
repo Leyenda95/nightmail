@@ -48,6 +48,8 @@ pub enum CoreError {
     InvalidInput,
     /// Lock requested with an operation or payment in flight: wait for it to finish.
     SessionBusy,
+    /// Another profile was opened in this window while the open one was being deleted: nothing was deleted.
+    ProfileChanged,
     /// The restore has not finished: `recover` must complete before asking for the plan or addresses.
     RecoveryPending,
     /// This network has no test token, so there is no faucet.

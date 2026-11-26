@@ -56,7 +56,7 @@ const LOCK_SHOWN: BadgeState = { unread: 0, locked: true, showCount: true };
 export function createBadgeSender(
   send: (s: BadgeState) => Promise<boolean>,
   retry: BadgeRetry = RETRY,
-): (next: BadgeState) => void {
+): (next: BadgeState, force?: boolean) => void {
   let last: BadgeState | null = null;
   /** `tries`: the retries already made of `s`. */
   const attempt = (s: BadgeState, tries: number): void => {
@@ -77,8 +77,9 @@ export function createBadgeSender(
       },
     );
   };
-  return (next) => {
-    const s = badgeToSend(next, last);
+  // `force`: sent even if it looks like the last one (what that was is no longer known: another profile opened).
+  return (next, force = false) => {
+    const s = badgeToSend(next, force ? null : last);
     if (s === null) return;
     last = s;
     attempt(s, 0);
@@ -96,6 +97,10 @@ export function useTaskbarBadge(unread: number): void {
     pushBadge({ unread, locked: false, showCount });
   }, [unread, showCount]);
 }
+
+/** Another profile opened in this window: nothing on the taskbar, as on a fresh start. The new profile's core has never
+ *  had a session, so it draws nothing whatever is asked, and this sender forgets the padlock it remembered. */
+export const badgeCleared = (): void => pushBadge({ unread: 0, locked: false, showCount: false }, true);
 
 /** On locking: the padlock. Even if an Inbox read from before locking later asks for the number, the core with no
  *  session keeps the padlock (`set_taskbar_badge`). */

@@ -53,6 +53,8 @@ pub type Result<T> = std::result::Result<T, AppError>;
 /// Maximum wait for the orchestrator's orderly shutdown when the session closes. With a payment in flight this is
 /// never reached: exit is postponed ([`App::wallet_busy`]) and locking answers `sessionBusy`.
 const SHUTDOWN_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
+/// How often [`App::shutdown_released`] looks whether the database was released.
+const RELEASE_POLL: std::time::Duration = std::time::Duration::from_millis(10);
 /// Maximum wait for sync to release the store when the session closes. It only runs out if the round is inside a
 /// blocking thread (parsing or storing a message), which cannot be interrupted: closing goes on, the round task is
 /// aborted, and that thread finishes its message alone (an atomic store write; the store stays open while in use)
@@ -96,6 +98,8 @@ pub struct App {
     seed_draft: std::sync::Mutex<Option<(u32, keys::Draft)>>,
     /// Last draft `id` handed out.
     draft_ids: std::sync::atomic::AtomicU32,
+    /// The database of the last session opened, to know when nothing holds it any more ([`App::shutdown_released`]).
+    last_store: std::sync::Mutex<std::sync::Weak<LocalStore>>,
 }
 
 /// Session usage: closed, or with `active` operations in flight.
@@ -235,6 +239,7 @@ impl App {
             password_change: Mutex::new(()),
             seed_draft: std::sync::Mutex::new(None),
             draft_ids: Default::default(),
+            last_store: Default::default(),
         }
     }
 
@@ -383,6 +388,14 @@ impl App {
         Ok(())
     }
 
+    /// Would [`App::lock`] answer `sessionBusy` now (an operation or payment in flight)? Non-blocking: during an unlock
+    /// in progress, `false`.
+    pub fn session_busy(&self) -> bool {
+        self.session.try_lock().is_ok_and(|slot| {
+            slot.as_ref().is_some_and(|s| lock_usage(&s.usage).active > 0 || s.wallet_busy())
+        })
+    }
+
     /// Is a wallet payment in flight? If so the app must not exit. Non-blocking: if the session lock is held (unlock
     /// in progress) there cannot be a payment.
     pub fn wallet_busy(&self) -> bool {
@@ -395,6 +408,12 @@ impl App {
     /// even then the atomic `rename` leaves either the old or the new file, complete. First of all, the words of a
     /// profile being created are wiped (the process ends without dropping the `App`).
     pub async fn shutdown(&self) {
+        self.close_for_good().await;
+        self.sidecar.shutdown().await;
+    }
+
+    /// What [`App::shutdown`] does before stopping the sidecar.
+    async fn close_for_good(&self) {
         self.forget_draft();
         let _change = tokio::time::timeout(SHUTDOWN_WAIT, self.password_change.lock()).await;
         let session = self.session.lock().await.take();
@@ -402,11 +421,33 @@ impl App {
             lock_usage(&session.usage).closed = true;
             session.close().await;
         }
-        self.sidecar.shutdown().await;
+    }
+
+    /// Like [`App::shutdown`], before another profile opens in this same process (switching profiles, always with the
+    /// session already locked): the sidecar is killed at once instead of being given its grace period (session and
+    /// wallet are already closed, so nothing of this profile is open in it), and afterwards it waits until nothing
+    /// holds the last session's database any more, so its files are really closed before the profile is released or
+    /// its files are removed. Closing aborts the session's tasks, and an aborted task drops its copy only when the
+    /// runtime gets to it, or, inside a blocking thread, when that thread finishes its message. Capped
+    /// (`SHUTDOWN_WAIT`): returns whether it was released in time.
+    pub async fn shutdown_released(&self) -> bool {
+        self.close_for_good().await;
+        self.sidecar.kill().await;
+        let store = self.last_store.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let deadline = tokio::time::Instant::now() + SHUTDOWN_WAIT;
+        while store.strong_count() > 0 {
+            if tokio::time::Instant::now() >= deadline {
+                log::warn!("[app] the database of the closed profile is still in use");
+                return false;
+            }
+            tokio::time::sleep(RELEASE_POLL).await;
+        }
+        true
     }
 
     /// Puts the open session in place.
     fn put(&self, slot: &mut Option<Arc<Session>>, session: Arc<Session>) {
+        *self.last_store.lock().unwrap_or_else(|e| e.into_inner()) = Arc::downgrade(&session.store);
         *slot = Some(session);
         self.ever_opened.store(true, std::sync::atomic::Ordering::Relaxed);
     }

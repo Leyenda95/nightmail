@@ -4,9 +4,16 @@
 //! database and wallet). The profile folder itself is account 1, exactly as before: nothing is moved or migrated.
 //! Further accounts live in `<profile>/accounts/<id>/`, where `<id>` is 32 lowercase hex characters generated here.
 //!
-//! `<profile>/current-account` names the account opened at startup. Missing, unreadable, malformed or pointing at a
-//! folder that does not exist: account 1. The folder is fixed for the whole run; switching writes this file and
-//! restarts the app.
+//! `<profile>/current-account` names the account to open. Missing, unreadable, malformed or pointing at a folder that
+//! does not exist: account 1. It is read at startup and again each time another account opens in the same window:
+//! switching writes this file, closes the open account and reads the accounts again ([`Accounts::at_startup`]).
+//!
+//! `<profile>/last-entered-account` names the account entered most recently: its session opened (unlocked with the
+//! password, or created or restored). The list marks it ("Usado recientemente"), not the one merely chosen in
+//! `current-account`, which only says what opens next. Missing (an installation from before this file, or nothing
+//! entered yet): the open account is marked, as before. Empty, malformed or naming an account that is not listed: none
+//! is marked until the next one is entered. Deleting the account it names empties it (removing it would mark the open
+//! account again).
 //!
 //! Ids coming from the UI are only accepted with that exact shape (or `main`), so no path is ever taken from the UI
 //! and `..`, `/` or `\` cannot reach the file system. Only accounts with a `seed.v1` are listed: a folder prepared for
@@ -23,9 +30,6 @@
 //! a name that is exactly `Perfil <n>` or `Profile <n>` is therefore read as the automatic one with that number, whoever
 //! wrote it (see [`auto_number_in`]). Neither file (account 1 from before names existed, or saving failed): the number
 //! is [`AccountView::number`], the place in the list, and for accounts other than 1 it is fixed at the next startup.
-//!
-//! The window size and position survive the restart through `<profile>/window-state`, written just before
-//! restarting and read (and removed) at startup.
 //!
 //! Deleting an account (see [`Accounts::prepare_delete`] and [`Accounts::delete`]) removes only that account's files on
 //! this device, by validated id, never by a path or a name from the UI. An account under `accounts/` loses its whole
@@ -52,8 +56,8 @@ use crate::keys::{self, ATTEMPTS_FILE_NAME, KeyError, SEED_FILE_NAME};
 pub const ACCOUNTS_DIR: &str = "accounts";
 /// File, inside the profile, naming the account to open at startup.
 pub const CURRENT_FILE: &str = "current-account";
-/// File, inside the profile, with the window size and position to restore after a restart.
-pub const WINDOW_FILE: &str = "window-state";
+/// File, inside the profile, naming the account entered most recently (see the module docs).
+pub const LAST_ENTERED_FILE: &str = "last-entered-account";
 /// File, inside an account's folder, with the name chosen for it.
 pub const NAME_FILE: &str = "account-name";
 /// File, inside an account's folder, with the number of its automatic name ("Perfil 4"), fixed once written.
@@ -70,11 +74,12 @@ const ID_BYTES: usize = 16;
 const MAX_SMALL_FILE: u64 = 256;
 /// Folder, inside an account's folder, with the mail database and the wallet of each network (`AppConfig::scope_dir`).
 pub const NETWORKS_DIR: &str = "networks";
-/// File, inside the profile, asking the next startup to show the profile list first: written before restarting after
-/// deleting the open account, read and removed at startup.
+/// File, inside the profile, asking to show the profile list first: written after deleting the open account, read and
+/// removed when the next account opens.
 pub const SHOW_ACCOUNTS_FILE: &str = "show-accounts";
 /// What belongs to account 1 in the profile folder (plus the temp files of those files, and its `instance.lock`, which
-/// stays). Everything else there (`accounts/`, `current-account`, `window-state`, anything unknown) is left alone.
+/// stays). Everything else there (`accounts/`, `current-account`, `last-entered-account`, anything unknown) is left
+/// alone.
 pub const MAIN_OWNED: &[&str] = &[SEED_FILE_NAME, ATTEMPTS_FILE_NAME, NAME_FILE, NUMBER_FILE, NETWORKS_DIR];
 
 /// An account: the profile folder itself or one under `accounts/`.
@@ -106,8 +111,8 @@ impl AccountId {
     }
 }
 
-/// An account as the UI sees it: no address, only the name chosen for it (if any), its number, when it was created and
-/// whether it is the one this window has open.
+/// An account as the UI sees it: no address, only the name chosen for it (if any), its number, when it was created,
+/// whether it is the one this window has open and whether it is the one entered most recently.
 #[derive(Serialize, TS, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../../desktop/src/bindings/")]
@@ -123,11 +128,14 @@ pub struct AccountView {
     /// Creation time in Unix seconds (the account folder's), if the file system knows it.
     #[ts(type = "number | null")]
     pub created_at: Option<i64>,
-    /// The account this window opened at startup.
+    /// The account this window has open.
     pub current: bool,
+    /// The account entered most recently, unlocked or created or restored (marked "Usado recientemente"). Choosing or
+    /// opening an account does not move it. At most one account has it (`last-entered-account`).
+    pub recent: bool,
 }
 
-/// The accounts of a profile folder and the one opened at startup.
+/// The accounts of a profile folder and the one open now.
 #[derive(Debug, Clone)]
 pub struct Accounts {
     root: PathBuf,
@@ -135,8 +143,9 @@ pub struct Accounts {
 }
 
 impl Accounts {
-    /// At startup: the account named in `current-account` (account 1 if that fails), after removing abandoned folders
-    /// of other accounts that hold nothing but their lock file.
+    /// At startup, and each time another account opens in the same window: the account named in `current-account`
+    /// (account 1 if that fails), after removing abandoned folders of other accounts that hold nothing but their lock
+    /// file.
     pub fn at_startup(root: PathBuf) -> Self {
         let current = read_current(&root);
         remove_abandoned(&root, &current);
@@ -194,18 +203,20 @@ impl Accounts {
         }
         // Unknown creation times go last; equal ones by id, so the order never changes between calls.
         extras.sort_by(|a, b| (a.0.is_none(), a.0, &a.1).cmp(&(b.0.is_none(), b.0, &b.1)));
+        let recent = self.last_entered();
         let mut list = Vec::with_capacity(extras.len() + 1);
         if has_seed(&self.root) {
-            list.push(self.view(AccountId::Main, 1, created_at(&self.root)));
+            list.push(self.view(AccountId::Main, 1, created_at(&self.root), recent.as_ref()));
         }
         for (number, (created, id)) in (2u32..).zip(extras) {
-            list.push(self.view(AccountId::Extra(id), number, created));
+            list.push(self.view(AccountId::Extra(id), number, created, recent.as_ref()));
         }
         Ok(list)
     }
 
-    fn view(&self, id: AccountId, number: u32, created_at: Option<i64>) -> AccountView {
+    fn view(&self, id: AccountId, number: u32, created_at: Option<i64>, recent: Option<&AccountId>) -> AccountView {
         let current = id == self.current;
+        let recent = recent == Some(&id);
         let dir = self.dir(&id);
         let fixed = || read_number(&dir).unwrap_or(number);
         let (name, auto_number) = match read_name(&dir) {
@@ -215,7 +226,33 @@ impl Accounts {
             },
             None => (None, fixed()),
         };
-        AccountView { id: id.as_str().to_owned(), name, number, auto_number, created_at, current }
+        AccountView { id: id.as_str().to_owned(), name, number, auto_number, created_at, current, recent }
+    }
+
+    /// Whether a cold start shows the profile list first: some account has a seed, so there is one to choose (even a
+    /// single one). With none (a first run, or only an empty account 1) the front screen offers to create or restore
+    /// straight away. A list that cannot be read opens the account as before.
+    pub fn list_first_at_startup(&self) -> bool {
+        self.list().is_ok_and(|list| !list.is_empty())
+    }
+
+    /// The account entered most recently, as `last-entered-account` names it. Missing: the open account (installations
+    /// from before that file, or nothing entered yet). Present but malformed: none.
+    fn last_entered(&self) -> Option<AccountId> {
+        let path = self.root.join(LAST_ENTERED_FILE);
+        if path.symlink_metadata().is_err() {
+            return Some(self.current.clone());
+        }
+        AccountId::parse(read_small_file(&path)?.trim())
+    }
+
+    /// Remembers `id` as the account entered most recently: its session just opened (unlocked, or created or restored).
+    /// Only a listed account (one with a seed).
+    pub fn mark_entered(&self, id: &AccountId) -> io::Result<()> {
+        if !self.has_seed(id) {
+            return Err(io::Error::from(io::ErrorKind::NotFound));
+        }
+        write_small_file(&self.root, LAST_ENTERED_FILE, id.as_str().as_bytes())
     }
 
     /// Names an account that already has a seed (so a folder abandoned before that keeps holding only its lock) and
@@ -244,7 +281,7 @@ impl Accounts {
         Ok(AccountView { name: custom, auto_number, ..view })
     }
 
-    /// Makes `id` the account opened at the next startup. Only a listed account (one with a seed) can be chosen.
+    /// Makes `id` the account to open next. Only a listed account (one with a seed) can be chosen.
     pub fn choose(&self, id: &AccountId) -> io::Result<()> {
         if !self.list()?.iter().any(|a| a.id == id.as_str()) {
             return Err(io::Error::from(io::ErrorKind::NotFound));
@@ -252,7 +289,7 @@ impl Accounts {
         write_small_file(&self.root, CURRENT_FILE, id.as_str().as_bytes())
     }
 
-    /// Prepares an empty, private folder for a new account and makes it the one opened at the next startup.
+    /// Prepares an empty, private folder for a new account and makes it the one to open next.
     pub fn create(&self) -> io::Result<AccountId> {
         let id = AccountId::generate();
         let dir = self.dir(&id);
@@ -294,9 +331,9 @@ impl Accounts {
 
     /// Removes the account's files (see the module docs), the seed last but one and then its failed attempts. Account
     /// 1 keeps its `instance.lock` in the profile folder. Another account's folder is removed too. If this process still
-    /// holds its lock (its open account, until the restart) and the system refuses to remove an open file (Windows), the
-    /// folder stays with that file only and the next startup removes it as abandoned. If `current-account` named it,
-    /// account 1 opens next.
+    /// holds its lock (its open account, until the next one opens) and the system refuses to remove an open file
+    /// (Windows), the folder stays with that file only and is removed as abandoned when the accounts are read again. If
+    /// `current-account` named it, account 1 opens next.
     pub fn delete(&self, deletion: Deletion) -> io::Result<()> {
         let Deletion { id, dir, _lock: lock } = deletion;
         let main = id == AccountId::Main;
@@ -332,6 +369,10 @@ impl Accounts {
         if self.current_file_names(&id) {
             let _ = fs::remove_file(self.root.join(CURRENT_FILE));
         }
+        if self.last_entered_file_names(&id) {
+            // Emptied, not removed: missing would mark the open account again, as before the file existed.
+            let _ = write_small_file(&self.root, LAST_ENTERED_FILE, b"");
+        }
         if main {
             return Ok(());
         }
@@ -343,7 +384,7 @@ impl Accounts {
         Ok(())
     }
 
-    /// After deleting the open account: the account to open on restarting. The first listed one that no other window
+    /// After deleting the open account: the account to open next. The first listed one that no other window
     /// has open (or, if all are, the first one), and the profile list is shown first. With none left, account 1 (no
     /// seed: the welcome screen). Returns whether any account is left.
     pub fn choose_after_delete(&self) -> io::Result<bool> {
@@ -363,6 +404,11 @@ impl Accounts {
     /// Whether `current-account` names `id`.
     fn current_file_names(&self, id: &AccountId) -> bool {
         read_small_file(&self.root.join(CURRENT_FILE)).is_some_and(|text| text.trim() == id.as_str())
+    }
+
+    /// Whether `last-entered-account` names `id`.
+    fn last_entered_file_names(&self, id: &AccountId) -> bool {
+        read_small_file(&self.root.join(LAST_ENTERED_FILE)).is_some_and(|text| text.trim() == id.as_str())
     }
 }
 
@@ -588,93 +634,6 @@ fn write_small_file(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
     result
 }
 
-// ---------- Window size and position across the restart ----------
-
-/// Where the window was just before restarting: physical pixels, as the window reports them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct WindowPlace {
-    pub position: Option<(i32, i32)>,
-    pub size: Option<(u32, u32)>,
-    pub maximized: bool,
-}
-
-/// Sizes outside this range are not applied (a damaged file must not shrink or blow up the window).
-const SIZE_RANGE: std::ops::RangeInclusive<u32> = 200..=20_000;
-/// Positions outside this range are not applied.
-const POSITION_RANGE: std::ops::RangeInclusive<i32> = -20_000..=20_000;
-
-impl WindowPlace {
-    pub fn to_text(self) -> String {
-        let mut text = String::new();
-        if let Some((x, y)) = self.position {
-            text.push_str(&format!("position {x} {y}\n"));
-        }
-        if let Some((w, h)) = self.size {
-            text.push_str(&format!("size {w} {h}\n"));
-        }
-        if self.maximized {
-            text.push_str("maximized\n");
-        }
-        text
-    }
-
-    /// Reads what [`Self::to_text`] wrote. Unknown or out-of-range lines are skipped.
-    pub fn parse(text: &str) -> Self {
-        let mut place = WindowPlace::default();
-        for line in text.lines() {
-            let words: Vec<&str> = line.split_whitespace().collect();
-            match words.as_slice() {
-                ["position", x, y] => {
-                    if let (Ok(x), Ok(y)) = (x.parse::<i32>(), y.parse::<i32>())
-                        && POSITION_RANGE.contains(&x)
-                        && POSITION_RANGE.contains(&y)
-                    {
-                        place.position = Some((x, y));
-                    }
-                }
-                ["size", w, h] => {
-                    if let (Ok(w), Ok(h)) = (w.parse::<u32>(), h.parse::<u32>())
-                        && SIZE_RANGE.contains(&w)
-                        && SIZE_RANGE.contains(&h)
-                    {
-                        place.size = Some((w, h));
-                    }
-                }
-                ["maximized"] => place.maximized = true,
-                _ => {}
-            }
-        }
-        place
-    }
-}
-
-/// A screen's rectangle in physical pixels: top-left corner and size.
-pub type ScreenRect = ((i32, i32), (u32, u32));
-
-/// Whether a window whose outer top-left corner is at `position` can still be grabbed: a point of its title bar lies
-/// on one of `screens`. A screen unplugged since the place was saved must not leave the window out of reach.
-pub fn reachable(position: (i32, i32), screens: &[ScreenRect]) -> bool {
-    // Inside the title bar, past the invisible resize border some systems count in the outer position.
-    let (x, y) = (i64::from(position.0) + 64, i64::from(position.1) + 16);
-    screens.iter().any(|&((left, top), (width, height))| {
-        let (left, top) = (i64::from(left), i64::from(top));
-        x >= left && x < left + i64::from(width) && y >= top && y < top + i64::from(height)
-    })
-}
-
-/// Saves the window place for the next startup.
-pub fn save_window_place(root: &Path, place: WindowPlace) -> io::Result<()> {
-    write_small_file(root, WINDOW_FILE, place.to_text().as_bytes())
-}
-
-/// The window place saved before a restart, if any. The file is removed: it only applies once.
-pub fn take_window_place(root: &Path) -> Option<WindowPlace> {
-    let path = root.join(WINDOW_FILE);
-    let text = read_small_file(&path);
-    let _ = fs::remove_file(&path);
-    text.map(|text| WindowPlace::parse(&text))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -867,34 +826,6 @@ mod tests {
         let order: Vec<&str> = list.iter().skip(1).map(|a| a.id.as_str()).collect();
         assert_eq!(order, created.iter().map(String::as_str).collect::<Vec<_>>());
         assert_eq!(list.iter().map(|a| a.number).collect::<Vec<_>>(), [1, 2, 3, 4]);
-    }
-
-    #[test]
-    fn the_window_place_round_trips_once() {
-        let dir = tempfile::tempdir().unwrap();
-        let place = WindowPlace { position: Some((-1200, 40)), size: Some((1280, 860)), maximized: true };
-        save_window_place(dir.path(), place).unwrap();
-        assert_eq!(take_window_place(dir.path()), Some(place));
-        assert_eq!(take_window_place(dir.path()), None, "it applies once");
-    }
-
-    #[test]
-    fn a_position_off_every_screen_is_not_used() {
-        let screens = [((0, 0), (1920, 1080)), ((1920, -200), (2560, 1440))];
-        assert!(reachable((100, 100), &screens));
-        assert!(reachable((-7, 0), &screens), "snapped to the left edge");
-        assert!(reachable((3000, -150), &screens), "on the second screen, above the first one's top");
-        assert!(!reachable((-5000, 100), &screens), "on a screen that is no longer there");
-        assert!(!reachable((100, 1075), &screens), "title bar below the bottom edge");
-        assert!(!reachable((100, 100), &[]), "no screen known");
-    }
-
-    #[test]
-    fn a_damaged_window_place_applies_nothing_odd() {
-        let place = WindowPlace::parse("size 10 10\nposition 99999999 3\nsize x y\nposition 1 2 3\nwhatever\n");
-        assert_eq!(place, WindowPlace::default());
-        let place = WindowPlace::parse("size 1000 700\n");
-        assert_eq!(place, WindowPlace { position: None, size: Some((1000, 700)), maximized: false });
     }
 
     // ---------- Names ----------
@@ -1301,7 +1232,8 @@ mod tests {
         let other = AccountId::Extra("1".repeat(32));
         real_account(&accounts.dir(&other));
         accounts.choose(&other).unwrap();
-        save_window_place(dir.path(), WindowPlace::default()).unwrap();
+        // Left by older versions, which restarted the app to switch accounts: not account 1's.
+        fs::write(dir.path().join("window-state"), b"").unwrap();
         fs::write(dir.path().join("desconocido"), b"x").unwrap();
         fs::write(dir.path().join("seed.v1.0011223344556677.tmp"), b"old").unwrap();
         fs::write(dir.path().join(format!("{NAME_FILE}.8899aabbccddeeff.tmp")), b"old").unwrap();
@@ -1315,7 +1247,10 @@ mod tests {
         // Its seed, data, name and temp files are gone. The profile folder's own files, the other account and anything
         // unknown stay, and so does account 1's lock file.
         let not_its_own = format!("{SHOW_ACCOUNTS_FILE}.0011223344556677.tmp");
-        assert_eq!(entries(dir.path()), [ACCOUNTS_DIR, CURRENT_FILE, "desconocido", LOCK_FILE_NAME, &not_its_own, WINDOW_FILE]);
+        assert_eq!(
+            entries(dir.path()),
+            [ACCOUNTS_DIR, CURRENT_FILE, "desconocido", LOCK_FILE_NAME, &not_its_own, "window-state"]
+        );
         assert_eq!(ids(&accounts), ["1".repeat(32)]);
         assert!(accounts.dir(&other).join(NETWORKS_DIR).join("undeployed/abc/mail.db").is_file());
         assert_eq!(fs::read_to_string(dir.path().join(CURRENT_FILE)).unwrap(), other.as_str());
@@ -1347,7 +1282,33 @@ mod tests {
     }
 
     #[test]
-    fn deleting_the_open_account_restarts_into_the_list_or_the_welcome_screen() {
+    fn a_cold_start_shows_the_list_whenever_a_profile_has_a_seed() {
+        let dir = tempfile::tempdir().unwrap();
+        // No profile at all, then account 1 empty (a first run): straight to create or restore.
+        assert!(!Accounts::at_startup(dir.path().to_path_buf()).list_first_at_startup());
+        fs::write(dir.path().join("something"), b"x").unwrap();
+        assert!(!Accounts::at_startup(dir.path().to_path_buf()).list_first_at_startup());
+        // One profile with a seed: the list, even though it is the only one.
+        seed(dir.path());
+        assert!(Accounts::at_startup(dir.path().to_path_buf()).list_first_at_startup());
+        // Two, with the second one open: the list too.
+        let id = "4".repeat(32);
+        seed(&dir.path().join(ACCOUNTS_DIR).join(&id));
+        fs::write(dir.path().join(CURRENT_FILE), &id).unwrap();
+        assert!(Accounts::at_startup(dir.path().to_path_buf()).list_first_at_startup());
+        // An empty account left open ("Nuevo perfil", then the app closed) next to saved ones: the list, to choose.
+        let empty = "5".repeat(32);
+        let empty_dir = dir.path().join(ACCOUNTS_DIR).join(&empty);
+        fsutil::ensure_private_dir(&empty_dir).unwrap();
+        fs::write(empty_dir.join("something"), b"x").unwrap();
+        fs::write(dir.path().join(CURRENT_FILE), &empty).unwrap();
+        let accounts = Accounts::at_startup(dir.path().to_path_buf());
+        assert_eq!(accounts.current(), &AccountId::Extra(empty));
+        assert!(accounts.list_first_at_startup());
+    }
+
+    #[test]
+    fn deleting_the_open_account_opens_the_list_or_the_welcome_screen() {
         let dir = tempfile::tempdir().unwrap();
         real_account(dir.path());
         let id = AccountId::Extra("3".repeat(32));
@@ -1404,6 +1365,61 @@ mod tests {
         delete_with(&accounts, &id, PASSWORD, false).unwrap();
         assert!(!dir.path().join(CURRENT_FILE).exists());
         assert_eq!(Accounts::at_startup(dir.path().to_path_buf()).current(), &AccountId::Main);
+    }
+
+    fn recent(accounts: &Accounts) -> Vec<bool> {
+        accounts.list().unwrap().iter().map(|a| a.recent).collect()
+    }
+
+    #[test]
+    fn the_recent_mark_follows_the_account_entered_not_the_one_chosen() {
+        let dir = tempfile::tempdir().unwrap();
+        seed(dir.path());
+        let other = AccountId::Extra("7".repeat(32));
+        seed(&dir.path().join(ACCOUNTS_DIR).join(other.as_str()));
+        // Nothing entered yet (or an installation from before the file): the open account, as before.
+        assert_eq!(recent(&Accounts::at_startup(dir.path().to_path_buf())), [true, false]);
+        Accounts::at_startup(dir.path().to_path_buf()).mark_entered(&AccountId::Main).unwrap();
+        // Choosing the other account opens it, but it is not entered: the mark stays.
+        Accounts::at_startup(dir.path().to_path_buf()).choose(&other).unwrap();
+        let switched = Accounts::at_startup(dir.path().to_path_buf());
+        assert_eq!(switched.current(), &other);
+        assert_eq!(recent(&switched), [true, false]);
+        let current: Vec<bool> = switched.list().unwrap().iter().map(|a| a.current).collect();
+        assert_eq!(current, [false, true]);
+        // Entered: the mark moves, and only one account has it.
+        switched.mark_entered(&other).unwrap();
+        assert_eq!(recent(&switched), [false, true]);
+        assert_eq!(fs::read_to_string(dir.path().join(LAST_ENTERED_FILE)).unwrap(), other.as_str());
+        // An account without a seed cannot be marked.
+        let empty = switched.create().unwrap();
+        assert_eq!(switched.mark_entered(&empty).unwrap_err().kind(), io::ErrorKind::NotFound);
+        assert_eq!(recent(&switched), [false, true]);
+    }
+
+    #[test]
+    fn a_deleted_or_malformed_last_entered_account_marks_none() {
+        let dir = tempfile::tempdir().unwrap();
+        real_account(dir.path());
+        let id = AccountId::Extra("8".repeat(32));
+        let accounts = Accounts::at_startup(dir.path().to_path_buf());
+        real_account(&accounts.dir(&id));
+        let other = AccountId::Extra("9".repeat(32));
+        real_account(&accounts.dir(&other));
+        accounts.mark_entered(&id).unwrap();
+        // Deleting another account leaves the record alone.
+        delete_with(&accounts, &other, PASSWORD, false).unwrap();
+        assert_eq!(fs::read_to_string(dir.path().join(LAST_ENTERED_FILE)).unwrap(), id.as_str());
+        delete_with(&accounts, &id, PASSWORD, false).unwrap();
+        // Emptied, not removed: no mark until another one is entered (missing would mark the open account).
+        assert_eq!(fs::read_to_string(dir.path().join(LAST_ENTERED_FILE)).unwrap(), "");
+        assert_eq!(recent(&Accounts::at_startup(dir.path().to_path_buf())), [false]);
+        for text in ["", "rubbish", "../x"] {
+            fs::write(dir.path().join(LAST_ENTERED_FILE), text).unwrap();
+            assert_eq!(recent(&accounts), [false], "{text:?}");
+        }
+        accounts.mark_entered(&AccountId::Main).unwrap();
+        assert_eq!(recent(&accounts), [true]);
     }
 
     #[cfg(unix)]

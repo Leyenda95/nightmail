@@ -18,6 +18,7 @@ import { Noche } from '../components/Noche.tsx';
 import { Progreso } from '../components/Progreso.tsx';
 import { seedWordCount, seedWords } from '../format.ts';
 import { t } from '../i18n/index.ts';
+import { useQuietEntry } from '../profileSwitch.ts';
 import { progressParts } from '../progress.ts';
 import { phraseProblem } from '../seedCheck.ts';
 import { domSloganClock, rotateSlogans, sloganMemory } from '../slogans.ts';
@@ -37,6 +38,13 @@ interface Props {
   /** The account list is in front (the back arrow of the unlock step, or "Cerrar sesión" in the sidebar). */
   chooser: boolean;
   onChooser: (open: boolean) => void;
+  /** Why deleting the open profile failed (it opened again), shown on the account list. */
+  notice?: unknown;
+  /** The account list, already read before switching to this profile, for the create or restore menu's first paint
+   *  (`undefined`: not read, the menu reads it). */
+  menuAccounts?: AccountView[] | null;
+  /** The account list, already read before the list is shown, so it paints with its rows at once. */
+  chooserAccounts?: AccountView[];
 }
 
 const PRIMARY = 'button button-large button-solid-norm nm-btn w-full';
@@ -77,8 +85,10 @@ function Slogans() {
 
 /** Frame of the whole front screen: the night panel and, on the right, the box with the current step. `paso` tells apart the
  *  steps that share a component (Restaurar: phrase, progress, result) so the box re-enters with its
- *  fade; between different components it already mounts anew. */
+ *  fade; between different components it already mounts anew. The first box after switching profile appears without
+ *  the fade (`useQuietEntry`): a switch shows no transition. */
 function Portada({ paso, children }: { paso?: string; children: ReactNode }) {
+  const quiet = useQuietEntry(paso);
   return (
     <div className="nm-raiz">
       <div className="nm-portada">
@@ -90,7 +100,9 @@ function Portada({ paso, children }: { paso?: string; children: ReactNode }) {
           <Noche />
         </div>
         <div className="nm-portada__panel">
-          <div key={paso} className="nm-portada__caja">{children}</div>
+          <div key={paso} className={quiet ? 'nm-portada__caja nm-portada__caja--quieta' : 'nm-portada__caja'}>
+            {children}
+          </div>
           <Languages />
         </div>
       </div>
@@ -404,15 +416,24 @@ function Restore({ events, onBack, onDone }: { events: CoreEvents; onBack: () =>
   );
 }
 
-function Menu({ onCreate, onRestore, onAccounts }: { onCreate: () => void; onRestore: () => void; onAccounts: () => void }) {
+interface MenuProps {
+  onCreate: () => void;
+  onRestore: () => void;
+  onAccounts: () => void;
+  /** The list read before switching to this profile, so the box paints with it at once. It is read again anyway. */
+  initial?: AccountView[] | null;
+}
+
+function Menu({ onCreate, onRestore, onAccounts, initial }: MenuProps) {
   // In a new account ("Nuevo perfil"), the arrow back to the others. Not on a first install. `undefined`: the list
   // has not answered yet (`null`: it failed, no arrow).
-  const [accounts, setAccounts] = useState<AccountView[] | null | undefined>(undefined);
+  const [accounts, setAccounts] = useState<AccountView[] | null | undefined>(initial);
   useEffect(() => {
     let cancelled = false;
     api.listAccounts().then(
       (list) => !cancelled && setAccounts(list),
-      () => !cancelled && setAccounts(null),
+      // A failed read keeps a list already known.
+      () => !cancelled && setAccounts((known) => known ?? null),
     );
     return () => {
       cancelled = true;
@@ -443,8 +464,17 @@ type Mode = 'menu' | 'create' | 'restore';
 
 /** The account list on the front screen, and from its "+" the "Nuevo perfil" step. Also for `App` when the account is
  *  open in another window. */
-export function AccountsScreen({ onBack }: { onBack: () => void }) {
+interface AccountsScreenProps {
+  onBack: () => void;
+  notice?: unknown;
+  /** The list already read, so the rows are there from the first frame (`undefined`: the list reads it). */
+  initial?: AccountView[];
+}
+
+export function AccountsScreen({ onBack, notice = null, initial }: AccountsScreenProps) {
   const [adding, setAdding] = useState(false);
+  // The last list known, so coming back from "Nuevo perfil" paints the rows at once too.
+  const [known, setKnown] = useState(initial);
   // Back from "Nuevo perfil": the list puts focus on its "+" again.
   const [returned, setReturned] = useState(false);
   return (
@@ -458,18 +488,32 @@ export function AccountsScreen({ onBack }: { onBack: () => void }) {
           onDone={onBack}
         />
       ) : (
-        <AccountChooser onLeave={onBack} onNew={() => setAdding(true)} focusNew={returned} />
+        <AccountChooser
+          onLeave={onBack}
+          onNew={() => setAdding(true)}
+          focusNew={returned}
+          notice={notice}
+          initial={known}
+          onList={setKnown}
+        />
       )}
     </Portada>
   );
 }
 
-export function Welcome({ status, events, onDone, chooser, onChooser }: Props) {
+export function Welcome({ status, events, onDone, chooser, onChooser, notice = null, menuAccounts, chooserAccounts }: Props) {
   const [mode, setMode] = useState<Mode>('menu');
   const back = () => setMode('menu');
-  if (chooser) return <AccountsScreen onBack={() => onChooser(false)} />;
+  if (chooser) return <AccountsScreen onBack={() => onChooser(false)} notice={notice} initial={chooserAccounts} />;
   if (status.hasSeed) return <Unlock onDone={onDone} onAccounts={() => onChooser(true)} />;
   if (mode === 'create') return <Create onBack={back} onDone={onDone} />;
   if (mode === 'restore') return <Restore events={events} onBack={back} onDone={onDone} />;
-  return <Menu onCreate={() => setMode('create')} onRestore={() => setMode('restore')} onAccounts={() => onChooser(true)} />;
+  return (
+    <Menu
+      onCreate={() => setMode('create')}
+      onRestore={() => setMode('restore')}
+      onAccounts={() => onChooser(true)}
+      initial={menuAccounts}
+    />
+  );
 }

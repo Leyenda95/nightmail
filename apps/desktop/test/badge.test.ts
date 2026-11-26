@@ -91,6 +91,20 @@ test('createBadgeSender: sends without repeating what is already shown', async (
   assert.equal(timer.pending(), 0);
 });
 
+test('createBadgeSender: a forced send goes out even if it looks like the last one (another profile opened)', async () => {
+  const sent: BadgeState[] = [];
+  const timer = manualTimer();
+  const push = createBadgeSender(async (s) => {
+    sent.push(s);
+    return s.locked;
+  }, timer.retry);
+  push(open(0));
+  push(open(0), true);
+  push(open(0));
+  await settle();
+  assert.deepEqual(sent, [open(0), open(0)]);
+});
+
 test('createBadgeSender: if Windows fails to set the padlock, it retries without waiting for another change', async () => {
   const sent: BadgeState[] = [];
   let failures = 0;

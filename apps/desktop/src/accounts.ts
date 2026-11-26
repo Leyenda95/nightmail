@@ -3,8 +3,10 @@
 // only "Perfil N", its creation day and which one is open.
 // Exception: the name the user wrote for the profile (`AccountView.name`) replaces "Perfil N" (see `profileName`).
 import type { AccountView } from './bindings/AccountView.ts';
+import { describeError } from './errors.ts';
 import { formatDay } from './format.ts';
 import { t } from './i18n/index.ts';
+import { errorCode } from './pending.ts';
 
 /** One row of the list. */
 export interface AccountRow {
@@ -13,8 +15,11 @@ export interface AccountRow {
   name: string;
   /** "Creado el 18 nov 2026", or `null` if the device does not know the day. */
   created: string | null;
-  /** The account this window opened (marked "Usado recientemente"). */
+  /** The account this window opened. */
   current: boolean;
+  /** The account entered most recently (unlocked, created or restored): marked "Usado recientemente". Merely choosing
+   *  or opening an account does not move it. */
+  recent: boolean;
 }
 
 export function accountRows(list: readonly AccountView[]): AccountRow[] {
@@ -24,6 +29,7 @@ export function accountRows(list: readonly AccountView[]): AccountRow[] {
     name: profileName(a),
     created: a.createdAt === null ? null : s.created(formatDay(a.createdAt)),
     current: a.current,
+    recent: a.recent,
   }));
 }
 
@@ -98,6 +104,11 @@ export function deleteProfileError(code: string | null): string | null {
     default:
       return null;
   }
+}
+
+/** Why deleting the open profile failed after closing it (it opened again): its own text, or the general one. */
+export function deleteFailureText(e: unknown): string {
+  return deleteProfileError(errorCode(e)) ?? describeError(e);
 }
 
 /** The password field's error: empty when sending, or the core said it is wrong. Anything else goes apart. */

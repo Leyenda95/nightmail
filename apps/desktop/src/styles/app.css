@@ -916,6 +916,8 @@
 /* The form enters with a short fade on mounting each step; without blocking clicks, focus or typing. */
 .nm-portada__caja { animation: nm-portada-entra 220ms ease-out backwards; }
 @keyframes nm-portada-entra { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+/* The first box after switching profile in place appears at once: a switch shows no transition. */
+.nm-portada__caja.nm-portada__caja--quieta { animation: none; }
 .nm-portada__panel { display: grid; place-items: center; min-block-size: 0; overflow: auto; padding: 2.5rem; background: var(--background-norm); }
 .nm-portada__caja { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.25rem; inline-size: 100%; max-inline-size: 27rem; }
 .nm-portada__titulo { font-size: 2rem; font-weight: var(--nm-font-weight-bold); line-height: 1.15; letter-spacing: -0.015em; }

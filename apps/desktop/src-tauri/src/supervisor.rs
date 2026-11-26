@@ -141,6 +141,8 @@ pub struct SidecarSupervisor {
     launch: Result<SidecarConfig, String>,
     init: InitializeParams,
     inner: Mutex<Inner>,
+    /// Set by [`SidecarSupervisor::kill`]: a start in progress stops at once (it holds `inner` meanwhile).
+    killed: tokio::sync::watch::Sender<bool>,
 }
 
 fn backoff(failures: u32) -> Duration {
@@ -153,7 +155,7 @@ fn backoff(failures: u32) -> Duration {
 
 impl SidecarSupervisor {
     pub fn new(launch: Result<SidecarConfig, String>, init: InitializeParams) -> Self {
-        Self { launch, init, inner: Mutex::new(Inner::default()) }
+        Self { launch, init, inner: Mutex::new(Inner::default()), killed: tokio::sync::watch::Sender::new(false) }
     }
 
     /// Client ready to use; spawns or respawns the sidecar if needed.
@@ -183,7 +185,14 @@ impl SidecarSupervisor {
         }
         inner.last_attempt = Some(Instant::now());
 
-        match self.start().await {
+        // A start can take up to `STARTUP_TIMEOUT` with `inner` held: `kill` interrupts it (dropping the start drops
+        // its child, which is killed on drop).
+        let mut killed = self.killed.subscribe();
+        let started = tokio::select! {
+            started = self.start() => started,
+            _ = killed.wait_for(|k| *k) => return Err(SidecarError::NotAvailable("shut down".into())),
+        };
+        match started {
             Ok(running) => {
                 inner.failures = 0;
                 let client = running.client.clone();
@@ -272,6 +281,23 @@ impl SidecarSupervisor {
             }
             None if failures > 0 => SidecarStatus::Down { failures },
             None => SidecarStatus::NotStarted,
+        }
+    }
+
+    /// Immediate stop, for switching profiles: the process is killed at once (also while it is still starting) and
+    /// nothing is relaunched. Only once nothing of the profile is open in it any more (session and wallet closed),
+    /// which is what ending the app's process did before.
+    pub async fn kill(&self) {
+        self.killed.send_replace(true);
+        let running = {
+            let mut inner = self.inner.lock().await;
+            inner.shut_down = true;
+            inner.running.take()
+        };
+        if let Some(mut r) = running {
+            r.client.close();
+            let _ = r.child.kill().await;
+            log::info!("[sidecar] killed");
         }
     }
 
@@ -430,6 +456,43 @@ mod tests {
         }
         assert!(res.is_ok(), "{res:?}");
         sup.shutdown().await;
+    }
+
+    /// Switching profiles kills the sidecar at once, without the orderly shutdown's grace period.
+    #[tokio::test]
+    async fn kill_stops_a_running_sidecar_at_once() {
+        let sup = supervisor();
+        let client = sup.client().await.expect("client");
+        let started = std::time::Instant::now();
+        sup.kill().await;
+        let took = started.elapsed();
+        eprintln!("[timing] kill of a running sidecar: {} ms", took.as_millis());
+        assert!(client.is_closed());
+        assert!(took < Duration::from_secs(2), "{took:?}");
+        assert!(matches!(sup.client().await, Err(SidecarError::NotAvailable(_))), "nothing is relaunched");
+        // For comparison: the orderly shutdown that exiting the app keeps.
+        let other = supervisor();
+        other.client().await.expect("client");
+        let started = std::time::Instant::now();
+        other.shutdown().await;
+        eprintln!("[timing] orderly shutdown of a running sidecar: {} ms", started.elapsed().as_millis());
+    }
+
+    /// A start in progress (it holds the supervisor's lock until the handshake ends) does not hold up the kill.
+    #[tokio::test]
+    async fn kill_interrupts_a_start_in_progress() {
+        let sup = Arc::new(supervisor());
+        let starting = tokio::spawn({
+            let sup = Arc::clone(&sup);
+            async move { sup.client().await }
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let started = std::time::Instant::now();
+        sup.kill().await;
+        let took = started.elapsed();
+        eprintln!("[timing] kill during start-up: {} ms", took.as_millis());
+        assert!(took < Duration::from_secs(2), "{took:?}");
+        assert!(starting.await.unwrap().is_err(), "the start was cut off");
     }
 
     #[test]

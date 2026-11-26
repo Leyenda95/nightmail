@@ -2,7 +2,8 @@
 // open in another window. In front of the welcome or the "already open" screen, the account list.
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api } from './api.ts';
-import { badgeLocked } from './badge.ts';
+import { badgeCleared, badgeLocked } from './badge.ts';
+import type { AccountView } from './bindings/AccountView.ts';
 import type { AppStatus } from './bindings/AppStatus.ts';
 import { Aviso } from './components/Aviso.tsx';
 import { Icon } from './components/Icon.tsx';
@@ -12,6 +13,7 @@ import { Luz } from './components/Luz.tsx';
 import { describeError, isBadConfig, isBootFailure, isProfileInUse } from './errors.ts';
 import { t } from './i18n/index.ts';
 import { useLocale } from './i18n/locale.ts';
+import { onProfileOpened, QuietEntry } from './profileSwitch.ts';
 import { ExitNotice } from './screens/common.tsx';
 import { Main } from './screens/Main.tsx';
 import { AccountsScreen, Welcome } from './screens/Welcome.tsx';
@@ -51,12 +53,69 @@ function Startup({ children }: { children: ReactNode }) {
   );
 }
 
+/** What the next profile's first screen needs, read before it is mounted after a switch, so no loading screen or empty
+ *  box is painted in between: its status, whether the profile list goes first, and the list itself when the first
+ *  screen will be the profile list or the create or restore menu (`undefined`: not read, `null`: the read failed). */
+interface FirstScreen {
+  load: Load;
+  showAccounts: boolean;
+  accounts: AccountView[] | null | undefined;
+}
+
+/** Never fails: each read that fails ends where it would on startup (the error screen, no list first, no list).
+ *  `chooser`: the profile list goes first anyway (deleting the open profile failed). */
+async function readFirstScreen(chooser: boolean): Promise<FirstScreen> {
+  const showAccounts = await api.takeShowAccounts().catch(() => false);
+  const load = await api.appStatus().then((status): Load => ({ kind: 'ready', status }), failure);
+  const menu = load.kind === 'ready' && !load.status.hasSeed && !load.status.unlocked;
+  const list = menu || chooser || showAccounts;
+  const accounts = list ? await api.listAccounts().catch(() => null) : undefined;
+  return { load, showAccounts, accounts };
+}
+
+/** The profile list, read before the list screen is shown so it paints with its rows at once. `undefined` if the read
+ *  fails: the list screen then reads it itself, as it always did. */
+function readChooserList(): Promise<AccountView[] | undefined> {
+  return api.listAccounts().catch(() => undefined);
+}
+
+/** The whole UI, mounted anew each time another profile opens in this window (`profileSwitch.ts`): every screen and
+ *  the core events start empty, as on startup, and the front screen is chosen again below. Its first screen is read
+ *  before (`readFirstScreen`), while the previous screen stays in view. The taskbar is cleared too, as on a fresh
+ *  start. */
 export default function App() {
+  const [opened, setOpened] = useState<{
+    times: number;
+    failedDelete: unknown;
+    first: FirstScreen | null;
+    quiet: object | null;
+  }>({ times: 0, failedDelete: null, first: null, quiet: null });
+  useEffect(
+    () =>
+      onProfileOpened((failedDelete) => {
+        void readFirstScreen(failedDelete !== null).then((first) => {
+          badgeCleared();
+          // The first screen of the next profile appears without its entry fade (`QuietEntry`).
+          setOpened((o) => ({ times: o.times + 1, failedDelete, first, quiet: {} }));
+        });
+      }),
+    [],
+  );
+  return (
+    <QuietEntry.Provider value={opened.quiet}>
+      <ProfileApp key={opened.times} failedDelete={opened.failedDelete} first={opened.first} />
+    </QuietEntry.Provider>
+  );
+}
+
+/** `failedDelete`: deleting the open profile failed after closing it, and it opened again. The profile list goes first
+ *  with the error, until it is left. `first`: the first screen, already read (after a switch); `null` on startup. */
+function ProfileApp({ failedDelete, first }: { failedDelete: unknown; first: FirstScreen | null }) {
   // Changing the language (Settings) repaints from here, the root: everything below is painted again (there is no `memo`) and
   // each `t()` reads the new language. No restart and no loss of the screens' state.
   useLocale();
   const events = useCoreEvents();
-  const [load, setLoad] = useState<Load>({ kind: 'loading' });
+  const [load, setLoad] = useState<Load>(first?.load ?? { kind: 'loading' });
 
   const refresh = useCallback(async () => {
     try {
@@ -67,16 +126,36 @@ export default function App() {
   }, []);
 
   // The account list in front of the front screen (or of "ya está abierto"): "Cambiar de perfil", "Elegir otro perfil" or
-  // the sidebar's "Cerrar sesión". Also right after starting, when the previous run deleted its open profile.
-  const [chooser, setChooser] = useState(false);
+  // the sidebar's "Cerrar sesión". Also right after starting, whenever there is a profile to choose (the core decides,
+  // `take_show_accounts`), and after the open profile was deleted.
+  const [chooser, setChooserState] = useState(failedDelete !== null || (first?.showAccounts ?? false));
+  const [notice, setNotice] = useState<unknown>(failedDelete);
+  const setChooser = useCallback((open: boolean) => {
+    if (!open) setNotice(null);
+    setChooserState(open);
+  }, []);
+  // The list the profile list screen paints with at once (no frame without its rows): read before showing it.
+  const [chooserList, setChooserList] = useState<AccountView[] | undefined>(first?.accounts ?? undefined);
+  /** Opening the list from a screen ("Cerrar sesión", the arrows, "Elegir otro perfil"): that screen stays in view until
+   *  the list is read, then the list shows with its rows. Closing it is immediate. */
+  const showChooser = useCallback(
+    async (open: boolean) => {
+      if (open) setChooserList(await readChooserList());
+      setChooser(open);
+    },
+    [setChooser],
+  );
 
+  // Read on mounting only on startup: after a switch it was read before (`first`). Mounted once per profile.
+  const [startup] = useState(first === null);
   useEffect(() => {
+    if (!startup) return;
     void (async () => {
-      // Asked once, before the first screen: the core forgets it on answering.
-      if (await api.takeShowAccounts().catch(() => false)) setChooser(true);
+      // Asked once, before the first screen: the core forgets it on answering. The list is read first too.
+      if (await api.takeShowAccounts().catch(() => false)) await showChooser(true);
       await refresh();
     })();
-  }, [refresh]);
+  }, [startup, refresh, showChooser]);
 
   // "Reintentar" goes through "loading": if it fails again with the same text, it is visible (and announced) that it was tried.
   // Only here, not inside `refresh`: `Welcome` and `locked` call it too, and going through "loading" would unmount them.
@@ -92,10 +171,10 @@ export default function App() {
     (toAccounts: boolean) => {
       clearResume();
       badgeLocked();
-      setChooser(toAccounts);
-      void refresh();
+      // The open mailbox stays in view while the list is read (`showChooser`), then the front screen comes.
+      void showChooser(toAccounts).then(refresh);
     },
-    [clearResume, refresh],
+    [clearResume, refresh, showChooser],
   );
 
   const s = t().onboarding.startup;
@@ -117,12 +196,12 @@ export default function App() {
       );
     case 'profileInUse':
       // No "Reintentar": this window will not take the account even if the other closes. Another account can be opened.
-      if (chooser) return <AccountsScreen onBack={() => setChooser(false)} />;
+      if (chooser) return <AccountsScreen onBack={() => setChooser(false)} notice={notice} initial={chooserList} />;
       return (
         <Startup>
           <h1 className="nm-centro__titulo">{s.profileInUseTitle}</h1>
           <p>{s.profileInUseText}</p>
-          <button type="button" className="button button-medium button-solid-norm nm-btn" onClick={() => setChooser(true)}>
+          <button type="button" className="button button-medium button-solid-norm nm-btn" onClick={() => void showChooser(true)}>
             {s.chooseOther}
           </button>
         </Startup>
@@ -153,7 +232,16 @@ export default function App() {
               <ExitNotice />
             </div>
           )}
-          <Welcome status={load.status} events={events} onDone={refresh} chooser={chooser} onChooser={setChooser} />
+          <Welcome
+            status={load.status}
+            events={events}
+            onDone={refresh}
+            chooser={chooser}
+            onChooser={(open) => void showChooser(open)}
+            notice={notice}
+            menuAccounts={first?.accounts}
+            chooserAccounts={chooserList}
+          />
         </div>
       );
   }

@@ -4,8 +4,9 @@
 // unlocking does, with the same failed-attempt counter and waits: wrong, nothing is deleted. The password leaves React
 // state as soon as it is sent.
 //
-// Deleting the open profile restarts NightMail (into the profile list, or the welcome screen if none is left): the
-// dialog then stays, locked, saying so until the window closes. Another profile: `onDeleted`.
+// Deleting the open profile opens another one in this same window and the whole UI starts again from the profile list,
+// or the welcome screen if none is left (`profileSwitch.ts`). If it fails once the profile is closed, that same
+// profile opens again and the list shows the error. Another profile: `onDeleted`.
 import { useId, useState } from 'react';
 import { deleteFieldError, deleteProfileError } from '../accounts.ts';
 import { api } from '../api.ts';
@@ -13,8 +14,8 @@ import { Aviso } from '../components/Aviso.tsx';
 import { Campo } from '../components/Campo.tsx';
 import { Dialogo } from '../components/Dialogo.tsx';
 import { Icon } from '../components/Icon.tsx';
-import { Luz } from '../components/Luz.tsx';
 import { t } from '../i18n/index.ts';
+import { profileOpened } from '../profileSwitch.ts';
 import { ErrorAviso } from './common.tsx';
 import { onSubmitWith } from './forms.ts';
 import { useAction } from './useAction.ts';
@@ -34,13 +35,16 @@ interface Props {
 export function DeleteProfileDialog({ id, name, onClose, onDeleted }: Props) {
   const [password, setPassword] = useState('');
   const [empty, setEmpty] = useState(false);
-  const [restarting, setRestarting] = useState(false);
-  const { busy, error, code, run } = useAction();
+  const { busy: running, error, code, run } = useAction();
+  // `switched`: the next profile is being read and mounted in place of this one, which stays busy until replaced
+  // (as the profile list does), so it cannot be sent again meanwhile. Only `deleted` or an error free it.
+  const [switching, setSwitching] = useState(false);
+  const busy = running || switching;
   const formId = useId();
   const s = t().onboarding.deleteProfile;
 
   async function submit() {
-    if (busy || restarting) return;
+    if (busy) return;
     if (password === '') {
       setEmpty(true);
       return;
@@ -49,19 +53,15 @@ export function DeleteProfileDialog({ id, name, onClose, onDeleted }: Props) {
     const typed = password;
     // Out of state before waiting for the core (Argon2id takes time): if it fails, it is typed again.
     setPassword('');
-    const outcome = await run(() => api.deleteAccount(id, typed), deleteProfileError);
-    if (outcome === 'restarting') setRestarting(true);
-    else if (outcome === 'deleted') onDeleted();
-  }
-
-  if (restarting) {
-    return (
-      <Dialogo title={s.restartingTitle} size="s" onClose={onClose} locked footer={null}>
-        <p className="nm-fila" role="status">
-          <Luz mode="trabaja" /> {s.restartingText}
-        </p>
-      </Dialogo>
-    );
+    const outcome = await run(async () => {
+      const answer = await api.deleteAccount(id, typed);
+      // Set before the action ends, so the dialog is never free in between.
+      if (answer.kind === 'switched') setSwitching(true);
+      return answer;
+    }, deleteProfileError);
+    // `switched` with an error: the open profile was closed but not deleted, and it opened again.
+    if (outcome?.kind === 'switched') profileOpened(outcome.error);
+    else if (outcome?.kind === 'deleted') onDeleted();
   }
 
   const fieldError = deleteFieldError(empty, code, error);

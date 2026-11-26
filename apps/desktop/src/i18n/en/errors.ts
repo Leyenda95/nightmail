@@ -79,6 +79,7 @@ export default {
       null,
       'Wait for it to finish, then try locking again.',
     ),
+    profileChanged: parts('Another profile was opened in the meantime.', null, 'Try again from the profile list.'),
     recoveryPending: parts(
       "The restore hasn't finished.",
       'Your recovery phrase is already saved and encrypted on this device.',

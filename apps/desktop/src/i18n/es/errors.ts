@@ -89,6 +89,11 @@ export default {
       null,
       'Espera a que termine y vuelve a bloquear.',
     ),
+    profileChanged: parts(
+      'Mientras tanto se ha abierto otro perfil.',
+      null,
+      'Vuelve a intentarlo desde la lista de perfiles.',
+    ),
     recoveryPending: parts(
       'La restauración no ha terminado.',
       'Tu frase semilla ya está guardada y cifrada en este dispositivo.',

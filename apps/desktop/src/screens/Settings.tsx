@@ -122,8 +122,9 @@ function SeedCard() {
   );
 }
 
-/** "Eliminar perfil" card: deletes the open profile from this computer (`DeleteProfile.tsx`, with its password); the app
- *  then restarts. Only where there is a profile list (`list_accounts` answers and the open profile is in it). */
+/** "Eliminar perfil" card: deletes the open profile from this computer (`DeleteProfile.tsx`, with its password),
+ *  and another one then opens in its place. Only where there is a profile list (`list_accounts` answers and the open
+ *  profile is in it). */
 function DeleteProfileCard() {
   const [own, setOwn] = useState<AccountRow | null>(null);
   const [open, setOpen] = useState(false);

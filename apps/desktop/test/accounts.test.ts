@@ -31,13 +31,15 @@ const account = (id: string, number: number, current = false, createdAt: number 
   autoNumber: number,
   createdAt,
   current,
+  recent: false,
 });
 
-test('each row: "Perfil N", its creation day and whether it is the open one', () => {
-  const rows = accountRows([account('main', 1, true), account('ab'.repeat(16), 2)]);
+test('each row: "Perfil N", its creation day, whether it is the open one and whether it was entered last', () => {
+  // The open profile was only chosen; the other one was the last entered: each flag stays its own.
+  const rows = accountRows([account('main', 1, true), { ...account('ab'.repeat(16), 2), recent: true }]);
   assert.deepEqual(rows, [
-    { id: 'main', name: 'Perfil 1', created: `Creado el ${formatDay(NOV_18)}`, current: true },
-    { id: 'ab'.repeat(16), name: 'Perfil 2', created: `Creado el ${formatDay(NOV_18)}`, current: false },
+    { id: 'main', name: 'Perfil 1', created: `Creado el ${formatDay(NOV_18)}`, current: true, recent: false },
+    { id: 'ab'.repeat(16), name: 'Perfil 2', created: `Creado el ${formatDay(NOV_18)}`, current: false, recent: true },
   ]);
   assert.equal(rows[0]?.created, 'Creado el 18 nov 2026');
 });
@@ -291,16 +293,87 @@ test('"Nuevo perfil": the three networks in order, only the local one can be cho
   } finally {
     prefs.setLocale('es');
   }
-  // The screen: the local one comes checked and the others disabled; "Continuar" keeps the core's restart.
+  // The screen: the local one comes checked and the others disabled; "Continuar" opens the new profile in this window.
   const screen = readFileSync(new URL('../src/screens/Accounts.tsx', import.meta.url), 'utf8');
   assert.match(screen, /defaultChecked=\{c\.available\} disabled=\{!c\.available\}/);
   assert.match(screen, /!c\.available && <Tag>\{s\.soon\}<\/Tag>/);
-  assert.match(screen, /onClick=\{\(\) => void open\(api\.newAccount\)\}>\s*\{s\.continue\}/);
+  assert.match(screen, /onClick=\{\(\) => void open\('new', api\.newAccount\)\}\s*>\s*\{s\.continue\}/);
+});
+
+test('switching or creating a profile shows no screen in between: the clicked control is busy and clicks wait', () => {
+  const screen = readFileSync(new URL('../src/screens/Accounts.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(screen, /function Opening|<Opening|openingTitle|openingText/);
+  assert.doesNotMatch(screen, /if \(opening\) return/);
+  // One switch at a time, guarded by a ref so a second click before painting again cannot start another.
+  assert.match(screen, /if \(running\.current\) return;\s*running\.current = true;/);
+  assert.match(screen, /aria-busy=\{opening === row\.id \|\| undefined\}/);
+  assert.match(screen, /aria-busy=\{opening !== null \|\| undefined\}/);
+  // A failure frees the screen again and shows the error as before.
+  assert.match(screen, /catch \{\s*running\.current = false;\s*setOpening\(null\);\s*setFailed\(true\);/);
+  // After the switch: the next profile's first screen is read before mounting it (no loading screen and no empty menu
+  // box in between), and that first box appears without its entry fade. On startup nothing of this applies.
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  assert.match(app, /void readFirstScreen\(failedDelete !== null\)\.then\(\(first\) => \{\s*badgeCleared\(\);/);
+  assert.match(app, /useState<Load>\(first\?\.load \?\? \{ kind: 'loading' \}\)/);
+  assert.match(app, /api\.takeShowAccounts\(\)\.catch\(\(\) => false\)/);
+  assert.match(app, /api\.appStatus\(\)\.then\(\(status\): Load => \(\{ kind: 'ready', status \}\), failure\)/);
+  assert.match(app, /api\.listAccounts\(\)\.catch\(\(\) => null\)/);
+  assert.match(app, /first: null, quiet: null \}\)/);
+  assert.match(app, /first, quiet: \{\} \}\)\);/);
+  const welcome = readFileSync(new URL('../src/screens/Welcome.tsx', import.meta.url), 'utf8');
+  assert.match(welcome, /useState<AccountView\[\] \| null \| undefined>\(initial\)/);
+  assert.match(welcome, /initial=\{menuAccounts\}/);
+  assert.match(welcome, /const quiet = useQuietEntry\(paso\);/);
+  const css = readFileSync(new URL('../src/styles/app.css', import.meta.url), 'utf8');
+  assert.match(css, /\.nm-portada__caja\.nm-portada__caja--quieta \{ animation: none; \}/);
+  for (const locale of ['es', 'en'] as const) {
+    const accounts: Record<string, unknown> = DICTIONARIES[locale].onboarding.accounts;
+    assert.equal(accounts.openingTitle, undefined);
+    assert.equal(accounts.openingText, undefined);
+  }
+});
+
+test('a cold start always shows the profile list first when there is a profile to choose, a switch never does', () => {
+  // The core decides once, at startup only (`Accounts::list_first_at_startup`), not when another profile opens in the
+  // same window (`commands::reopen`, which keeps only the "open profile deleted" case).
+  const lib = readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
+  assert.match(lib, /let show_accounts = show_accounts \|\| profile\.accounts\.as_ref\(\)\.is_some_and\(Accounts::list_first_at_startup\);\s*app\.manage\(AppState::new\(profile, show_accounts\)\);/);
+  const commands = readFileSync(new URL('../src-tauri/src/commands.rs', import.meta.url), 'utf8');
+  assert.doesNotMatch(commands, /list_first_at_startup/);
+  // The UI asks before its first screen, so the list is the first thing painted after loading, with no frame between.
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  assert.match(app, /if \(await api\.takeShowAccounts\(\)\.catch\(\(\) => false\)\) await showChooser\(true\);\s*await refresh\(\);/);
+  // Choosing the open profile on that list leaves it for its front screen (unlock) without asking the core again.
+  const screen = readFileSync(new URL('../src/screens/Accounts.tsx', import.meta.url), 'utf8');
+  assert.match(screen, /row\.current \? onLeave\(\) : void open\(row\.id, \(\) => api\.switchAccount\(row\.id\)\)/);
+});
+
+test('the profile list paints with its rows from its first frame, never empty, and the screen before stays meanwhile', () => {
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  // Read before it shows: on startup, after a switch that shows it first, and on every way in from a screen.
+  assert.match(app, /const list = menu \|\| chooser \|\| showAccounts;\s*const accounts = list \? await api\.listAccounts\(\)\.catch\(\(\) => null\) : undefined;/);
+  assert.match(app, /useState<AccountView\[\] \| undefined>\(first\?\.accounts \?\? undefined\)/);
+  assert.match(app, /if \(open\) setChooserList\(await readChooserList\(\)\);\s*setChooser\(open\);/);
+  assert.match(app, /void showChooser\(toAccounts\)\.then\(refresh\);/);
+  assert.match(app, /onClick=\{\(\) => void showChooser\(true\)\}/);
+  assert.match(app, /onChooser=\{\(open\) => void showChooser\(open\)\}/);
+  assert.match(app, /<AccountsScreen onBack=\{\(\) => setChooser\(false\)\} notice=\{notice\} initial=\{chooserList\} \/>/);
+  // Nothing else opens it without reading the list first.
+  assert.doesNotMatch(app, /setChooser\(true\)|setChooser\(toAccounts\)/);
+  // A failed read never blocks: the list screen reads it itself, as before.
+  assert.match(app, /return api\.listAccounts\(\)\.catch\(\(\) => undefined\);/);
+  const welcome = readFileSync(new URL('../src/screens/Welcome.tsx', import.meta.url), 'utf8');
+  assert.match(welcome, /<AccountsScreen onBack=\{\(\) => onChooser\(false\)\} notice=\{notice\} initial=\{chooserAccounts\} \/>/);
+  // Back from "Nuevo perfil" the rows are there at once too: the last list read is kept.
+  assert.match(welcome, /const \[known, setKnown\] = useState\(initial\);/);
+  assert.match(welcome, /initial=\{known\}\s*onList=\{setKnown\}/);
+  const screen = readFileSync(new URL('../src/screens/Accounts.tsx', import.meta.url), 'utf8');
+  assert.match(screen, /useState<AccountView\[\] \| null>\(initial \?\? null\)/);
 });
 
 test('the list: a "+" named "Nuevo perfil" instead of the full width button, and no "Cambiar de perfil" any more', () => {
   const screen = readFileSync(new URL('../src/screens/Accounts.tsx', import.meta.url), 'utf8');
-  assert.match(screen, /title=\{s\.newProfile\} aria-label=\{s\.newProfile\} onClick=\{onNew\}>\s*<Icon name="plus"/);
+  assert.match(screen, /title=\{s\.newProfile\} aria-label=\{s\.newProfile\} onClick=\{idle\(onNew\)\}>\s*<Icon name="plus"/);
   assert.doesNotMatch(screen, /createOther/);
   // Below the list (after its status line), not next to the title.
   assert.doesNotMatch(screen, /nm-portada__cab/);
@@ -331,22 +404,24 @@ test('"Elige un perfil" is the base screen: no back arrow, the open profile row 
   assert.doesNotMatch(chooser, /<Back /);
   // Ways forward: the open profile's row (to its front screen), another row (open it), the "+" and, with none left
   // after deleting, the front screen.
-  assert.match(chooser, /row\.current \? onLeave\(\) : void open\(\(\) => api\.switchAccount\(row\.id\)\)/);
+  assert.match(chooser, /row\.current \? onLeave\(\) : void open\(row\.id, \(\) => api\.switchAccount\(row\.id\)\)/);
   assert.match(chooser, /if \(accounts\.length === 0\) \{\s*onLeave\(\);/);
-  assert.match(chooser, /onClick=\{onNew\}/);
+  assert.match(chooser, /onClick=\{idle\(onNew\)\}/);
   // "Nuevo perfil" keeps its arrow back to the list.
   const fresh = screen.slice(screen.indexOf('export function NewProfile'), screen.indexOf('export function AccountChooser'));
-  assert.match(fresh, /<Back onBack=\{onBack\} \/>/);
+  assert.match(fresh, /<Back onBack=\{idle\(onBack\)\} \/>/);
   // The "+" is compact and centred under the list, not full width: as tall as the large buttons and wider than square.
   assert.match(screen, /const PLUS = 'button button-medium button-outline-weak nm-btn button-for-icon nm-cuentas__nuevo';/);
   const css = readFileSync(new URL('../src/styles/app.css', import.meta.url), 'utf8');
   assert.match(css, /\.button\.nm-cuentas__nuevo \{ justify-self: center; --padding-block: 0\.8125rem; --padding-inline: 2rem; \}/);
 });
 
-test('"Elige un perfil": the open profile says "Usado recientemente" in the plain muted tag, not in green', () => {
+test('"Elige un perfil": the profile entered last says "Usado recientemente" in the plain muted tag, not in green', () => {
   const screen = readFileSync(new URL('../src/screens/Accounts.tsx', import.meta.url), 'utf8');
-  assert.match(screen, /\{row\.current && <Tag>\{s\.recentlyUsed\}<\/Tag>\}/);
-  assert.doesNotMatch(screen, /row\.current && <Tag tone=/);
+  // The last one entered (`recent`), not the one merely chosen and open (`current`).
+  assert.match(screen, /\{row\.recent && <Tag>\{s\.recentlyUsed\}<\/Tag>\}/);
+  assert.doesNotMatch(screen, /row\.current && <Tag/);
+  assert.doesNotMatch(screen, /row\.recent && <Tag tone=/);
   assert.equal(DICTIONARIES.es.onboarding.accounts.recentlyUsed, 'Usado recientemente');
   assert.equal(DICTIONARIES.en.onboarding.accounts.recentlyUsed, 'Recently used');
   // The plain tag is the muted secondary text tone.
@@ -358,7 +433,7 @@ test('"Elige un perfil": if the list cannot be read, "Reintentar" reads it again
   const screen = readFileSync(new URL('../src/screens/Accounts.tsx', import.meta.url), 'utf8');
   const chooser = screen.slice(screen.indexOf('export function AccountChooser'));
   assert.match(chooser, /\(\) => !cancelled && setLoadFailed\(true\)/);
-  assert.match(chooser, /\}, \[reload\]\);/);
+  assert.match(chooser, /\}, \[reload, setList\]\);/);
   assert.match(chooser, /setLoadFailed\(false\);\s*setReload\(\(n\) => n \+ 1\);/);
   assert.match(chooser, /\{s\.retry\}\s*<\/button>\s*\}\s*>\s*<p>\{s\.loadFailed\}<\/p>/);
   // After deleting, a failed re-read is the same failure.

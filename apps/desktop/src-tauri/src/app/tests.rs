@@ -887,6 +887,24 @@ async fn shutdown_wipes_the_draft() {
     assert!(!dir.path().join(keys::SEED_FILE_NAME).exists());
 }
 
+/// Before another profile opens in this process, `shutdown_released` waits until nothing holds the closed one's
+/// database (here a copy that a task drops a moment later, as an aborted task does).
+#[tokio::test(flavor = "multi_thread")]
+async fn shutdown_released_waits_until_the_database_is_closed() {
+    let dir = private_tempdir();
+    let (app, _) = make_app(dir.path());
+    app.create_seed_now(secret("clave")).await.unwrap();
+    let held = Arc::clone(&app.session().await.unwrap().store);
+    let store = Arc::downgrade(&held);
+    app.lock().await.unwrap();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        drop(held);
+    });
+    assert!(app.shutdown_released().await);
+    assert_eq!(store.strong_count(), 0, "the database is closed");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn inputs_are_bounded() {
     let dir = private_tempdir();

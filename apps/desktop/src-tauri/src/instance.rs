@@ -64,8 +64,8 @@ impl ProfileLock {
         }
     }
 
-    /// Like [`Self::acquire`], but while the profile is in use it keeps trying for up to `wait`: after switching
-    /// accounts the new process starts while the old one is still finishing and holds the lock for a moment.
+    /// Like [`Self::acquire`], but while the profile is in use it keeps trying for up to `wait`: an app opened again
+    /// right after closing starts while the previous run is still finishing and holds the lock for a moment.
     pub fn acquire_waiting(profile_dir: &Path, wait: Duration) -> Result<Self, LockError> {
         retry_while_in_use(|| Self::acquire(profile_dir), wait, RETRY_EVERY)
     }

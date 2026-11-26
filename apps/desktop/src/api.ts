@@ -92,7 +92,7 @@ export const api = {
   // New-mail sound played by the system, outside the webview (`chime.ts`). `false` outside Windows.
   playChime: () => invoke<boolean>('play_chime'),
   // Accounts on this device (`accounts.ts`). They answer without a core too (account open in another window).
-  // Switching or creating restarts the app into that account, only with the session locked.
+  // Switching or creating opens that account in this same window, only with the session locked.
   listAccounts: () => invoke<AccountView[]>('list_accounts'),
   switchAccount: (id: string) => invoke<SwitchOutcome>('switch_account', { id }),
   newAccount: () => invoke<SwitchOutcome>('new_account'),
@@ -100,8 +100,9 @@ export const api = {
   // keeping its number. Answers the account as listed now.
   setAccountName: (name: string) => invoke<AccountView>('set_account_name', { name }),
   // Deletes a profile's files on this computer (nothing on the chain), after checking its password as unlocking does.
-  // `restarting`: it was the open one and the app restarts (into the profile list, or the welcome screen if none is left).
+  // `switched`: it was the open one and another one is open now (the profile list in front, or the welcome screen if
+  // none is left), or, with an `error`, it could not be deleted after closing it and it is open again.
   deleteAccount: (id: string, password: string) => invoke<DeleteOutcome>('delete_account', { id, password }),
-  // Once, at startup: the previous run deleted its open profile and the profile list goes in front.
+  // Once, when a profile opens: the open profile was just deleted and the profile list goes in front.
   takeShowAccounts: () => invoke<boolean>('take_show_accounts'),
 };

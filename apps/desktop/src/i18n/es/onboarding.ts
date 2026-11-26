@@ -93,8 +93,6 @@ export default {
     soon: 'Pronto',
     continue: 'Continuar',
     backToAccounts: 'Volver a mis perfiles',
-    openingTitle: 'Abriendo el perfil…',
-    openingText: 'NightMail se cerrará y se abrirá de nuevo con el perfil elegido.',
     failed: 'No se ha podido cambiar de perfil. Vuelve a intentarlo.',
     loadFailed: 'No se ha podido leer la lista de perfiles.',
     retry: 'Reintentar',
@@ -182,8 +180,6 @@ export default {
       'Ahora no se puede eliminar el perfil porque hay una operación en marcha. Espera a que termine y vuelve a intentarlo.',
     notFound: 'Este perfil ya no está en este ordenador.',
     deleted: (name: string): string => `Perfil eliminado: ${name}.`,
-    restartingTitle: 'Eliminando el perfil…',
-    restartingText: 'NightMail se cerrará y se abrirá de nuevo.',
     // Settings card for the open profile.
     cardTitle: 'Eliminar perfil',
     cardText: 'Borra este perfil de este ordenador. Antes de hacerlo, comprueba que tienes apuntadas sus 24 palabras.',
