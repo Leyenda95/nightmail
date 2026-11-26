@@ -1,10 +1,13 @@
-﻿# Opens the native Windows desktop app (debug build) against the local stack running in WSL.
+﻿# Opens the native Windows desktop app (debug build) against the local stack.
 #
 #   powershell -ExecutionPolicy Bypass -File tools\dev\window.ps1 [profile] [-TargetDir <folder>]
 #              [-ProfilesDir <folder>] [-WslRepo <path>] [-RunEnv <file>] [-Distro <name>] [-Bin <exe>]
+#              [-Docker] [-ContractsFile <file>]
 #
-# The devnet, payer, mail server and proof server stay in WSL (tools/dev/up.sh). Their ports answer on
-# 127.0.0.1 from Windows with networkingMode=mirrored in .wslconfig. Build first with build.ps1.
+# By default the devnet, payer, mail server and proof server run in WSL (tools/dev/up.sh). Their ports
+# answer on 127.0.0.1 from Windows with networkingMode=mirrored in .wslconfig. With -Docker they run in
+# Docker (infra/backend, started by demo.ps1, which copies contracts.json and run.env into
+# .data\dev\docker) and WSL is not used. Build first with build.ps1.
 # Each profile is an app data folder (default: .data\dev\profiles\<profile> in this checkout).
 # Never open two windows with the same profile at once.
 param(
@@ -14,7 +17,9 @@ param(
     [string]$WslRepo = '',
     [string]$RunEnv = '',
     [string]$Distro = '',
-    [string]$Bin = ''
+    [string]$Bin = '',
+    [switch]$Docker,
+    [string]$ContractsFile = ''
 )
 
 $Repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -23,7 +28,8 @@ if (-not $Bin) { $Bin = Join-Path $TargetDir 'debug\nightmail-desktop.exe' }
 if (-not $ProfilesDir) { $ProfilesDir = Join-Path $Repo '.data\dev\profiles' }
 # Without -Distro, the WSL default distribution.
 $distroArgs = if ($Distro) { @('-d', $Distro) } else { @() }
-if (-not $WslRepo) {
+$DockerState = Join-Path $Repo '.data\dev\docker'
+if (-not $Docker -and -not $WslRepo) {
     $info = (& wsl.exe @distroArgs -e sh -c 'echo $WSL_DISTRO_NAME:$HOME' | Out-String).Trim()
     if ($info -notmatch '^([^:]+):(/.*)$') {
         Write-Host 'ERROR: could not reach the WSL distribution (pass -Distro <name> or -WslRepo <path>).'
@@ -32,7 +38,11 @@ if (-not $WslRepo) {
     $unc = if (Test-Path "\\wsl.localhost\$($Matches[1])\") { "\\wsl.localhost\$($Matches[1])" } else { "\\wsl$\$($Matches[1])" }
     $WslRepo = $unc + ("$($Matches[2])/nightmail" -replace '/', '\')
 }
-if (-not $RunEnv) { $RunEnv = Join-Path $WslRepo '.data\dev\run.env' }
+if (-not $RunEnv) { $RunEnv = if ($Docker) { Join-Path $DockerState 'run.env' } else { Join-Path $WslRepo '.data\dev\run.env' } }
+if (-not $ContractsFile) {
+    $ContractsFile = if ($Docker) { Join-Path $DockerState 'contracts.json' } else { Join-Path $WslRepo '.data\operator\undeployed\contracts.json' }
+}
+$StartHint = if ($Docker) { 'Start it with: npm run demo:windows' } else { 'Start the stack in WSL with tools/dev/up.sh.' }
 
 $State = Join-Path $Repo '.data\dev'
 $ProfileDir = Join-Path $ProfilesDir $Perfil
@@ -59,26 +69,28 @@ foreach ($l in $locks | Where-Object { Test-Path $_ }) {
 }
 
 # Never run two instances at once: bail out if the WSL window is open.
-$wslWin = wsl.exe @distroArgs -- pgrep -f 'target/debug/nightmail-desktop'
-if ($wslWin) {
-    Write-Host "ERROR: the WSL window (nightmail-desktop) is open (pid $wslWin). Close it first."
-    exit 1
+if (-not $Docker) {
+    $wslWin = wsl.exe @distroArgs -- pgrep -f 'target/debug/nightmail-desktop'
+    if ($wslWin) {
+        Write-Host "ERROR: the WSL window (nightmail-desktop) is open (pid $wslWin). Close it first."
+        exit 1
+    }
 }
 
-# Receipt key fingerprint written by tools/dev/up.sh in WSL. Not printed.
+# Receipt key fingerprint (tools/dev/up.sh in WSL, or demo.ps1 from the Docker backend). Not printed.
 $keyLine = Get-Content $RunEnv -ErrorAction SilentlyContinue | Where-Object { $_ -like 'NIGHTMAIL_ISSUER_RECEIPT_KEY=*' } | Select-Object -First 1
 if (-not $keyLine) {
-    Write-Host "ERROR: could not read the receipt key fingerprint from $RunEnv. Was tools/dev/up.sh launched in WSL?"
+    Write-Host "ERROR: could not read the receipt key fingerprint from $RunEnv. $StartHint"
     exit 1
 }
 $env:NIGHTMAIL_ISSUER_RECEIPT_KEY = $keyLine.Substring('NIGHTMAIL_ISSUER_RECEIPT_KEY='.Length).Trim()
 $env:NIGHTMAIL_NETWORK = 'undeployed'
 $env:NIGHTMAIL_PROFILE_DIR = $ProfileDir
-# Devnet contracts are read straight from the WSL checkout (not copied).
-$env:NIGHTMAIL_CONTRACTS_FILE = Join-Path $WslRepo '.data\operator\undeployed\contracts.json'
+# Devnet contracts: read straight from the WSL checkout, or the copy demo.ps1 took from the Docker backend.
+$env:NIGHTMAIL_CONTRACTS_FILE = $ContractsFile
 $env:NIGHTMAIL_SIDECAR_DIR = Join-Path $Repo 'apps\midnight-sidecar'
 if (-not (Test-Path $env:NIGHTMAIL_CONTRACTS_FILE)) {
-    Write-Host "ERROR: $($env:NIGHTMAIL_CONTRACTS_FILE) not found (devnet contracts in WSL)."
+    Write-Host "ERROR: $($env:NIGHTMAIL_CONTRACTS_FILE) not found (devnet contracts). $StartHint"
     exit 1
 }
 $node = Get-Command node.exe -ErrorAction SilentlyContinue
@@ -88,7 +100,7 @@ if ($null -eq $node) {
 }
 $env:NIGHTMAIL_NODE = $node.Source
 
-# WSL services as seen from Windows. Without the payer and server the app opens but cannot create addresses or request plans.
+# Backend services as seen from Windows. Without the payer and server the app opens but cannot create addresses or request plans.
 # String keys on purpose: with numeric keys, $puertos[$p] would index by position instead of by port.
 $puertos = [ordered]@{ '9944' = 'devnet node'; '8088' = 'indexer'; '6300' = 'proof server'; '8787' = 'mail API'; '8788' = 'issuer'; '8789' = 'relayer' }
 $falta = @()
@@ -103,10 +115,14 @@ foreach ($p in $puertos.Keys) {
         $c.Close()
     }
 }
-$payer = wsl.exe @distroArgs -- pgrep -f '^node .*src/bin/operator-wallet[.]ts'
+if ($Docker) {
+    $payer = (& docker.exe inspect --format '{{.State.Health.Status}}' nightmail-backend-payer 2>$null | Out-String).Trim() -eq 'healthy'
+} else {
+    $payer = wsl.exe @distroArgs -- pgrep -f '^node .*src/bin/operator-wallet[.]ts'
+}
 if (-not $payer) { $falta += 'the payer' }
 if ($falta.Count -gt 0) {
-    Write-Host ('WARNING: not responding: ' + ($falta -join ', ') + '. Start the stack in WSL with tools/dev/up.sh.')
+    Write-Host ('WARNING: not responding: ' + ($falta -join ', ') + ". $StartHint")
 }
 
 New-Item -ItemType Directory -Force $State | Out-Null

@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
@@ -190,11 +190,11 @@ test('acquireLock on Linux does not change: the lock carries no Windows marks an
   const dir = openDir(t);
   const probe = fakeWindows();
   const release = acquireLock(dir, 'wallet', 'linux', probe);
-  assert.deepEqual(JSON.parse(readFileSync(lockOf(dir), 'utf8')), currentProcessId());
+  assert.deepEqual(JSON.parse(readFileSync(lockOf(dir), 'utf8')), { ...currentProcessId(), host: hostname() });
   assert.throws(() => acquireLock(dir, 'wallet', 'linux', probe), WalletInUseError);
   release();
   // With Windows marks and our own pid from another boot, it is recovered through /proc as usual.
-  writeLock(dir, { ...winOwner(process.pid, probe.ownStart, 1e9), start: 'otro', boot: 'otro' });
+  writeLock(dir, { ...winOwner(process.pid, probe.ownStart, 1e9), start: 'other', boot: 'other' });
   acquireLock(dir, 'wallet', 'linux', probe)();
   assert.deepEqual(probe.asked, []);
 });
@@ -268,4 +268,25 @@ test('real acquireLock on Windows: a live child blocks, and the same pid with an
   assert.throws(() => acquireLock(dir, 'wallet'), WalletInUseError);
   writeLock(dir, winOwner(pid, started - 3_600_000, 1));
   acquireLock(dir, 'wallet')();
+});
+
+test('acquireLock on Linux: a lock from another host (another container) is honored, even if its pid looks dead here', { skip: process.platform !== 'linux' }, (t) => {
+  const dir = openDir(t);
+  // pid 1 started at another instant: from the same host it would be stale.
+  const stale = { pid: 1, start: 'other', boot: currentProcessId().boot };
+  writeLock(dir, { ...stale, host: `${hostname()}-other` });
+  assert.throws(() => acquireLock(dir, 'wallet', 'linux'), (e: unknown) =>
+    e instanceof WalletInUseError && e.message === `wallet already in use by process 1 on host ${hostname()}-other`);
+  writeLock(dir, { ...stale, host: hostname() });
+  acquireLock(dir, 'wallet', 'linux')();
+  writeLock(dir, stale);
+  acquireLock(dir, 'wallet', 'linux')();
+  assert.equal(existsSync(lockOf(dir)), false, 'same host or no host recorded: stale, recovered as before');
+});
+
+test('acquireLock on Linux: a lock from an earlier boot is stale, also when it was taken on another host', { skip: process.platform !== 'linux' }, (t) => {
+  const dir = openDir(t);
+  writeLock(dir, { pid: 1, start: 'other', boot: 'an-earlier-boot', host: `${hostname()}-other` });
+  acquireLock(dir, 'wallet', 'linux')();
+  assert.equal(existsSync(lockOf(dir)), false, 'recovered, then released');
 });

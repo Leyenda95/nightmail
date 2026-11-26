@@ -73,6 +73,22 @@ Private providers protect what your mail says. Midnight lets NightMail also prot
 
 NightMail runs on a local Midnight network in Docker.
 
+### Windows
+
+You need Git, Node.js 24 and Docker Desktop (running, or it is started for you).
+
+```powershell
+git clone https://github.com/Leyenda95/nightmail.git
+cd nightmail
+npm run demo:windows
+```
+
+It checks what is missing and tells you how to install it, starts the local Midnight network and the NightMail backend (mail server and payer) in Docker and opens the app. The first run builds the backend image, compiles the contracts and deploys them, which takes several minutes. Run it again any time: it reuses everything and does not open a second window. The app is downloaded prebuilt, or built locally with `npm run demo:windows -- -Build`. To stop it, run `docker compose -f infra/backend/docker-compose.yml stop` and then `docker compose -f infra/devnet/docker-compose.yml stop`.
+
+To start the local demo from scratch, run `docker compose -f infra/backend/docker-compose.yml down -v` and then `npm run demo:windows` again. It deletes the backend's keys and mailboxes of the local demo, and the next run deploys new contracts.
+
+Alternative with WSL (Ubuntu) instead of the backend in Docker: clone to `C:\nightmail`, run `bash /mnt/c/nightmail/tools/dev/demo-wsl.sh` in an Ubuntu terminal and keep it open, then run `npm run demo:windows -- -Wsl` on Windows.
+
 ### Linux or WSL
 
 You need Git, Node.js 24 and Docker.
@@ -84,15 +100,6 @@ npm run demo
 ```
 
 It checks what is missing and tells you how to install it, sets everything up the first time (this takes a while, because it compiles the contracts and the app) and opens the app. Run it again any time. To stop, run `bash tools/dev/down.sh`.
-
-### Windows
-
-You need Node.js 24, Docker Desktop and WSL with Ubuntu. Clone the repository to `C:\nightmail`.
-
-1. In an Ubuntu terminal, run `bash /mnt/c/nightmail/tools/dev/demo-wsl.sh` and keep it open.
-2. On Windows, in `C:\nightmail`, run `npm run demo:windows`.
-
-Both commands check the rest (such as mirrored networking) and tell you what to do. The app is downloaded prebuilt, or built locally with `npm run demo:windows -- -Build`.
 
 ### First steps in the app
 
@@ -203,6 +210,7 @@ For what is in progress and planned, see [Project status](#project-status).
 | [`packages/midnight`](packages/midnight/README.md) | Registry utilities shared by the server and the helper process. |
 | [`packages/test-vectors`](packages/test-vectors/README.md) | Test vectors shared by Rust and TypeScript, and the protocol spec. |
 | [`infra/devnet`](infra/devnet/README.md) | The local Midnight network in Docker. |
+| [`infra/backend`](infra/backend/docker-compose.yml) | The demo backend in Docker (mail server, payer and contract deployment), used by `npm run demo:windows`. |
 | [`tools/dev`](tools/dev) | Scripts to set up, start, build, open and stop everything. |
 | [`tools/demo-mailer`](tools/demo-mailer/README.md) | Sends sample mail over SMTP. |
 | [`tools/demo-seed`](tools/demo-seed/README.md) | Prepares the demo network (filler bonos, round advance). |
@@ -253,7 +261,7 @@ bash tools/dev/down.sh                   # stops the payer and the server (add -
 
 Native Windows app by hand, only if you do not use `npm run demo:windows`. It expects a WSL copy at `~/nightmail` in the default WSL distribution, already set up as above.
 
-1. Set up mirrored networking as in the Windows path. Install on Windows Node 24, Rust (MSVC) 1.90 or later, Visual Studio Build Tools, WebView2 and [Strawberry Perl](https://strawberryperl.com).
+1. Set up mirrored networking, so that the WSL ports answer on Windows: add `networkingMode=mirrored` under `[wsl2]` in `%UserProfile%\.wslconfig` and run `wsl --shutdown`. Install on Windows Node 24, Rust (MSVC) 1.90 or later, Visual Studio Build Tools, WebView2 and [Strawberry Perl](https://strawberryperl.com).
 2. In the Windows copy, run `npm ci` and copy `vendor/base-styles` and `contracts/managed` into it from the WSL copy. In WSL, run `bash tools/dev/up.sh`.
 3. On Windows, with the app closed:
 

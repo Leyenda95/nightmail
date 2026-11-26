@@ -12,7 +12,7 @@
 import { loadConfig, redactUrl } from '../config.ts';
 import { installOutputRedaction } from '../redact.ts';
 import { PayerSocketError, startPayerApi, type PayerApi } from '../payer/api.ts';
-import { payerSocketPath } from '../payer/client.ts';
+import { payerClient, payerSocketPath } from '../payer/client.ts';
 import { loadPayerLimits } from '../payer/config.ts';
 import { IssueJournal, JournalUnreadableError } from '../payer/journal.ts';
 import { Payer, type PayerLimits, type PayerLog } from '../payer/payer.ts';
@@ -118,6 +118,15 @@ async function withTimeout<T>(name: string, timeoutMs: number, fn: () => Promise
 const PERMANENT = [InsecurePermissionsError, PayerConfigError, JournalUnreadableError, PayerSocketError];
 
 console.log(`[payer] network ${config.network}, indexer ${redactUrl(config.indexer)}`);
+// Another payer answering on the socket holds the wallet. The lock cannot always tell: a second container of the
+// same service (`docker compose run payer`) has the same host name and pid. A socket that does not answer in
+// time is not proof that nobody is there either.
+const other = await payerClient(payerSocketPath(config.dataDir), 3000).health().then(() => 'answers', (err: unknown) =>
+  (err as NodeJS.ErrnoException).code === 'ENOENT' || (err as NodeJS.ErrnoException).code === 'ECONNREFUSED' ? null : describe(err));
+if (other) {
+  console.error(`[payer] another payer seems to be running on ${payerSocketPath(config.dataDir)} (${other}). Not starting.`);
+  process.exit(EX_CONFIG);
+}
 try {
   const journal = IssueJournal.open(config.dataDir); // first: if it cannot be understood, do not start
   const wallet: OperatorWallet = await openOperatorWallet(config); // takes the directory's single-instance lock

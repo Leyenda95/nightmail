@@ -212,12 +212,23 @@ echo "[5/8] Starting the local network and waiting until it is healthy"
 "${COMPOSE[@]}" up -d --wait || { echo "ERROR: the local network did not become healthy. See: npm run devnet:status"; exit 1; }
 
 # ---------- 6. Contract deployment ----------
-# Exit 0 if the registry in contracts.json exists on the local indexer, 3 if not, 4 if it could not tell.
+# The Docker backend (infra/backend, npm run demo:windows) uses the same ports and the same devnet wallet.
+if [ -n "$(docker ps -q --filter name=^nightmail-backend-payer$ --filter status=running 2>/dev/null)" ]; then
+  echo "ERROR: the Docker backend (infra/backend) is running. Stop it first:"
+  echo "       docker compose -f infra/backend/docker-compose.yml stop"
+  exit 1
+fi
+# Exit 0 if contracts.json records a finished deployment whose registry exists on the local indexer, 3 if the
+# registry is not there, 4 if it could not tell, 5 if the deployment is unfinished (deploy-contracts saves it as
+# it goes, so a crash or a timeout leaves it half written, and running it again resumes it).
 registry_on_chain() {
   node -e '
     const [file, url] = process.argv.slice(1);
-    const a = JSON.parse(require("fs").readFileSync(file, "utf8")).registry?.address;
-    if (!/^[0-9a-f]+$/.test(a ?? "")) process.exit(4);
+    let d;
+    try { d = JSON.parse(require("fs").readFileSync(file, "utf8")); } catch { process.exit(5); }
+    const a = d.registry?.address;
+    const pending = d.pending && Object.keys(d.pending).length > 0;
+    if (!/^[0-9a-f]{64}$/.test(a ?? "") || !d.token?.color || !d.deployedAt || pending) process.exit(5);
     fetch(url, { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ query: `{ contractAction(address: "${a}") { __typename } }` }) })
       .then((r) => r.json())
@@ -225,9 +236,10 @@ registry_on_chain() {
       .catch(() => process.exit(4));
   ' "$CONTRACTS_JSON" "$INDEXER_URL"
 }
-if [ -f "$CONTRACTS_JSON" ]; then
-  registry_on_chain
-  case $? in
+DEPLOYED=5
+if [ -f "$CONTRACTS_JSON" ]; then registry_on_chain; DEPLOYED=$?; fi
+if [ "$DEPLOYED" != 5 ]; then
+  case $DEPLOYED in
     0) echo "[6/8] Contracts already deployed ($CONTRACTS_JSON)" ;;
     3) echo "ERROR: $CONTRACTS_JSON names contracts that are not on the local network."
        echo "       The local chain was reset (its containers were removed, for example with docker compose down)."
@@ -237,7 +249,8 @@ if [ -f "$CONTRACTS_JSON" ]; then
     *) echo "[6/8] WARNING: could not ask the local indexer whether the contracts in $CONTRACTS_JSON exist. Continuing." ;;
   esac
 else
-  echo "[6/8] Deploying the contracts to the local network"
+  if [ -f "$CONTRACTS_JSON" ]; then echo "[6/8] Resuming the unfinished deployment of the contracts"
+  else echo "[6/8] Deploying the contracts to the local network"; fi
   NIGHTMAIL_NETWORK=undeployed npm run deploy-contracts -w apps/server -- --price 100 || exit 1
 fi
 

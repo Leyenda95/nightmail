@@ -38,22 +38,43 @@ export function parseNetwork(value: string | undefined): NetworkName {
   return network as NetworkName;
 }
 
+/** `value` if it is a URL with one of `protocols`, else `fallback` when unset. Anything else throws. */
+function urlFrom(name: string, value: string | undefined, fallback: string, protocols: string[]): string {
+  if (value === undefined) return fallback;
+  let url: URL | undefined;
+  try {
+    url = new URL(value);
+  } catch {
+    url = undefined;
+  }
+  if (!url || !protocols.includes(url.protocol)) throw new Error(`${name} must be a ${protocols.join(' or ')} URL`);
+  return value.replace(/\/+$/, '');
+}
+
+/**
+ * Network configuration. The local devnet and the proof server are reached on 127.0.0.1 unless these
+ * variables say otherwise (the Docker backend in infra/backend points them at the devnet containers):
+ * NIGHTMAIL_DEVNET_NODE_URL (ws), NIGHTMAIL_DEVNET_INDEXER_URL (http, its WebSocket is `<url>/ws`)
+ * and NIGHTMAIL_PROOF_SERVER_URL (http).
+ */
 export function loadConfig(
   network: NetworkName = parseNetwork(process.env['NIGHTMAIL_NETWORK']),
   env: Record<string, string | undefined> = readEnvFile(path.join(REPO_ROOT, '.env')),
+  vars: Record<string, string | undefined> = process.env,
 ): ServerConfig {
   // In case it was exported in the shell: keep it away from child processes.
   delete process.env['BLOCKFROST_PROJECT_ID'];
 
-  const proofServer = 'http://127.0.0.1:6300';
+  const proofServer = urlFrom('NIGHTMAIL_PROOF_SERVER_URL', vars['NIGHTMAIL_PROOF_SERVER_URL'], 'http://127.0.0.1:6300', ['http:', 'https:']);
   const dataDir = path.join(REPO_ROOT, '.data', 'operator', network);
 
   if (network === 'undeployed') {
+    const indexer = urlFrom('NIGHTMAIL_DEVNET_INDEXER_URL', vars['NIGHTMAIL_DEVNET_INDEXER_URL'], 'http://127.0.0.1:8088/api/v4/graphql', ['http:']);
     return {
       network,
-      indexer: 'http://127.0.0.1:8088/api/v4/graphql',
-      indexerWS: 'ws://127.0.0.1:8088/api/v4/graphql/ws',
-      relayURL: 'ws://127.0.0.1:9944',
+      indexer,
+      indexerWS: `${indexer.replace(/^http/, 'ws')}/ws`,
+      relayURL: urlFrom('NIGHTMAIL_DEVNET_NODE_URL', vars['NIGHTMAIL_DEVNET_NODE_URL'], 'ws://127.0.0.1:9944', ['ws:']),
       proofServer,
       dataDir,
       secrets: [],
@@ -98,8 +119,11 @@ export type MailServerConfig = {
   registryAddress: string;
   /** Mail domain, lowercase. */
   mailDomain: string;
-  /** The MVP only listens locally: inbound mail is local-only by design. */
-  listenHost: '127.0.0.1';
+  /**
+   * Address the SMTP server, the API, the issuer and the relayer listen on. The MVP only listens locally:
+   * 127.0.0.1, or 0.0.0.0 inside the Docker backend's container, whose ports are published on 127.0.0.1 only.
+   */
+  listenHost: string;
   smtpPort: number;
   apiPort: number;
   /** Base URL clients use to reach the API; its authority is the `host` they sign. */
@@ -122,6 +146,22 @@ function portFrom(value: string | undefined, fallback: number, name: string): nu
   return port;
 }
 
+/** Docker creates this file in every container. */
+export const inDockerContainer = (): boolean => existsSync('/.dockerenv');
+
+/**
+ * Only these two: local-only, or every interface of a container whose ports are published on 127.0.0.1.
+ * 0.0.0.0 is refused outside a container, where it would expose the server to the network.
+ */
+function listenHostFrom(value: string | undefined, inContainer: () => boolean): string {
+  if (value === undefined) return '127.0.0.1';
+  if (value !== '127.0.0.1' && value !== '0.0.0.0') throw new Error('NIGHTMAIL_LISTEN_HOST must be 127.0.0.1 or 0.0.0.0');
+  if (value === '0.0.0.0' && !inContainer()) {
+    throw new Error('NIGHTMAIL_LISTEN_HOST=0.0.0.0 is only allowed inside a Docker container (no /.dockerenv here)');
+  }
+  return value;
+}
+
 /** Address of the registry deployed on that network, from `contracts.json` (written by `deploy-contracts`). */
 export function readRegistryAddress(config: Pick<ServerConfig, 'network' | 'dataDir'>): string {
   const file = path.join(config.dataDir, 'contracts.json');
@@ -137,11 +177,13 @@ export function readRegistryAddress(config: Pick<ServerConfig, 'network' | 'data
 /**
  * Mail server configuration. Optional environment variables: NIGHTMAIL_MAIL_DOMAIN,
  * NIGHTMAIL_SMTP_PORT, NIGHTMAIL_API_PORT, NIGHTMAIL_API_URL (public API URL when it is not
- * `http://127.0.0.1:<port>`), NIGHTMAIL_API_TRUSTED_PROXY (1 or 0) and NIGHTMAIL_DEBUG=1.
+ * `http://127.0.0.1:<port>`), NIGHTMAIL_API_TRUSTED_PROXY (1 or 0), NIGHTMAIL_LISTEN_HOST (127.0.0.1 or
+ * 0.0.0.0, the latter only inside a container) and NIGHTMAIL_DEBUG=1.
  */
 export function loadMailServerConfig(
   config: Pick<ServerConfig, 'network' | 'dataDir'>,
   env: Record<string, string | undefined> = process.env,
+  inContainer: () => boolean = inDockerContainer,
 ): MailServerConfig {
   const registryAddress = readRegistryAddress(config);
   const mailDomain = (env['NIGHTMAIL_MAIL_DOMAIN'] ?? DEFAULT_MAIL_DOMAIN).toLowerCase();
@@ -150,7 +192,7 @@ export function loadMailServerConfig(
   return {
     registryAddress,
     mailDomain,
-    listenHost: '127.0.0.1',
+    listenHost: listenHostFrom(env['NIGHTMAIL_LISTEN_HOST'], inContainer),
     smtpPort: portFrom(env['NIGHTMAIL_SMTP_PORT'], DEFAULT_SMTP_PORT, 'NIGHTMAIL_SMTP_PORT'),
     apiPort,
     apiBaseUrl: env['NIGHTMAIL_API_URL'] ?? `http://127.0.0.1:${apiPort}`,

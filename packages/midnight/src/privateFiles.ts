@@ -88,7 +88,13 @@ export function pidExists(
  * - `winUptime`: system uptime in seconds when the lock was taken.
  */
 type WindowsMarks = { winStart: number; winUptime: number };
-type LockOwner = ProcessId & Partial<WindowsMarks>;
+/**
+ * `host`: the host name of the lock holder, recorded off Windows. Each container has its own process ids (the
+ * Docker backend's payer is pid 1 in its container, and the deploy's node is a low pid in another one), so a lock
+ * taken on another host in the same system boot cannot be checked through /proc and is honored. The Docker backend
+ * gives each service a fixed host name (infra/backend/docker-compose.yml).
+ */
+type LockOwner = ProcessId & Partial<WindowsMarks> & { host?: string };
 
 /** The lock's view of Windows. Injected in tests to simulate reboots and reused pids. */
 export type WindowsProbe = {
@@ -146,15 +152,22 @@ function isLiveOnWindows(owner: LockOwner, probe: WindowsProbe): boolean {
   return started === null || started <= owner.winStart + REUSED_PID_MARGIN_MS;
 }
 
-/** Alive only if a process with that pid exists, started at the same instant and within the same system boot. */
+/**
+ * Alive only if a process with that pid exists, started at the same instant and within the same system boot.
+ * A lock from an earlier boot is stale wherever it was taken (containers share the kernel, and its boot id).
+ * Within this boot, a lock recorded on another host (another container) is taken as alive: its pid means nothing here.
+ */
 function isSameLiveProcess(owner: LockOwner, platform: NodeJS.Platform, probe: WindowsProbe): boolean {
   if (platform === 'win32') return isLiveOnWindows(owner, probe);
-  return owner.boot === bootId() && processStart(owner.pid) === owner.start;
+  if (owner.boot !== bootId()) return false;
+  if (typeof owner.host === 'string' && owner.host !== os.hostname()) return true;
+  return processStart(owner.pid) === owner.start;
 }
 
 /** "Wallet in use" message. On Windows it also says what to do, since the process is harder to identify there. */
-function inUseMessage(what: string, pid: number, platform: NodeJS.Platform): string {
-  const base = `${what} already in use by process ${pid}`;
+function inUseMessage(what: string, pid: number, platform: NodeJS.Platform, host?: string): string {
+  const where = typeof host === 'string' && host !== os.hostname() ? ` on host ${host}` : '';
+  const base = `${what} already in use by process ${pid}${where}`;
   if (platform !== 'win32') return base;
   // Deleting the file by hand is not suggested: the sidecar shows up as node.exe and the lock may belong to an open window.
   return `${base}. Close the other NightMail window. If the message persists, restart the computer`;
@@ -169,6 +182,7 @@ function inUseMessage(what: string, pid: number, platform: NodeJS.Platform): str
  *   system `boot_id` are compared too.
  * - It cannot be acquired twice within the same process either.
  * - On Windows, without /proc, the `WindowsMarks` fields are used (see isLiveOnWindows).
+ * - Elsewhere the host name is recorded too: a lock from another host (container) is never taken as stale.
  */
 export function acquireLock(
   dir: string, what = 'operator wallet', platform: NodeJS.Platform = process.platform, probe: WindowsProbe = realWindowsProbe,
@@ -176,7 +190,7 @@ export function acquireLock(
   const file = path.join(dir, 'lock');
   const me: LockOwner = platform === 'win32'
     ? { ...currentProcessId(), winStart: probe.ownStart, winUptime: probe.uptime() }
-    : currentProcessId();
+    : { ...currentProcessId(), host: os.hostname() };
   for (let attempt = 0; attempt < 3; attempt++) {
     const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
     writeFileSync(tmp, JSON.stringify(me), { mode: 0o600, flag: 'wx' });
@@ -199,7 +213,7 @@ export function acquireLock(
       owner = null;
     }
     if (owner && typeof owner.pid === 'number' && isSameLiveProcess(owner, platform, probe)) {
-      throw new WalletInUseError(inUseMessage(what, owner.pid, platform));
+      throw new WalletInUseError(inUseMessage(what, owner.pid, platform, owner.host));
     }
     // Stale (or legacy pid-only format): move it away with an atomic rename and retry. If another process
     // replaced it meanwhile, the file has changed: leave it alone and check again.

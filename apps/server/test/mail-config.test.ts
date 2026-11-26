@@ -102,3 +102,15 @@ test('createLogger: info and warnings always, debug only when asked', () => {
   silentLogger.warn('nothing');
   silentLogger.debug('nothing');
 });
+
+test('NIGHTMAIL_LISTEN_HOST: 127.0.0.1 by default, 0.0.0.0 only inside a container, nothing else', () => {
+  const container = () => true;
+  const host = () => false;
+  assert.equal(loadMailServerConfig(deployed(), { NIGHTMAIL_LISTEN_HOST: '0.0.0.0' }, container).listenHost, '0.0.0.0');
+  assert.throws(() => loadMailServerConfig(deployed(), { NIGHTMAIL_LISTEN_HOST: '0.0.0.0' }, host), /only allowed inside a Docker container/);
+  assert.equal(loadMailServerConfig(deployed(), { NIGHTMAIL_LISTEN_HOST: '127.0.0.1' }, host).listenHost, '127.0.0.1');
+  assert.equal(loadMailServerConfig(deployed(), {}, container).listenHost, '127.0.0.1');
+  for (const value of ['', 'localhost', '192.168.1.10', '::']) {
+    assert.throws(() => loadMailServerConfig(deployed(), { NIGHTMAIL_LISTEN_HOST: value }, container), /NIGHTMAIL_LISTEN_HOST/, value);
+  }
+});

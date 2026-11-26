@@ -43,7 +43,7 @@ try {
   closers.push(() => server.close());
   const { sync } = server;
   const services = await startOperatorServices({
-    dataDir: config.dataDir, registry: mail.registryAddress, log, setup,
+    dataDir: config.dataDir, registry: mail.registryAddress, log, setup, host: mail.listenHost,
     roundState: () => sync.roundState(), healthy: () => sync.healthy(),
   });
   closers.push(() => services.close());

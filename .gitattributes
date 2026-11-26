@@ -12,6 +12,9 @@
 *.tsx  text eol=lf
 *.json text eol=lf
 *.compact text eol=lf
+*.mjs  text eol=lf
+Dockerfile text eol=lf
+*.dockerignore text eol=lf
 .env.example text eol=lf
 
 # PowerShell 5.1 reads LF scripts fine, so *.ps1 follows the default

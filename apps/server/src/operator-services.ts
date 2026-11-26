@@ -42,7 +42,7 @@ export type StartOptions = {
   roundState: () => RoundState | undefined;
   /** Whether the sync is healthy (`sync.healthy()`); if not, the round may be stale. */
   healthy: () => boolean;
-  /** Tests only. */
+  /** Listen address of the issuer and the relayer (default 127.0.0.1): the mail server's `listenHost`. */
   host?: string;
 };
 

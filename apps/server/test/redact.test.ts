@@ -52,3 +52,29 @@ test('parseNetwork rejects unknown networks', () => {
   assert.throws(() => parseNetwork('mainnet; rm -rf /'), /Unsupported network/);
   assert.throws(() => parseNetwork(''), /Unsupported network/, 'an empty variable does not pick a network on its own');
 });
+
+test('loadConfig: the devnet and the proof server are on 127.0.0.1 unless the environment says otherwise', () => {
+  const local = loadConfig('undeployed', {}, {});
+  assert.equal(local.indexer, 'http://127.0.0.1:8088/api/v4/graphql');
+  assert.equal(local.indexerWS, 'ws://127.0.0.1:8088/api/v4/graphql/ws');
+  assert.equal(local.relayURL, 'ws://127.0.0.1:9944');
+  assert.equal(local.proofServer, 'http://127.0.0.1:6300');
+  const docker = loadConfig('undeployed', {}, {
+    NIGHTMAIL_DEVNET_INDEXER_URL: 'http://indexer:8088/api/v4/graphql/',
+    NIGHTMAIL_DEVNET_NODE_URL: 'ws://node:9944',
+    NIGHTMAIL_PROOF_SERVER_URL: 'http://proof-server:6300',
+  });
+  assert.equal(docker.indexer, 'http://indexer:8088/api/v4/graphql');
+  assert.equal(docker.indexerWS, 'ws://indexer:8088/api/v4/graphql/ws');
+  assert.equal(docker.relayURL, 'ws://node:9944');
+  assert.equal(docker.proofServer, 'http://proof-server:6300');
+  assert.throws(() => loadConfig('undeployed', {}, { NIGHTMAIL_DEVNET_NODE_URL: 'http://node:9944' }), /NIGHTMAIL_DEVNET_NODE_URL/);
+  assert.throws(() => loadConfig('undeployed', {}, { NIGHTMAIL_PROOF_SERVER_URL: 'not a url' }), /NIGHTMAIL_PROOF_SERVER_URL/);
+});
+
+test('loadConfig: the devnet URLs only take their own scheme, and an empty value is an error, not the default', () => {
+  assert.throws(() => loadConfig('undeployed', {}, { NIGHTMAIL_DEVNET_INDEXER_URL: 'https://indexer:8088/api/v4/graphql' }), /NIGHTMAIL_DEVNET_INDEXER_URL/);
+  for (const name of ['NIGHTMAIL_DEVNET_INDEXER_URL', 'NIGHTMAIL_DEVNET_NODE_URL', 'NIGHTMAIL_PROOF_SERVER_URL']) {
+    assert.throws(() => loadConfig('undeployed', {}, { [name]: '' }), new RegExp(name), name);
+  }
+});

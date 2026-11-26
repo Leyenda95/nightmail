@@ -6,12 +6,12 @@
 // long to wait (see chain/deploy.ts). Requires the contracts compiled with keys
 // (`npm run compile -w contracts`) and the payer process stopped (the wallet allows one holder at a time).
 import { parseArgs } from 'node:util';
-import { loadConfig, redactUrl } from '../config.ts';
+import { inDockerContainer, loadConfig, redactUrl } from '../config.ts';
 import { installOutputRedaction } from '../redact.ts';
 import { WalletInUseError } from '../wallet/storage.ts';
 import { balancesLine, ensureSpendableDust, openOperatorWallet, type OperatorWallet } from '../wallet/operatorWallet.ts';
 import { causes, openChain } from '../chain/midnight.ts';
-import { DeployInProgressError, deployNightMail, DeployPendingError } from '../chain/deploy.ts';
+import { DeployInProgressError, deployNightMail, DeployPendingError, StaleDeploymentError } from '../chain/deploy.ts';
 
 const { values } = parseArgs({ options: { price: { type: 'string', default: '100' } } });
 if (!/^[1-9][0-9]{0,19}$/.test(values.price) || BigInt(values.price) >= 2n ** 64n) {
@@ -38,7 +38,15 @@ try {
   process.exitCode = 0;
 } catch (err) {
   if (err instanceof WalletInUseError) {
-    console.error('[deploy] the operator wallet is in use (is the payer running?): tools/operator-wallet-service.sh stop');
+    const stop = inDockerContainer()
+      ? 'docker compose -f infra/backend/docker-compose.yml stop payer server'
+      : 'tools/operator-wallet-service.sh stop, or tools/dev/down.sh for the local stack';
+    console.error(`[deploy] the operator wallet is in use (is the payer running?): ${err.message}. Stop it: ${stop}`);
+  } else if (err instanceof StaleDeploymentError) {
+    const fresh = inDockerContainer()
+      ? 'docker compose -f infra/backend/docker-compose.yml down -v (it deletes the backend keys and mailboxes)'
+      : `move ${config.dataDir} aside`;
+    console.error(`[deploy] ${err.message}. Nothing was sent. To start over on this chain: ${fresh}`);
   } else if (err instanceof DeployInProgressError) {
     console.error('[deploy] another deploy-contracts is already running with this data folder; nothing was sent:', err.message);
   } else if (err instanceof DeployPendingError) {

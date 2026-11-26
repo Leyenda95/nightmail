@@ -28,6 +28,8 @@ export const EXPIRY_MARGIN_MS = 60_000;
 export class DeployInProgressError extends Error {}
 /** A sent deployment can still land on chain: wait, do not resend. */
 export class DeployPendingError extends Error {}
+/** contracts.json names a contract that is not on the chain (the local devnet was reset): start over. */
+export class StaleDeploymentError extends Error {}
 
 export type Deployment = {
   network: NetworkName;
@@ -196,7 +198,7 @@ async function checkAuthority(c: DeployableContract, name: Name, address: string
 async function checkStillDeployed(chain: DeployChain, d: Progress): Promise<void> {
   for (const [name, address] of [['token', d.token!.address], ['registry', d.registry!.address]] as const) {
     if (!(await (await chain.contract(name, name === 'registry' ? registryWitnesses() : {})).exists(address))) {
-      throw new Error(`contracts.json is stale: ${name} ${address} does not exist on ${d.network} (devnet reset?)`);
+      throw new StaleDeploymentError(`contracts.json is stale: ${name} ${address} does not exist on ${d.network} (devnet reset?)`);
     }
   }
 }
@@ -233,6 +235,10 @@ async function deployLocked(chain: DeployChain, opts: { dataDir: string; network
   if (readDeployment(dataDir)) {
     await checkStillDeployed(chain, d);
     return d as Deployment;
+  }
+  // Resuming: a recorded token must still be on chain, or the registry would be deployed over a missing one.
+  if (d.token?.address && !(await (await chain.contract('token')).exists(d.token.address))) {
+    throw new StaleDeploymentError(`contracts.json is stale: token ${d.token.address} does not exist on ${d.network} (devnet reset?)`);
   }
 
   if (!d.token?.color) {

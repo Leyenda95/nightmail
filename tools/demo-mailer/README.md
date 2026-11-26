@@ -45,8 +45,8 @@ Test templates, sent only when you ask for them:
   2. The same image written inside the HTML as `data:image/png;base64,…` (the path for images embedded in the HTML).
   3. Through `cid:`, a PNG of 8000 × 8000. Each side fits, but its 64 Mpx go over the per-image limit (`MAX_PIXELS`, currently 16 Mpx).
 
-  In the app the three boxes must say «imagen no disponible» without the app freezing. The small green square in the same email must show.
-- `images`: 24 PNG images of 1280 × 960, each one a single colour, a few KB each. **It only tests the limit on images per message**: `MAX_INLINE_IMAGES` in the core (`apps/desktop/src-tauri/src/mail/parser/inline.rs`) and `MAX_IMAGES` in the reader (`apps/desktop/src/images.ts`), both currently 20. The last 4 must show as «imagen no disponible», and the message must open and scroll smoothly. **It does not test** the other limits: the images shown stay under the pixel budget per message (`MAX_TOTAL_PIXELS` in `images.ts`) and far below the byte limits of the core (`MAX_INLINE_IMAGE_BYTES` and `MAX_INLINE_TOTAL_BYTES` in `inline.rs`).
+  In the app the three boxes must say "image not available" without the app freezing. The small green square in the same email must show.
+- `images`: 24 PNG images of 1280 × 960, each one a single colour, a few KB each. **It only tests the limit on images per message**: `MAX_INLINE_IMAGES` in the core (`apps/desktop/src-tauri/src/mail/parser/inline.rs`) and `MAX_IMAGES` in the reader (`apps/desktop/src/images.ts`), both currently 20. The last 4 must show as "image not available", and the message must open and scroll smoothly. **It does not test** the other limits: the images shown stay under the pixel budget per message (`MAX_TOTAL_PIXELS` in `images.ts`) and far below the byte limits of the core (`MAX_INLINE_IMAGE_BYTES` and `MAX_INLINE_TOTAL_BYTES` in `inline.rs`).
 
 ## Output
 

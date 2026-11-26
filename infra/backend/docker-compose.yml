@@ -1,0 +1,105 @@
+# NightMail backend in Docker: the mail server (SMTP, mailbox API, issuer, relayer), the payer (operator
+# wallet) and a one-time contract deployment, on the local network of infra/devnet. Start that one first:
+# this project joins its Docker network and reaches the node, indexer and proof server by service name.
+#
+#   docker compose -f infra/devnet/docker-compose.yml up -d --wait
+#   docker compose -f infra/backend/docker-compose.yml up -d --build --wait
+#
+# npm run demo:windows does both. The first build compiles the contracts with their ZK keys (minutes).
+# Data lives in two named volumes: nightmail-backend_operator (wallet, keys, contracts.json, payer socket)
+# and nightmail-backend_server (mailboxes). `down -v` deletes them, keys included.
+# Do not run it next to the payer and mail server of tools/dev/up.sh: both use the same ports and the
+# same devnet wallet.
+
+name: nightmail-backend
+
+x-backend: &backend
+  image: nightmail-backend:local
+  networks: [devnet]
+  volumes:
+    - operator:/app/.data/operator
+  environment: &environment
+    NIGHTMAIL_NETWORK: undeployed
+    NIGHTMAIL_DEVNET_NODE_URL: ws://node:9944
+    NIGHTMAIL_DEVNET_INDEXER_URL: http://indexer:8088/api/v4/graphql
+    NIGHTMAIL_PROOF_SERVER_URL: http://proof-server:6300
+
+services:
+  # Deploys the contracts the first time, resumes an unfinished deployment, and refuses to start the
+  # payer on contracts that are not on the chain or were compiled from other sources (deploy.sh).
+  deploy:
+    <<: *backend
+    build:
+      context: ../..
+      dockerfile: infra/backend/Dockerfile
+    container_name: nightmail-backend-deploy
+    # Fixed host names: the wallet lock records its holder's host (packages/midnight/src/privateFiles.ts).
+    hostname: nightmail-deploy
+    command: ['sh', 'infra/backend/deploy.sh']
+    restart: 'no'
+
+  payer:
+    <<: *backend
+    pull_policy: never
+    container_name: nightmail-backend-payer
+    # To run a command next to the payer, use `docker compose exec payer ...`, never `docker compose run payer`:
+    # a second container of this service gets the same host name and pid, so the wallet lock cannot tell them
+    # apart. The payer also refuses to start while another one answers on its socket.
+    hostname: nightmail-payer
+    command: ['node', '--max-old-space-size=4096', 'apps/server/src/bin/operator-wallet.ts']
+    depends_on:
+      deploy:
+        condition: service_completed_successfully
+    # Docker restarts it after any failed exit, up to 5 times. That helps after a transient failure
+    # (exit 1). A configuration error (exit 78) fails the same way each time: see the logs.
+    restart: on-failure:5
+    # The payer waits up to 60 s for the operation in progress, then saves the wallet.
+    stop_grace_period: 90s
+    healthcheck:
+      test: ['CMD', 'node', 'infra/backend/healthcheck.mjs', 'payer']
+      interval: 5s
+      timeout: 10s
+      retries: 3
+      start_period: 20m
+
+  server:
+    <<: *backend
+    pull_policy: never
+    container_name: nightmail-backend-server
+    hostname: nightmail-server
+    command: ['node', 'apps/server/src/bin/mail-server.ts']
+    # The whole operator folder, the wallet seed included: the mail server keeps the issuer's receipt key and
+    # database there and reaches the payer through its socket, all in the same folder (dataDir in
+    # apps/server/src/config.ts). Leaving the seed out would mean moving those files, not done for the demo.
+    volumes:
+      - operator:/app/.data/operator
+      - server:/app/.data/server
+    environment:
+      <<: *environment
+      # Every interface inside the container. Published on 127.0.0.1 only, below.
+      NIGHTMAIL_LISTEN_HOST: 0.0.0.0
+    ports:
+      - '127.0.0.1:2525:2525' # SMTP (local demo mail)
+      - '127.0.0.1:8787:8787' # mailbox API
+      - '127.0.0.1:8788:8788' # issuer
+      - '127.0.0.1:8789:8789' # relayer
+    depends_on:
+      payer:
+        condition: service_healthy
+    restart: on-failure:5
+    stop_grace_period: 70s
+    healthcheck:
+      test: ['CMD', 'node', 'infra/backend/healthcheck.mjs', 'server']
+      interval: 5s
+      timeout: 15s
+      retries: 3
+      start_period: 10m
+
+volumes:
+  operator:
+  server:
+
+networks:
+  devnet:
+    name: nightmail-devnet_default
+    external: true

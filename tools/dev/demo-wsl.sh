@@ -5,7 +5,8 @@
 #
 # Run it in a WSL (Ubuntu) terminal. It keeps a Linux copy of the project (default ~/nightmail-wsl,
 # or --dir, or NIGHTMAIL_WSL_DIR) and runs tools/dev/demo.sh --backend-only there: local network,
-# contracts, payer and mail server. Then open the app on Windows with: npm run demo:windows
+# contracts, payer and mail server. Then open the app on Windows with: npm run demo:windows -- -Wsl
+# This is the alternative to the default Windows flow, where the backend runs in Docker (no WSL copy).
 #
 # The Linux copy is a git clone of the Windows copy, updated (fast-forward) on every run, so it gets
 # the committed content only. Without git on the Windows side (a downloaded ZIP) the files are copied.
@@ -19,7 +20,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --dir) DIR="${2:?--dir needs a folder}"; shift ;;
     --check) ARGS+=(--check) ;;
-    -h|--help) sed -n '2,12s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,13s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "Usage: bash tools/dev/demo-wsl.sh [--dir <linux folder>] [--check] [--help]"; exit 2 ;;
   esac
   shift
@@ -73,8 +74,8 @@ WIN_SRC="$(wslpath -w "$SRC" 2>/dev/null || echo "$SRC")"
 echo
 echo "Next, on Windows, in $WIN_SRC:"
 if [ "$DIR" = "$HOME/nightmail-wsl" ]; then
-  echo "  npm run demo:windows"
+  echo "  npm run demo:windows -- -Wsl"
 else
-  echo "  npm run demo:windows -- -WslDir \"$DIR\""
+  echo "  npm run demo:windows -- -Wsl -WslDir \"$DIR\""
 fi
 echo "Keep this Ubuntu terminal open while you use the app."

@@ -37,6 +37,12 @@ if [ ! -f .data/operator/undeployed/contracts.json ]; then
   echo "       NIGHTMAIL_NETWORK=undeployed npm run deploy-contracts -w apps/server -- --price 100"
   exit 1
 fi
+# The Docker backend (infra/backend, npm run demo:windows) uses the same ports and the same devnet wallet.
+if [ -n "$(docker ps -q --filter name=^nightmail-backend-payer$ --filter status=running 2>/dev/null)" ]; then
+  echo "ERROR: the Docker backend (infra/backend) is running. Stop it first:"
+  echo "       docker compose -f infra/backend/docker-compose.yml stop"
+  exit 1
+fi
 if pgrep -f '^node .*src/bin/operator-wallet[.]ts' >/dev/null; then
   echo "ERROR: a payer is already running. Stop it first (tools/dev/down.sh) to avoid having two."
   exit 1

@@ -1,0 +1,19 @@
+# Only what the backend image needs is sent to the build (see Dockerfile).
+*
+!package.json
+!package-lock.json
+!apps/desktop/package.json
+!apps/midnight-sidecar/package.json
+!apps/server/package.json
+!apps/server/src
+!contracts/package.json
+!contracts/src
+!packages/core-ts/package.json
+!packages/core-ts/src
+!packages/midnight/package.json
+!packages/midnight/src
+!tools/demo-mailer/package.json
+!tools/demo-seed/package.json
+!infra/backend/deploy.sh
+!infra/backend/healthcheck.mjs
+!infra/backend/receipt-key.mjs
