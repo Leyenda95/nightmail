@@ -250,13 +250,13 @@ Every day:
 
 ```bash
 bash tools/dev/up.sh                     # local network, payer and mail server
-bash tools/dev/window.sh                 # opens the app with the data folder perfil-a
+bash tools/dev/window.sh                 # opens the app with your profiles in .data/dev/perfiles
 bash tools/dev/mail.sh name@nightmail.local   # sends sample mail to one of your addresses
 bash tools/dev/down.sh                   # stops the payer and the server (add --devnet to also stop the network)
 ```
 
-- `window.sh other-folder` opens the app with an empty data folder in `.data/dev/profiles/other-folder`, for example to test restoring with the 24 words on a clean computer. Each folder can hold several NightMail profiles. Do not open two windows with the same folder at once.
-- Logs are kept in `.data/dev/` (`payer.log`, `server.log`, `window-<folder>.log`).
+- `window.sh` keeps all your profiles in one folder, `.data/dev/perfiles` (the app adds and switches between them). `window.sh other-folder` opens the app with an empty folder in `.data/dev/profiles/other-folder`, for example to test restoring with the 24 words on a clean computer or to open two windows at once. Do not open two windows on the same folder at once.
+- Logs are kept in `.data/dev/` (`payer.log`, `server.log`, `window.log` and `window-<folder>.log`).
 - Mail on the local network uses the domain `nightmail.local` and enters over SMTP at `127.0.0.1:2525`.
 
 Native Windows app by hand, only if you do not use `npm run demo:windows`. It expects a WSL copy at `~/nightmail` in the default WSL distribution, already set up as above.
@@ -267,10 +267,10 @@ Native Windows app by hand, only if you do not use `npm run demo:windows`. It ex
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\dev\build.ps1
-powershell -ExecutionPolicy Bypass -File tools\dev\window.ps1 perfil-a
+powershell -ExecutionPolicy Bypass -File tools\dev\window.ps1
 ```
 
-`window.ps1` reads the receipt key and the contracts from `~/nightmail` in the default WSL distribution (`-WslRepo` or `-Distro` to change it). Options: `-ProfilesDir` for the data folders, `-TargetDir` for the build folder.
+`window.ps1` reads the receipt key and the contracts from `~/nightmail` in the default WSL distribution (`-WslRepo` or `-Distro` to change it). Options: `-ProfilesDir` for the named folders, `-TargetDir` for the build folder.
 
 </details>
 

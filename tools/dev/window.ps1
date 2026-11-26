@@ -1,6 +1,6 @@
 ﻿# Opens the native Windows desktop app (debug build) against the local stack.
 #
-#   powershell -ExecutionPolicy Bypass -File tools\dev\window.ps1 [profile] [-TargetDir <folder>]
+#   powershell -ExecutionPolicy Bypass -File tools\dev\window.ps1 [name] [-TargetDir <folder>]
 #              [-ProfilesDir <folder>] [-WslRepo <path>] [-RunEnv <file>] [-Distro <name>] [-Bin <exe>]
 #              [-Docker] [-ContractsFile <file>]
 #
@@ -8,10 +8,11 @@
 # answer on 127.0.0.1 from Windows with networkingMode=mirrored in .wslconfig. With -Docker they run in
 # Docker (infra/backend, started by demo.ps1, which copies contracts.json and run.env into
 # .data\dev\docker) and WSL is not used. Build first with build.ps1.
-# Each profile is an app data folder (default: .data\dev\profiles\<profile> in this checkout).
-# Never open two windows with the same profile at once.
+# Without a name the app uses one folder, .data\dev\perfiles in this checkout, which holds all your profiles
+# (the app adds and switches between them). A name uses its own folder, .data\dev\profiles\<name>, meant
+# for tests with two windows at once. Never open two windows on the same folder at once.
 param(
-    [string]$Perfil = 'perfil-a',
+    [string]$Perfil = '',
     [string]$TargetDir = $(if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { '' }),
     [string]$ProfilesDir = '',
     [string]$WslRepo = '',
@@ -45,25 +46,29 @@ if (-not $ContractsFile) {
 $StartHint = if ($Docker) { 'Start it with: npm run demo:windows' } else { 'Start the stack in WSL with tools/dev/up.sh.' }
 
 $State = Join-Path $Repo '.data\dev'
-$ProfileDir = Join-Path $ProfilesDir $Perfil
+$ProfileDir = if ($Perfil) { Join-Path $ProfilesDir $Perfil } else { Join-Path $State 'perfiles' }
+$LogSuffix = if ($Perfil) { "-$Perfil" } else { '' }
+if (-not $Perfil -and $ProfilesDir -ne (Join-Path $Repo '.data\dev\profiles')) {
+    Write-Host 'WARNING: -ProfilesDir only applies to named folders. The default folder .data\dev\perfiles is used.'
+}
 
 if (-not (Test-Path $Bin)) {
     Write-Host "ERROR: $Bin does not exist. Build first with tools\dev\build.ps1."
     exit 1
 }
 if (-not (Test-Path $ProfileDir)) {
-    Write-Host "WARNING: profile $ProfileDir does not exist yet. The app will create it empty."
+    Write-Host "WARNING: the profile folder $ProfileDir does not exist yet. The app will create it empty."
 }
 
-# Never two windows with the same profile: an open window holds an OS lock on instance.lock in the profile
-# (main account) or in accounts\<id> (other accounts). If one is held, leave that window as it is.
+# Never two windows on the same folder: an open window holds an OS lock on instance.lock in the profile
+# (first profile) or in accounts\<id> (the other profiles). If one is held, leave that window as it is.
 $locks = @(Join-Path $ProfileDir 'instance.lock') + @(Get-ChildItem (Join-Path $ProfileDir 'accounts') -Directory -ErrorAction SilentlyContinue | ForEach-Object { Join-Path $_.FullName 'instance.lock' })
 foreach ($l in $locks | Where-Object { Test-Path $_ }) {
     try {
         $fs = [System.IO.File]::Open($l, 'Open', 'Read', [System.IO.FileShare]'ReadWrite, Delete')
         try { $fs.Lock(0, 1); $fs.Unlock(0, 1) } finally { $fs.Close() }
     } catch {
-        Write-Host "The window with profile $Perfil is already open."
+        Write-Host "The window on the profile folder $ProfileDir is already open."
         exit 0
     }
 }
@@ -126,8 +131,8 @@ if ($falta.Count -gt 0) {
 }
 
 New-Item -ItemType Directory -Force $State | Out-Null
-$log = Join-Path $State "window-$Perfil.log"
-$err = Join-Path $State "window-$Perfil.err.log"
+$log = Join-Path $State "window$LogSuffix.log"
+$err = Join-Path $State "window$LogSuffix.err.log"
 $proc = Start-Process -FilePath $Bin -WorkingDirectory (Join-Path $Repo 'apps\desktop') -RedirectStandardOutput $log -RedirectStandardError $err -WindowStyle Hidden -PassThru
 Write-Host "Window open (pid $($proc.Id)), profile $ProfileDir"
 Write-Host "Logs: $log and $err"

@@ -4,7 +4,7 @@
 #   npm run demo:windows -- -Check        # only check the prerequisites, change nothing
 #   npm run demo:windows -- -Build        # build the app here instead of downloading it
 #   npm run demo:windows -- -Wsl          # use the backend started in WSL by tools/dev/demo-wsl.sh instead
-#   options: [-Perfil <profile>] [-RepoRoot <folder>], and with -Wsl: [-WslDir <linux folder>] [-Distro <name>]
+#   options: [-Perfil <name>] (own profile folder, only for tests with two windows) [-RepoRoot <folder>], and with -Wsl: [-WslDir <linux folder>] [-Distro <name>]
 #
 # Checks every prerequisite first and stops before changing anything if one is missing. Then: npm ci
 # (when needed), starts the local network and the backend in Docker (infra/devnet and infra/backend:
@@ -17,7 +17,7 @@ param(
     [switch]$Check,
     [switch]$Build,
     [switch]$Wsl,
-    [string]$Perfil = 'perfil-a',
+    [string]$Perfil = '',
     [string]$WslDir = '',
     [string]$Distro = '',
     [string]$RepoRoot = ''
@@ -427,9 +427,10 @@ if ($exe -eq $DownloadedExe -and -not (Test-AppHash $exe)) {
 # ---------- Last step: window ----------
 Write-Host "[$Steps/$Steps] Opening the window"
 $window = Join-Path $Repo 'tools\dev\window.ps1'
+$perfilArg = @(if ($Perfil) { $Perfil })
 if ($Wsl) {
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $window $Perfil -WslRepo $wslRepo -Distro $Distro -Bin $exe
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $window @perfilArg -WslRepo $wslRepo -Distro $Distro -Bin $exe
 } else {
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $window $Perfil -Docker -Bin $exe
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $window @perfilArg -Docker -Bin $exe
 }
 exit $LASTEXITCODE

@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Opens the desktop app (debug build) against the local stack from tools/dev/up.sh, on Linux or WSL.
 #
-#   bash tools/dev/window.sh [profile]
+#   bash tools/dev/window.sh [name]
 #
-# Each profile is an app data folder under .data/dev/profiles/<profile> (default: perfil-a).
-# Use a new name to start with an empty profile, e.g. to test restoring from the seed phrase.
-# Never open two windows with the same profile at once.
+# Without a name the app uses one folder, .data/dev/perfiles, which holds all your profiles (the app adds
+# and switches between them). A name uses its own folder, .data/dev/profiles/<name>, e.g. to test
+# restoring from the seed phrase or to open two windows at once.
+# Never open two windows on the same folder at once.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-PERFIL="${1:-perfil-a}"
+PERFIL="${1:-}"
 STATE="$ROOT/.data/dev"
 RUN="$STATE/run.env"
 BIN="${CARGO_TARGET_DIR:-$ROOT/apps/desktop/src-tauri/target}/debug/nightmail-desktop"
@@ -28,19 +29,24 @@ KEY=$(grep '^NIGHTMAIL_ISSUER_RECEIPT_KEY=' "$RUN" | cut -d= -f2-)
 
 export NIGHTMAIL_ISSUER_RECEIPT_KEY="$KEY"
 export NIGHTMAIL_NETWORK=undeployed
-export NIGHTMAIL_PROFILE_DIR="$STATE/profiles/$PERFIL"
+if [ -n "$PERFIL" ]; then
+  export NIGHTMAIL_PROFILE_DIR="$STATE/profiles/$PERFIL"
+else
+  export NIGHTMAIL_PROFILE_DIR="$STATE/perfiles"
+fi
 
-# Never two windows with the same profile: if one is open, leave it as it is.
+# Never two windows on the same folder: if one is open, leave it as it is.
 for pid in $(pgrep -fx "$BIN"); do
   if tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -qxF "NIGHTMAIL_PROFILE_DIR=$NIGHTMAIL_PROFILE_DIR"; then
-    echo "The window with profile $PERFIL is already open (pid $pid)."
+    echo "The window on the profile folder $NIGHTMAIL_PROFILE_DIR is already open (pid $pid)."
     exit 0
   fi
 done
 NIGHTMAIL_NODE="$(command -v node)"
 export NIGHTMAIL_NODE
-mkdir -p "$STATE/profiles"
-chmod 700 "$STATE/profiles"
+LOG="$STATE/window${PERFIL:+-$PERFIL}.log"
+mkdir -p "$STATE/profiles" "$STATE/perfiles"
+chmod 700 "$STATE/profiles" "$STATE/perfiles"
 
 # On WSL: tell xdg-desktop-portal about the display (otherwise the window takes ~23 s to appear)
 # and detect a broken WSLg connection (the window would come up invisible).
@@ -59,5 +65,5 @@ ss -ltn 'sport = :8789' 2>/dev/null | grep -q LISTEN || FALTA="${FALTA:+$FALTA a
 [ -z "$FALTA" ] || echo "WARNING: $FALTA not running. Start it with tools/dev/up.sh."
 
 cd "$ROOT/apps/desktop" || exit 1
-setsid "$BIN" > "$STATE/window-$PERFIL.log" 2>&1 < /dev/null &
-echo "Window open (pid $!), profile $NIGHTMAIL_PROFILE_DIR. Log: $STATE/window-$PERFIL.log"
+setsid "$BIN" > "$LOG" 2>&1 < /dev/null &
+echo "Window open (pid $!), profile $NIGHTMAIL_PROFILE_DIR. Log: $LOG"
