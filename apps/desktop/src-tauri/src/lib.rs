@@ -24,6 +24,8 @@ mod instance;
 mod keys;
 mod link;
 mod mail;
+#[cfg(windows)]
+mod minimized;
 mod nav_guard;
 // `faucet` and a few read paths are not wired to the UI yet.
 #[allow(dead_code)]
@@ -194,6 +196,10 @@ pub fn run() {
             // another profile from the list in this window lands on its front screen.
             let show_accounts = show_accounts || profile.accounts.as_ref().is_some_and(Accounts::list_first_at_startup);
             app.manage(AppState::new(profile, show_accounts));
+            #[cfg(windows)]
+            if let Some(window) = app.get_webview_window("main") {
+                minimized::install(&window);
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
