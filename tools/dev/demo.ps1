@@ -23,11 +23,9 @@ param(
     [string]$RepoRoot = ''
 )
 
-# Prebuilt app (debug build from build.ps1) published with the release, pinned by its SHA-256. None is pinned for
-# this version: the v0.1.0-alpha app was built for the previous contract (round-based mailboxes) and cannot create
-# mailboxes on this one. Set both when a release for this contract is published.
-$AppUrl = ''
-$AppSha256 = 'TO_BE_FILLED_AT_RELEASE'
+# Prebuilt app (debug build from build.ps1) published with the release, pinned by its SHA-256.
+$AppUrl = 'https://github.com/Leyenda95/nightmail/releases/download/v0.1.1-alpha/nightmail-desktop-windows-x64.exe'
+$AppSha256 = '1CE23EE7E6F4EB8AA7135DD61FBCF25E37F8DE6F5A4715A8161D5B479645D967'
 
 if (-not $RepoRoot) { $RepoRoot = Join-Path $PSScriptRoot '..\..' }
 $Repo = (Resolve-Path $RepoRoot).Path
