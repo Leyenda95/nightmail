@@ -165,17 +165,14 @@ function ProfileApp({ failedDelete, first }: { failedDelete: unknown; first: Fir
   }, [refresh]);
 
   // On locking, the `resume` notice belonged to that session. In the taskbar, the padlock instead of the number
-  // (`badge.ts`). With "Cerrar sesión" (`toAccounts`), the account list comes next.
+  // (`badge.ts`). "Bloquear" and "Cerrar sesión" both go next to the account list.
   const { clearResume } = events;
-  const locked = useCallback(
-    (toAccounts: boolean) => {
-      clearResume();
-      badgeLocked();
-      // The open mailbox stays in view while the list is read (`showChooser`), then the front screen comes.
-      void showChooser(toAccounts).then(refresh);
-    },
-    [clearResume, refresh, showChooser],
-  );
+  const locked = useCallback(() => {
+    clearResume();
+    badgeLocked();
+    // The open mailbox stays in view while the list is read (`showChooser`), then the front screen comes.
+    void showChooser(true).then(refresh);
+  }, [clearResume, refresh, showChooser]);
 
   const s = t().onboarding.startup;
   switch (load.kind) {

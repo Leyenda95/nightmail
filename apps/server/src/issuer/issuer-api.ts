@@ -1,7 +1,8 @@
 // Issuer API, separate from the Mailbox API (own port and lifecycle):
 //
 //   POST /v1/bono/free    {id, captchaToken}              free plan after CAPTCHA (simulated in the MVP)
-//   POST /v1/bono/fiat    {id, cardToken, period}         simulated paid plan; period = monthly | annual
+//   POST /v1/bono/fiat    {id, cardToken}                 simulated paid plan (Night Plus, no period). Clients from
+//                                                         before still send period = monthly | annual: accepted, ignored
 //   POST /v1/bono/status  {id}                            receipt and state of a request
 //
 // The id never goes in the URL, where proxy logs would pair it with the IP.
@@ -17,7 +18,7 @@ import { fail, json, readJsonObject, type Reply, respond } from './http.ts';
 import type { Issuer } from './issuer.ts';
 import type { IssuePlan } from './payer-client.ts';
 import type { ReceiptSigner } from './receipt.ts';
-import type { BonoRequest, Period } from './store.ts';
+import type { BonoRequest } from './store.ts';
 
 const DAY_MS = 86_400_000;
 
@@ -66,10 +67,11 @@ export type IssuerApiDeps = {
 };
 
 type RouteKind = 'free' | 'fiat' | 'status';
-type Signup = { plan: IssuePlan; id: string; period: Period | null; token: string };
+type Signup = { plan: IssuePlan; id: string; token: string };
 
 const ID_RE = /^[0-9a-f]{64}$/;
-const PERIODS: readonly string[] = ['monthly', 'annual'];
+/** The `period` that clients from before Night Plus still send on `fiat` (validated, then ignored). */
+const LEGACY_PERIODS: readonly string[] = ['monthly', 'annual'];
 const ROUTES = new Map<string, RouteKind>([['/v1/bono/free', 'free'], ['/v1/bono/fiat', 'fiat'], ['/v1/bono/status', 'status']]);
 
 export const parseRoute = (url: string | undefined): RouteKind | undefined => ROUTES.get(url ?? '');
@@ -86,11 +88,12 @@ const hasExactly = (value: Record<string, unknown>, keys: string[]) =>
 /** Sign-up fields, or undefined if any field is extra, missing or invalid. */
 function parseSignup(kind: 'free' | 'fiat', body: Record<string, unknown>): Signup | undefined {
   const free = kind === 'free';
-  if (!hasExactly(body, free ? ['id', 'captchaToken'] : ['id', 'cardToken', 'period'])) return undefined;
+  const legacy = !free && 'period' in body;
+  const keys = free ? ['id', 'captchaToken'] : legacy ? ['id', 'cardToken', 'period'] : ['id', 'cardToken'];
+  if (!hasExactly(body, keys)) return undefined;
   const id = body['id'] as string;
-  const period = free ? null : (body['period'] as string);
-  if (!ID_RE.test(id) || (period !== null && !PERIODS.includes(period))) return undefined;
-  return { plan: free ? 'free' : 'paid', id, period: period as Period | null, token: body[free ? 'captchaToken' : 'cardToken'] as string };
+  if (!ID_RE.test(id) || (legacy && !LEGACY_PERIODS.includes(body['period'] as string))) return undefined;
+  return { plan: free ? 'free' : 'paid', id, token: body[free ? 'captchaToken' : 'cardToken'] as string };
 }
 
 class IssuerApi {
@@ -160,7 +163,7 @@ class IssuerApi {
     if (!signup) return BAD_REQUEST;
     const reply = this.known(signup) ?? this.busy() ?? this.unpaid(signup) ?? this.admit(signup.plan, key, time);
     if (reply) return reply;
-    const result = this.deps.issuer.submit(signup.id, signup.plan, signup.period);
+    const result = this.deps.issuer.submit(signup.id, signup.plan, null);
     return result.ok ? this.receipt(result.request) : CONFLICT;
   }
 

@@ -39,8 +39,7 @@ export default {
     // The price and the balance, in the test token ("1 NightMail token", "100 NightMail tokens").
     amount: tokenAmount,
     cardHint: 'Con tarjeta (simulado en esta versión)',
-    fiatMonthly: 'Pago simulado mensual',
-    fiatAnnual: 'Pago simulado anual',
+    fiat: 'Pago simulado',
     freeTitle: 'Gratis',
     requestFree: 'Pedir el plan gratis',
     buyAnother: 'Comprar otro bono',
@@ -54,16 +53,14 @@ export default {
     dustInfo:
       'El DUST es un recurso que sirve para pagar las comisiones. Se regenera solo a partir del NIGHT de la cartera.',
     dustInfoLabel: 'Qué es el DUST',
-    tokenName: `${TOKEN_NAME} (moneda de prueba)`,
+    tokenName: TOKEN_NAME,
     receiveNight: 'Dirección para recibir NIGHT',
     addressUnavailable: `Ahora no está disponible. Pulsa ${REFRESH} más tarde.`,
     refresh: REFRESH,
     view: 'Ver cartera',
-    requestToken: `Pedir ${TOKEN_NAME_PLURAL} de prueba`,
+    requestToken: `Pedir ${TOKEN_NAME}`,
     tokenNote: `El ${TOKEN_NAME} es una moneda de prueba, sin valor real. Sirve para pagar el plan en esta red de pruebas.`,
-    faucetBlocked:
-      'Necesitas NIGHT. La comisión se paga con DUST, que se genera a partir del NIGHT. Envía NIGHT a la dirección de ' +
-      `arriba y pulsa ${REFRESH}.`,
+    faucetBlocked: `Necesitas NIGHT. Envíalo a la dirección de arriba y pulsa ${REFRESH}.`,
     faucetDone: `Se han pedido ${TOKEN_NAME_PLURAL}. Si aún no aparecen, pulsa ${REFRESH} en unos segundos.`,
     waitForPlan: 'Espera a que termine la operación del plan.',
     opening: 'Abriendo la cartera',

@@ -650,7 +650,7 @@ impl Issuer for FakeIssuer {
         let delay = w.issue_delay;
         w.issuing.entry(id.into()).or_insert((request.plan(), delay));
         let state = issue_state(&mut w, id).unwrap();
-        Ok(Self::reply(&w, id, request.plan(), request.period_text(), state))
+        Ok(Self::reply(&w, id, request.plan(), request.receipt_period().unwrap_or("none"), state))
     }
 
     async fn status(&self, id: &str) -> Result<IssueReply, IssuerError> {

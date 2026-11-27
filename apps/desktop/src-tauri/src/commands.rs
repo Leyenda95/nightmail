@@ -12,7 +12,7 @@ use ts_rs::TS;
 
 use crate::accounts::{AccountId, AccountView, Accounts, DeleteError, Deletion};
 use crate::app::{
-    App, AppError, AppStatus, CoreError, FlagsInput, MessageDetail, MessageQuery, MessageView, PeriodInput, PlanView, Secret,
+    App, AppError, AppStatus, CoreError, FlagsInput, MessageDetail, MessageQuery, MessageView, PlanView, Secret,
     SeedDraft, SeedPhrase, SentDetail, SentQuery, SentView, ServerHealth, WalletView,
 };
 use crate::instance::ProfileLock;
@@ -294,10 +294,10 @@ pub async fn get_free_plan(state: State<'_>, op: u64) -> Reply<BonoInfo> {
 }
 
 #[tauri::command]
-pub async fn pay_fiat(state: State<'_>, period: PeriodInput, op: u64) -> Reply<BonoInfo> {
+pub async fn pay_fiat(state: State<'_>, op: u64) -> Reply<BonoInfo> {
     let profile = state.profile().await;
     let session = profile.app()?.session().await?;
-    let result = session.pay_fiat(period, op).await;
+    let result = session.pay_fiat(op).await;
     session.retry_later_if_payment_pending(&result).await;
     result
 }

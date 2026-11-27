@@ -3,7 +3,6 @@
 
 use super::*;
 use crate::orchestrator::fakes::*;
-use crate::orchestrator::ports::BonoPeriod;
 use crate::protocol::{AddressEntry, AddressKind};
 use crate::store::Address;
 
@@ -26,7 +25,7 @@ async fn a_clean_profile_restores_what_the_orchestrator_created() {
     let a = harness().await;
     set(&a.world, |w| w.auto_time = true);
     a.orch.request_free_plan().await.unwrap();
-    a.orch.pay_fiat(BonoPeriod::Monthly).await.unwrap();
+    a.orch.pay_fiat().await.unwrap();
     a.orch.create_mailbox("Juan").await.unwrap();
     a.orch.create_alias().await.unwrap();
     a.orch.create_alias().await.unwrap();

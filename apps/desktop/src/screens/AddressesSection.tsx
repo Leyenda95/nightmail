@@ -186,14 +186,14 @@ export function AddressesSection({ events, onLoaded, reloadKey, onNav, onChanged
   return (
     <>
       {abandoned && (
-        <Aviso tone="exito">
+        <Aviso tone="exito" autoHide={() => setAbandoned(false)}>
           <p>
             <strong>{abandonedText()}</strong>
           </p>
         </Aviso>
       )}
       {fresh && (
-        <Aviso tone="exito">
+        <Aviso key={fresh} tone="exito" autoHide={() => setFresh(null)}>
           <p>
             <strong>{t().screensPlan.addresses.createdBold}</strong>
             {t().screensPlan.addresses.createdRest}

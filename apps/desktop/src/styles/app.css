@@ -191,33 +191,35 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  column-gap: 0.75rem;
-  row-gap: 0.375rem;
-  padding: 0.4375rem 0.875rem;
+  column-gap: 0.625rem;
+  row-gap: 0.25rem;
+  padding: 0.25rem 0.75rem;
   border-radius: var(--border-radius-md);
   background: var(--background-weak);
   color: var(--text-norm);
-  font-size: 0.875rem;
-  line-height: 1.45;
+  font-size: 0.8125rem;
+  line-height: 1.4;
 }
-.nm-aviso__principal { flex: 1 1 16rem; min-inline-size: 0; display: flex; align-items: flex-start; gap: 0.625rem; }
-.nm-aviso__principal > .nm-ic { margin-block-start: 0.15rem; color: var(--text-weak); }
+.nm-aviso__principal { flex: 1 1 16rem; min-inline-size: 0; display: flex; align-items: flex-start; gap: 0.5rem; }
+.nm-aviso__principal > .nm-ic { inline-size: 0.875rem; block-size: 0.875rem; margin-block-start: 0.2rem; color: var(--text-weak); }
 .nm-aviso__cuerpo { flex: 1; min-inline-size: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.125rem; }
 .nm-aviso__cuerpo ul { padding-inline-start: 1.1rem; list-style: disc; }
-.nm-aviso__acciones { flex: 0 0 auto; max-inline-size: 100%; margin-inline-start: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.nm-aviso__acciones { flex: 0 0 auto; max-inline-size: 100%; margin-inline-start: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem; }
 /* Closing a notice: only the "X", no border or box. On hover the icon darkens a little. */
 .nm-aviso__cerrar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  inline-size: 1.5rem;
-  block-size: 1.5rem;
+  inline-size: 1.25rem;
+  block-size: 1.25rem;
   border: 0;
   border-radius: var(--border-radius-sm);
   background: none;
   color: var(--text-weak);
   cursor: pointer;
 }
+/* The cross is a little smaller than the box (0.875rem inside 1.25rem). */
+.nm-aviso__cerrar > .nm-ic { inline-size: 0.875rem; block-size: 0.875rem; }
 .nm-aviso__cerrar:hover { color: var(--text-norm); }
 .nm-aviso--error { background: var(--signal-danger-minor-2); }
 .nm-aviso--error .nm-aviso__principal > .nm-ic { color: var(--signal-danger); }
@@ -228,7 +230,7 @@
 .nm-aviso--info { background: var(--signal-info-minor-2); }
 .nm-aviso--info .nm-aviso__principal > .nm-ic { color: var(--signal-info); }
 /* Global strip: above the panels, edge to edge. */
-.nm-aviso--franja { border-radius: 0; padding: 0.3125rem 1.25rem; border-block-end: 1px solid var(--border-weak); }
+.nm-aviso--franja { border-radius: 0; padding: 0.1875rem 1rem; border-block-end: 1px solid var(--border-weak); }
 
 /* A long operation in progress: the light beats and the text says the real stage the core sends. */
 .nm-progreso {
@@ -399,7 +401,8 @@
   color: var(--text-weak);
   cursor: help;
 }
-.nm-info__boton .nm-ic { inline-size: 0.875rem; block-size: 0.875rem; }
+/* The "i" itself is small (12 px) so it sits with the label it explains. The button around it keeps 20 px to click. */
+.nm-info__boton .nm-ic { inline-size: 0.75rem; block-size: 0.75rem; }
 .nm-info__boton:hover { background: var(--interaction-default-hover); color: var(--text-norm); }
 .nm-info__texto {
   position: absolute;
@@ -570,8 +573,9 @@
 }
 .nm-fila__act:hover { background: var(--interaction-default-active); color: var(--text-norm); }
 .nm-fila__act[aria-busy] { cursor: progress; }
-/* It only spins while syncing, in steps (8): without a GPU it costs far less than a continuous spin. */
-.nm-fila__gira { animation: nm-gira 1s steps(8) infinite; }
+/* It only spins while syncing, smoothly and continuously like the wait icon (in steps it went by jerks). Every
+   refresh icon of the inbox carries it at once (`useSpin` in `Main.tsx`), so they turn together. */
+.nm-fila__gira { animation: nm-gira 1s linear infinite; will-change: transform; }
 /* The wait icon (ring with a dot) spins smoothly and continuously, one turn per second. */
 .nm-espera__gira { animation: nm-gira 1s linear infinite; }
 @keyframes nm-gira { to { transform: rotate(360deg); } }

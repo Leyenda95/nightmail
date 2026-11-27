@@ -1,5 +1,6 @@
 // Notice: what happened, what is still safe (only when money is at stake), what you can do. Always with icon and text, never colour alone.
 import type { ReactNode } from 'react';
+import { useAutoHide } from '../autoHide.ts';
 import { avisoClass, avisoIcon, avisoRole, type AvisoTone } from '../pieces.ts';
 import { Icon } from './Icon.tsx';
 
@@ -11,15 +12,18 @@ interface Props {
   actions?: ReactNode;
   /** A notice that can be closed: a plain "X" after the actions (only the icon, no box), named `label`. */
   dismiss?: { label: string; onDismiss: () => void };
+  /** An event notice: it calls this (to hide itself) 5 s after appearing, paused while the pointer or focus is on it. Never on errors or notices with an action to press. */
+  autoHide?: () => void;
   /** The role, if the tone's does not fit. `null`: none, because a separate, always-mounted region announces it. */
   role?: 'alert' | 'status' | null;
   /** The text, in paragraphs (`<p>`); what is still safe goes in one with the `nm-suave` class. */
   children: ReactNode;
 }
 
-export function Aviso({ tone, strip = false, actions, dismiss, role, children }: Props) {
+export function Aviso({ tone, strip = false, actions, dismiss, role, autoHide, children }: Props) {
+  const hover = useAutoHide(autoHide);
   return (
-    <div className={avisoClass(tone, strip)} role={role === undefined ? avisoRole(tone) : (role ?? undefined)}>
+    <div className={avisoClass(tone, strip)} role={role === undefined ? avisoRole(tone) : (role ?? undefined)} {...hover}>
       <div className="nm-aviso__principal">
         <Icon name={avisoIcon(tone)} className="nm-ic" />
         <div className="nm-aviso__cuerpo">{children}</div>

@@ -15,7 +15,7 @@ use ts_rs::TS;
 
 use super::http::{ExpectedReceipt, verify_receipt};
 use super::prove::Holdup;
-use super::ports::{BonoPeriod, Chain, IssueReply, IssueRequest, IssueState, Issuer, IssuerError, Receipt, Relayer};
+use super::ports::{Chain, IssueReply, IssueRequest, IssueState, Issuer, IssuerError, Receipt, Relayer};
 use super::{OrchError, Orchestrator, Progress, Result, bytes32, to_protocol_plan};
 use crate::protocol::{HashOp, Plan as WirePlan};
 use crate::store::{BonoLeaf, BonoStatus, Plan};
@@ -26,8 +26,10 @@ pub(crate) const NO_EXPIRY: u32 = u32::MAX;
 pub(crate) const BUY_JOURNAL_KIND: &str = "buy-bono";
 /// Maximum receipt insertion deadline: the Issuer's (3900 s) plus a clock margin.
 const RECEIPT_MAX_AHEAD_S: i64 = 3900 + 300;
-/// Claimable payment methods (value of `method/<n>/<k>`); the card one carries its period.
+/// Claimable payment methods (value of `method/<n>/<k>`).
 pub(crate) const METHOD_FREE: &str = "free";
+/// Night Plus by simulated card. Leaves claimed before the period was dropped keep `fiat:monthly` or `fiat:annual`.
+const METHOD_FIAT: &str = "fiat";
 pub(crate) const METHOD_SHIELDED: &str = "shielded";
 
 pub(crate) fn receipt_key(n: u32, k: u32) -> String {
@@ -40,10 +42,6 @@ pub(crate) fn journal_id(n: u32, k: u32) -> String {
 
 pub(crate) fn method_key(n: u32, k: u32) -> String {
     format!("method/{n}/{k}")
-}
-
-fn fiat_method(period: BonoPeriod) -> String {
-    format!("fiat:{}", if period == BonoPeriod::Monthly { "monthly" } else { "annual" })
 }
 
 /// A ready bono. Neither `Debug` nor the UI sees the position (it identifies the leaf in the tree).
@@ -94,13 +92,9 @@ pub(crate) fn pick_leaf(bonos: &[BonoLeaf], plan: Plan) -> (u32, u32) {
     }
 }
 
-/// The period of an already claimed card method (`fiat:monthly` | `fiat:annual`).
-fn claimed_period(method: &str) -> Option<BonoPeriod> {
-    match method {
-        "fiat:monthly" => Some(BonoPeriod::Monthly),
-        "fiat:annual" => Some(BonoPeriod::Annual),
-        _ => None,
-    }
+/// Is this claimed method the card one (`fiat`, or `fiat:monthly` | `fiat:annual` from before Night Plus)?
+fn is_card_method(method: &str) -> bool {
+    matches!(method, METHOD_FIAT | "fiat:monthly" | "fiat:annual")
 }
 
 fn issuer_error(error: IssuerError) -> OrchError {
@@ -131,16 +125,16 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
         self.issue(IssueRequest::Free { captcha_token: &token }, METHOD_FREE.into()).await
     }
 
-    /// Simulated card payment (monthly or annual; the bono does not expire for now). If the leaf was already claimed by
-    /// a card payment, that same request (its period) is repeated, not a new one.
-    pub async fn pay_fiat(&self, period: BonoPeriod) -> Result<BonoInfo> {
+    /// Simulated card payment of Night Plus (no period, the bono does not expire for now). If the leaf was already
+    /// claimed by a card payment (also one from before the period was dropped), that same request is repeated.
+    pub async fn pay_fiat(&self) -> Result<BonoInfo> {
         let _guard = self.bono_lock()?;
         let (n, k) = self.choose_leaf(Plan::Paid).await?;
         let claimed = self.db(move |s| s.get_meta(&method_key(n, k))).await?;
-        let claimed = claimed.and_then(|v| String::from_utf8(v).ok()).and_then(|m| claimed_period(&m));
-        let period = claimed.unwrap_or(period);
+        let claimed = claimed.and_then(|v| String::from_utf8(v).ok()).filter(|m| is_card_method(m));
+        let method = claimed.unwrap_or_else(|| METHOD_FIAT.into());
         let token = self.d.config.card_token.clone();
-        self.issue(IssueRequest::Fiat { card_token: &token, period }, fiat_method(period)).await
+        self.issue(IssueRequest::Fiat { card_token: &token }, method).await
     }
 
     async fn issue(&self, request: IssueRequest<'_>, method: String) -> Result<BonoInfo> {
@@ -214,7 +208,7 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
             contract: &self.d.config.contract_address,
             id,
             plan: request.plan(),
-            period: request.period_text(),
+            period: request.receipt_period(),
             key_fingerprint: &self.d.config.issuer_key,
         };
         let now = self.now();
@@ -234,10 +228,8 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
         let method = self.db(move |s| s.get_meta(&method_key(n, k))).await?.and_then(|v| String::from_utf8(v).ok());
         let request = match method.as_deref() {
             Some(METHOD_FREE) => IssueRequest::Free { captcha_token: "" },
-            Some(m) => match claimed_period(m) {
-                Some(period) => IssueRequest::Fiat { card_token: "", period },
-                None => return Ok(None),
-            },
+            Some(m) if is_card_method(m) => IssueRequest::Fiat { card_token: "" },
+            Some(_) => return Ok(None),
             None => return Ok(None),
         };
         let bono = self.db(move |s| s.get_bono(n, k)).await?.ok_or(OrchError::Internal)?;
@@ -262,7 +254,7 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
             contract: &self.d.config.contract_address,
             id,
             plan: request.plan(),
-            period: request.period_text(),
+            period: request.receipt_period(),
             key_fingerprint: &self.d.config.issuer_key,
         };
         if !verify_receipt(&reply, &expected) {
@@ -398,9 +390,9 @@ mod tests {
 
     #[test]
     fn methods_and_bono_info() {
-        assert_eq!(claimed_period(&fiat_method(BonoPeriod::Monthly)), Some(BonoPeriod::Monthly));
-        assert_eq!(claimed_period(&fiat_method(BonoPeriod::Annual)), Some(BonoPeriod::Annual));
-        assert_eq!(claimed_period(METHOD_SHIELDED), None);
+        assert!(is_card_method(METHOD_FIAT));
+        assert!(is_card_method("fiat:monthly") && is_card_method("fiat:annual"), "claimed before Night Plus");
+        assert!(!is_card_method(METHOD_SHIELDED) && !is_card_method(METHOD_FREE));
         let info = BonoInfo { n: 1, k: 0, plan: WirePlan::Free, position: 777, usable_at: 0 };
         assert!(!format!("{info:?}").contains("777"));
         assert!(serde_json::to_value(info).unwrap().get("position").is_none());

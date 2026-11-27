@@ -22,6 +22,8 @@ interface Props {
   /** The error of "Sincronizar ahora" (the list button syncs everything, as in the inbox). */
   syncError: string | null;
   syncing: boolean;
+  /** The refresh icon turns (shared with the inbox's, `Main.tsx`). */
+  spinning: boolean;
   onSync: () => void;
   addresses: AddressView[] | null;
   onNav: (action: NavAction) => void;
@@ -31,7 +33,7 @@ interface Props {
   onReply: (seed: ReplySeed) => void;
 }
 
-export function ArchiveView({ nav, layout, hidden, archive, syncError, syncing, onSync, addresses, onNav, onFlags, domain, onReply }: Props) {
+export function ArchiveView({ nav, layout, hidden, archive, syncError, syncing, spinning, onSync, addresses, onNav, onFlags, domain, onReply }: Props) {
   const openId = openHere(nav, 'archivo');
   const show = panes({ openId }, layout);
   const { listWidth } = usePrefs();
@@ -62,6 +64,7 @@ export function ArchiveView({ nav, layout, hidden, archive, syncError, syncing, 
         error={syncError ?? archive.error}
         hidden={!show.list}
         syncing={syncing}
+        spinning={spinning}
         onSync={onSync}
         onOpen={onOpen}
         resizable={layout === 'tres'}

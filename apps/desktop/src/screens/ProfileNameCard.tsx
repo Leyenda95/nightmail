@@ -82,7 +82,7 @@ export function ProfileNameCard() {
             </button>
           </div>
           {saved && (
-            <Aviso tone="exito">
+            <Aviso tone="exito" autoHide={() => setSaved(false)}>
               <p>{s.saved}</p>
             </Aviso>
           )}

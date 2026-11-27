@@ -201,15 +201,6 @@ pub struct ServerHealth {
     pub issuer: bool,
 }
 
-/// Paid plan period.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, TS)]
-#[serde(rename_all = "lowercase")]
-#[ts(export, export_to = "../../../desktop/src/bindings/")]
-pub enum PeriodInput {
-    Monthly,
-    Annual,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../../desktop/src/bindings/")]

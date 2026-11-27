@@ -104,8 +104,10 @@ impl Issuer for HttpIssuer {
             IssueRequest::Free { captcha_token } => {
                 self.send("/v1/bono/free", json!({ "id": id, "captchaToken": captcha_token })).await
             }
-            IssueRequest::Fiat { card_token, period } => {
-                let body = json!({ "id": id, "cardToken": card_token, "period": period });
+            IssueRequest::Fiat { card_token } => {
+                // Night Plus has no period. Issuers from before the change require the field and the current one
+                // ignores it, so a fixed value is sent until every backend is rebuilt.
+                let body = json!({ "id": id, "cardToken": card_token, "period": LEGACY_WIRE_PERIOD });
                 self.send("/v1/bono/fiat", body).await
             }
         }
@@ -116,6 +118,9 @@ impl Issuer for HttpIssuer {
     }
 }
 
+/// The `period` that issuers from before Night Plus still require on `/v1/bono/fiat` (the current one ignores it).
+const LEGACY_WIRE_PERIOD: &str = "monthly";
+
 // --- Receipt ---------------------------------------------------------------------------------------------
 
 const RECEIPT_DOMAIN: &[u8] = b"nightmail/bono-receipt/v2";
@@ -125,7 +130,8 @@ pub struct ExpectedReceipt<'a> {
     pub contract: &'a str,
     pub id: &'a str,
     pub plan: Plan,
-    pub period: &'a str,
+    /// `None`: any valid period (Night Plus has none, older requests carry `monthly` or `annual`).
+    pub period: Option<&'a str>,
     /// SHA-256 of the published public key (`sha256:<hex>` fingerprint).
     pub key_fingerprint: &'a [u8; 32],
 }
@@ -164,8 +170,8 @@ pub fn verify_receipt(reply: &IssueReply, expected: &ExpectedReceipt<'_>) -> boo
     let same = reply.id == expected.id
         && reply.plan == expected.plan
         && receipt.contract == expected.contract
-        && receipt.period == expected.period;
-    let parts = (bytes32(expected.contract), bytes32(expected.id), period_byte(expected.period));
+        && expected.period.is_none_or(|p| receipt.period == p);
+    let parts = (bytes32(expected.contract), bytes32(expected.id), period_byte(&receipt.period));
     let (Some(contract), Some(id), Some(period)) = parts else { return false };
     let message = receipt_message(&contract, &id, expected.plan, period, receipt.insert_by);
     same && signature_ok(receipt, &message, expected.key_fingerprint).is_some()
@@ -309,14 +315,14 @@ mod tests {
                 contract: entry["contract"].as_str().unwrap(),
                 id: entry["id"].as_str().unwrap(),
                 plan: reply.plan,
-                period: entry["period"].as_str().unwrap(),
+                period: entry["period"].as_str(),
                 key_fingerprint: &fingerprint,
             };
             let message = receipt_message(
                 &bytes32(expected.contract).unwrap(),
                 &bytes32(expected.id).unwrap(),
                 expected.plan,
-                period_byte(expected.period).unwrap(),
+                period_byte(&reply.receipt.period).unwrap(),
                 reply.receipt.insert_by,
             );
             assert_eq!(hex::encode(message), entry["message"].as_str().unwrap());
@@ -326,8 +332,38 @@ mod tests {
             assert!(!verify_receipt(&later, &expected), "tampered deadline");
             assert!(!verify_receipt(&reply, &ExpectedReceipt { key_fingerprint: &[0; 32], ..expected }), "another key");
             assert!(!verify_receipt(&reply, &ExpectedReceipt { id: &"00".repeat(32), ..expected }), "another id");
-            assert!(!verify_receipt(&reply, &ExpectedReceipt { period: "x", ..expected }), "odd period");
+            assert!(!verify_receipt(&reply, &ExpectedReceipt { period: Some("x"), ..expected }), "odd period");
+            // Night Plus expects no period: any valid one is accepted (`monthly` from before it was dropped), still
+            // bound by the signature.
+            assert!(verify_receipt(&reply, &ExpectedReceipt { period: None, ..expected }), "any valid period");
+            let mut relabelled = reply.clone();
+            relabelled.receipt.period = if reply.receipt.period == "annual" { "monthly" } else { "annual" }.into();
+            assert!(!verify_receipt(&relabelled, &ExpectedReceipt { period: None, ..expected }), "period not signed");
+            relabelled.receipt.period = "x".into();
+            assert!(!verify_receipt(&relabelled, &ExpectedReceipt { period: None, ..expected }), "odd period");
         }
+    }
+
+    #[test]
+    fn a_free_receipt_must_say_no_period() {
+        assert_eq!(IssueRequest::Free { captcha_token: "" }.receipt_period(), Some("none"));
+        assert_eq!(IssueRequest::Fiat { card_token: "" }.receipt_period(), None);
+        let v = receipt_vectors();
+        let public_key = v["publicKey"].as_str().unwrap();
+        let fingerprint: [u8; 32] = Sha256::digest(hex::decode(public_key).unwrap()).into();
+        let entry = v["valid"].as_array().unwrap().iter().find(|e| e["plan"] == "free").unwrap();
+        let reply = vector_reply(entry, public_key);
+        let expected = ExpectedReceipt {
+            contract: entry["contract"].as_str().unwrap(),
+            id: entry["id"].as_str().unwrap(),
+            plan: Plan::Free,
+            period: IssueRequest::Free { captcha_token: "" }.receipt_period(),
+            key_fingerprint: &fingerprint,
+        };
+        assert!(verify_receipt(&reply, &expected));
+        let mut relabelled = reply.clone();
+        relabelled.receipt.period = "monthly".into();
+        assert!(!verify_receipt(&relabelled, &expected), "a free receipt relabelled monthly");
     }
 
     #[test]
@@ -416,7 +452,7 @@ mod tests {
         let issuer = HttpIssuer::new(transport(), server.base.clone());
         let free = issuer.request("aa", &IssueRequest::Free { captcha_token: "t" }).await.unwrap();
         assert_eq!(free.receipt.insert_by, 1_800_003_960);
-        let fiat = IssueRequest::Fiat { card_token: "c", period: super::super::ports::BonoPeriod::Annual };
+        let fiat = IssueRequest::Fiat { card_token: "c" };
         assert!(issuer.request("aa", &fiat).await.is_ok());
         assert!(issuer.status("aa").await.is_ok());
         let relayer = HttpRelayer::new(transport(), server.base.clone());

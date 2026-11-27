@@ -58,7 +58,7 @@ export function offerTitle(kind: PlanKind): string | null {
 export interface BonoParts {
   /** The kind, as a code (not shown: the text is `title`). */
   readonly kind: 'de pago' | 'gratis';
-  /** "Bono gratis" / "Bono de pago": without the internal counters (`n/k`), which go apart, for support. */
+  /** "Bono gratis" / "Bono Night Plus": without the internal counters (`n/k`), which go apart, for support. */
   readonly title: string;
   /** Only shown if there is something to know: a confirmed bono carries no label. */
   readonly state: string | null;

@@ -354,7 +354,7 @@ test('the profile list paints with its rows from its first frame, never empty, a
   assert.match(app, /const list = menu \|\| chooser \|\| showAccounts;\s*const accounts = list \? await api\.listAccounts\(\)\.catch\(\(\) => null\) : undefined;/);
   assert.match(app, /useState<AccountView\[\] \| undefined>\(first\?\.accounts \?\? undefined\)/);
   assert.match(app, /if \(open\) setChooserList\(await readChooserList\(\)\);\s*setChooser\(open\);/);
-  assert.match(app, /void showChooser\(toAccounts\)\.then\(refresh\);/);
+  assert.match(app, /void showChooser\(true\)\.then\(refresh\);/);
   assert.match(app, /onClick=\{\(\) => void showChooser\(true\)\}/);
   assert.match(app, /onChooser=\{\(open\) => void showChooser\(open\)\}/);
   assert.match(app, /<AccountsScreen onBack=\{\(\) => setChooser\(false\)\} notice=\{notice\} initial=\{chooserList\} \/>/);

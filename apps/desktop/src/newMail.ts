@@ -6,6 +6,7 @@
 // address) does not notify, even if another address fails. Archiving, deleting or reading do not go through here.
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import type { SyncView } from './bindings/SyncView.ts';
+import { NOTICE_HIDE_MS } from './autoHide.ts';
 import { chime } from './chime.ts';
 import { STILL_ATTR } from './stillness.ts';
 
@@ -50,7 +51,7 @@ export function holdNotice(notice: MailNotice, held: boolean): MailNotice {
 }
 
 /** How long the notice takes to hide itself, from the last arrival (if the pointer or focus is not on it). */
-export const AUTO_HIDE_MS = 8000;
+export const AUTO_HIDE_MS = NOTICE_HIDE_MS;
 
 // --- React
 

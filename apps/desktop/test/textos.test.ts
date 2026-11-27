@@ -245,7 +245,7 @@ function englishTexts(): { file: string; text: string }[] {
 const EN_CONSOLATION =
   /\bnothing (was|has been|got|is) (changed|lost|touched|deleted|sent|saved)\b|\b(doesn't|don't|does not|do not|won't|will not) change\b|\b(keeps?|still) working\b|\bstill works?\b|\b(still|stays?|remains?) (saved and )?encrypted\b/i;
 // The light is seen, not named: "light(s)", "lit", "glow", "shine", "switch/turn on/off". "lightweight",
-// "highlight" and "Switch to the paid plan" do not fall.
+// "highlight" and "Switch to Night Plus" do not fall.
 const EN_LIGHT = /\b(lights?|lit|glow\w*|shin(e|es|ing|y)|shone|(switch|turn)(es|ed|ing|s)? (it |them )?(on|off))\b/i;
 // The only exception: the name of the light theme in Settings ("Light", like "Claro").
 const EN_LIGHT_ALLOWED = new Set(['Light']);
@@ -284,7 +284,7 @@ test('the English word guards catch what they should and let look-alikes pass', 
     ["It's still saved. Repeating it won't pay twice.", EN_CONSOLATION],
     ['lightweight', EN_LIGHT],
     ['highlight', EN_LIGHT],
-    ['Switch to the paid plan', EN_LIGHT],
+    ['Switch to Night Plus', EN_LIGHT],
     ['Turn back', EN_LIGHT],
     ['around', EN_ROUND],
     ['background', EN_ROUND],

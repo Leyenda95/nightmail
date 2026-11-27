@@ -44,6 +44,7 @@ import { SentFolder } from './Sent.tsx';
 import { Settings } from './Settings.tsx';
 import { useAction } from './useAction.ts';
 import { useMessageList, useMessages, type Messages } from './useMessages.ts';
+import { useSpin } from './useSpin.ts';
 import { WalletSection } from './WalletSection.tsx';
 
 /** Management page: title, intro and content, with its own scroll. */
@@ -64,6 +65,9 @@ interface InboxViewProps {
   layout: Layout;
   hidden: boolean;
   inbox: Messages;
+  /** The refresh icon turns, and "Sincronizar ahora" (the same as the sidebar's, `Main`). */
+  spinning: boolean;
+  onSync: () => void;
   /** `null` until AddressesSection loads them. */
   addresses: AddressView[] | null;
   unread: Unread;
@@ -92,7 +96,7 @@ function useShown(messages: MessageView[] | null, addrKey: string | null, onLoad
 
 /** Inbox: the list and the reader according to the layout (`panes`). With two panels the list is hidden, still mounted. With no
  *  messages (and none open), an empty state at full width in their place. */
-function InboxView({ nav, layout, hidden, inbox, addresses, unread, archived, restoring, planKey, onNav, onFlags, onLoaded, onGone, domain, onReply }: InboxViewProps) {
+function InboxView({ nav, layout, hidden, inbox, spinning, onSync, addresses, unread, archived, restoring, planKey, onNav, onFlags, onLoaded, onGone, domain, onReply }: InboxViewProps) {
   // Only the message opened from the inbox (the archive's is shown by `ArchiveView`).
   const openId = openHere(nav, 'bandeja');
   const show = panes({ openId }, layout);
@@ -112,7 +116,7 @@ function InboxView({ nav, layout, hidden, inbox, addresses, unread, archived, re
   if (empty) {
     return (
       <div className="nm-paneles nm-paneles--uno" hidden={hidden}>
-        <InboxEmpty state={empty} error={inbox.error} syncing={inbox.syncing} onSync={inbox.syncNow} onPlan={() => onNav({ type: 'go', view: 'plan' })} onNew={() => onNav({ type: 'new' })} planKey={planKey} />
+        <InboxEmpty state={empty} error={inbox.error} syncing={inbox.syncing} spinning={spinning} onSync={onSync} onPlan={() => onNav({ type: 'go', view: 'plan' })} onNew={() => onNav({ type: 'new' })} planKey={planKey} />
       </div>
     );
   }
@@ -128,7 +132,8 @@ function InboxView({ nav, layout, hidden, inbox, addresses, unread, archived, re
         error={inbox.error}
         hidden={!show.list}
         syncing={inbox.syncing}
-        onSync={inbox.syncNow}
+        spinning={spinning}
+        onSync={onSync}
         onOpen={onOpen}
         resizable={layout === 'tres'}
         scope={`${hidden}|${nav.addrKey ?? ''}`}
@@ -269,7 +274,7 @@ function useCompose(nav: Nav, onNav: (action: NavAction) => void, addresses: Add
   return { compose, onNew, onReply, onChange, onDiscard, onSent, dialog, sentOpen, setSentOpen, sentTick, notice, dismissNotice: () => setNotice(null) };
 }
 
-export function Main({ events, onLocked }: { events: CoreEvents; onLocked: (toAccounts: boolean) => void }) {
+export function Main({ events, onLocked }: { events: CoreEvents; onLocked: () => void }) {
   // The chosen layout, unless this window (at this font size) cannot fit three panels.
   const layout = useEffectiveLayout();
   const [nav, onNav] = useNav(layout);
@@ -285,6 +290,15 @@ export function Main({ events, onLocked }: { events: CoreEvents; onLocked: (toAc
   const composer = useCompose(nav, onNav, addresses);
   // The inbox messages: the list and the sidebar's unread counts (light and counter) come from the same read.
   const inbox = useMessages(events.syncTick + flagsTick);
+  // One turn for every refresh icon of the inbox (sidebar, list, empty inbox, archive): whichever is pressed, they all
+  // start in the same frame and stop together at the end of a whole turn after the sync (`useSpin`).
+  const syncSpin = useSpin(inbox.syncing);
+  const { kick: kickSpin } = syncSpin;
+  const { syncNow } = inbox;
+  const onSync = useCallback(() => {
+    kickSpin();
+    syncNow();
+  }, [kickSpin, syncNow]);
   const unread = useMemo(() => unreadCounts(inbox.messages ?? []), [inbox.messages]);
   useTaskbarBadge(unread.total);
   // The archive: re-read with the same trigger as the inbox (archiving in one changes the other).
@@ -353,10 +367,10 @@ export function Main({ events, onLocked }: { events: CoreEvents; onLocked: (toAc
 
   // "Bloquear" has no `disabled` (the button would lose focus): the guard is here, in a ref and not in `locking`,
   // which in a stale closure (two presses before repainting) would still be false.
-  // "Cerrar sesión" (`toAccounts`) is the same lock and then shows the account list. With a payment in flight the core
-  // refuses (`sessionBusy`) and its notice goes in the strip, as with "Bloquear".
+  // "Bloquear" and "Cerrar sesión" are the same lock and then show the account list. With a payment in flight the core
+  // refuses (`sessionBusy`) and its notice goes in the strip.
   const lockingNow = useRef(false);
-  async function lock(toAccounts: boolean) {
+  async function lock() {
     if (lockingNow.current) return;
     lockingNow.current = true;
     try {
@@ -364,7 +378,7 @@ export function Main({ events, onLocked }: { events: CoreEvents; onLocked: (toAc
         await api.lock();
         return true;
       });
-      if (ok) onLocked(toAccounts);
+      if (ok) onLocked();
     } finally {
       lockingNow.current = false;
     }
@@ -389,11 +403,12 @@ export function Main({ events, onLocked }: { events: CoreEvents; onLocked: (toAc
           planKey={planTick + events.syncTick + addressesTick}
           onNav={onNav}
           onCompose={composer.onNew}
-          onLock={() => void lock(false)}
-          onLogOut={() => void lock(true)}
+          onLock={() => void lock()}
+          onLogOut={() => void lock()}
           locking={locking}
           syncing={inbox.syncing}
-          onSync={inbox.syncNow}
+          spinning={syncSpin.spinning}
+          onSync={onSync}
           pending={pending.count}
           serverNow={serverNow}
         />
@@ -413,11 +428,7 @@ export function Main({ events, onLocked }: { events: CoreEvents; onLocked: (toAc
               <Aviso
                 tone="exito"
                 strip
-                actions={
-                  <button type="button" className="button button-small button-outline-weak nm-btn" onClick={() => onNav({ type: 'go', view: 'enviados' })}>
-                    {words.viewSent}
-                  </button>
-                }
+                autoHide={composer.dismissNotice}
                 dismiss={{ label: words.dismiss, onDismiss: composer.dismissNotice }}
               >
                 <p>{words.sent}</p>
@@ -435,6 +446,8 @@ export function Main({ events, onLocked }: { events: CoreEvents; onLocked: (toAc
             layout={layout}
             hidden={view !== 'bandeja'}
             inbox={inbox}
+            spinning={syncSpin.spinning}
+            onSync={onSync}
             addresses={addresses}
             unread={unread}
             archived={archive.messages}
@@ -454,7 +467,8 @@ export function Main({ events, onLocked }: { events: CoreEvents; onLocked: (toAc
             archive={archive}
             syncError={inbox.syncError}
             syncing={inbox.syncing}
-            onSync={inbox.syncNow}
+            spinning={syncSpin.spinning}
+            onSync={onSync}
             addresses={addresses}
             onNav={onNav}
             onFlags={onFlags}

@@ -8,6 +8,9 @@ import type { ProgressText } from '../../progress.ts';
 import { PAID_PLAN, TOKEN_NAME_PLURAL, tokenAmount } from '../brand.ts';
 import { plural } from '../locale.ts';
 
+/** A bono title inside a sentence: «bono gratis», «bono Night Plus» (the plan keeps its capitals). */
+const bonoInSentence = (title: string): string => title.charAt(0).toLowerCase() + title.slice(1);
+
 /** A stage: the headline and, if there is one, the note (a `null` one is not stored: a dictionary holds no `null`).
  *  English must carry a note on the same stages (checked by `test/i18n.test.ts`). */
 const stage = (title: string, note: string | null): ProgressText => (note === null ? { stage: title } : { stage: title, note });
@@ -108,20 +111,20 @@ export default {
     dustActivating: 'Activando la generación de DUST',
     dustFailed: 'No se ha podido activar la generación de DUST. Se volverá a intentar cuando vuelvas a abrir la aplicación.',
     offerNone: 'Elige un plan',
-    offerFree: 'Pasar al plan de pago',
-    bonoTitle: (paid: boolean): string => `Bono ${paid ? 'de pago' : 'gratis'}`,
+    offerFree: `Pasar a ${PAID_PLAN}`,
+    bonoTitle: (paid: boolean): string => `Bono ${paid ? PAID_PLAN : 'gratis'}`,
     confirmed: 'Confirmado.',
     pending: 'pendiente',
     usableFrom: (at: string): string => `Se podrá usar a partir del ${at}`,
     cancel: 'Cancelar',
     cancelPaid: {
-      label: (title: string): string => `Cancelar el pago pendiente del ${title.toLowerCase()}`,
+      label: (title: string): string => `Cancelar el pago pendiente del ${bonoInSentence(title)}`,
       title: '¿Cancelar este pago pendiente?',
       note: 'Si ya se pagó y aún puede completarse, no se podrá cancelar.',
       yes: 'Sí, cancelar el pago',
     },
     cancelFree: {
-      label: (title: string): string => `Cancelar la petición pendiente del ${title.toLowerCase()}`,
+      label: (title: string): string => `Cancelar la petición pendiente del ${bonoInSentence(title)}`,
       title: '¿Cancelar esta petición pendiente?',
       note: 'Si la petición ya se aceptó y aún puede completarse, no se podrá cancelar.',
       yes: 'Sí, cancelar la petición',

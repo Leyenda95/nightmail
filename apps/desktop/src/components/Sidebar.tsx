@@ -28,14 +28,17 @@ interface Props {
   onNav: (action: NavAction) => void;
   /** "Nuevo mensaje": opens the form (or the one already being written). */
   onCompose: () => void;
+  /** "Bloquear": lock and show the account list. */
   onLock: () => void;
-  /** "Cerrar sesión" (in the Settings options): lock and show the account list. */
+  /** "Cerrar sesión" (in the Settings options): the same as "Bloquear". */
   onLogOut: () => void;
   locking: boolean;
   /** Half-done addresses: the "N en proceso" or "N detenidas" label of "Direcciones". */
   pending: PendingCount;
   /** The same sync as the list's "Sincronizar ahora" (`useMessages`). */
   syncing: boolean;
+  /** Its icon turns together with the list's (`useSpin` in `Main.tsx`). */
+  spinning: boolean;
   onSync: () => void;
   /** The NightMail server line with its deadline (`useServerLine`): the same one that decides the mail notice. */
   serverNow: StatusLineView;
@@ -59,7 +62,7 @@ function UnreadNum({ n }: { n: number }) {
  *  sibling buttons (never one inside the other); "Actualizar" and the badge sit over the right end of the
  *  row. The badge is not announced: its data goes in the button's name (`sr-only`). While syncing it is not disabled
  *  (focus would be lost): `aria-busy` and the `syncNow` guard. */
-function InboxRow({ unread, on, syncing, onGo, onSync }: { unread: number; on: boolean; syncing: boolean; onGo: () => void; onSync: () => void }) {
+function InboxRow({ unread, on, syncing, spinning, onGo, onSync }: { unread: number; on: boolean; syncing: boolean; spinning: boolean; onGo: () => void; onSync: () => void }) {
   return (
     <li className={classes('nm-fila', unread > 0 && 'nm-fila--num')}>
       <button type="button" className="nm-nav__item nm-fila__ir" aria-current={current(on)} onClick={onGo}>
@@ -76,7 +79,7 @@ function InboxRow({ unread, on, syncing, onGo, onSync }: { unread: number; on: b
           aria-busy={syncing || undefined}
           onClick={onSync}
         >
-          <Icon name="arrows-rotate" className={classes('nm-ic', syncing && 'nm-fila__gira keep-motion')} />
+          <Icon name="arrows-rotate" className={classes('nm-ic', spinning && 'nm-fila__gira keep-motion')} />
         </button>
         {unread > 0 && (
           <span className="nm-fila__num" aria-hidden="true">
@@ -111,10 +114,10 @@ function MenuItem({ icon, label, on, count = 0, tag, onClick }: MenuItemProps) {
   );
 }
 
-function Menu({ nav, unread, pending, go, syncing, onSync }: { nav: Props['nav']; unread: number; pending: PendingCount; go: (view: View) => void; syncing: boolean; onSync: () => void }) {
+function Menu({ nav, unread, pending, go, syncing, spinning, onSync }: { nav: Props['nav']; unread: number; pending: PendingCount; go: (view: View) => void; syncing: boolean; spinning: boolean; onSync: () => void }) {
   return (
     <ul className="nm-nav">
-      <InboxRow unread={unread} on={nav.view === 'bandeja' && nav.addrKey === null} syncing={syncing} onGo={() => go('bandeja')} onSync={onSync} />
+      <InboxRow unread={unread} on={nav.view === 'bandeja' && nav.addrKey === null} syncing={syncing} spinning={spinning} onGo={() => go('bandeja')} onSync={onSync} />
       {/* The archive: no counter; it is not filtered by address. */}
       <MenuItem icon="archive-box" label={t().mail.inbox.archiveTitle} on={nav.view === 'archivo'} onClick={() => go('archivo')} />
       {/* What was sent from this device: no counter, not filtered by address. */}
@@ -218,7 +221,7 @@ function Quota({ planKey, onClick }: { planKey: number; onClick: () => void }) {
 const SETTINGS_PANEL_ID = 'ajustes-opciones';
 
 /** "Ajustes" opens, upwards like "Estado del servicio", two options: all the settings, or "Cerrar sesión" (lock and
- *  go to the account list). Choosing one closes it. */
+ *  go to the account list, like "Bloquear"). Choosing one closes it. */
 function SettingsMenu({ on, onSettings, onLogOut }: { on: boolean; onSettings: () => void; onLogOut: () => void }) {
   const { open, setOpen, box, toggle } = usePopup(SETTINGS_PANEL_ID);
   const choose = (action: () => void) => {
@@ -258,7 +261,7 @@ function SettingsMenu({ on, onSettings, onLogOut }: { on: boolean; onSettings: (
   );
 }
 
-export function Sidebar({ nav, addresses, unread, planKey, onNav, onCompose, onLock, onLogOut, locking, pending, syncing, onSync, serverNow }: Props) {
+export function Sidebar({ nav, addresses, unread, planKey, onNav, onCompose, onLock, onLogOut, locking, pending, syncing, spinning, onSync, serverNow }: Props) {
   const go = (view: View) => onNav({ type: 'go', view });
   return (
     <nav className="nm-side" aria-label={t().screensMail.sidebar.navLabel}>
@@ -276,7 +279,7 @@ export function Sidebar({ nav, addresses, unread, planKey, onNav, onCompose, onL
         {t().screensMail.sidebar.newMessage}
       </button>
       <div className="nm-side__centro">
-        <Menu nav={nav} unread={unread.total} pending={pending} go={go} syncing={syncing} onSync={onSync} />
+        <Menu nav={nav} unread={unread.total} pending={pending} go={go} syncing={syncing} spinning={spinning} onSync={onSync} />
         <Addresses nav={nav} addresses={addresses} unread={unread} onNav={onNav} />
       </div>
       <div className="nm-side__pie">

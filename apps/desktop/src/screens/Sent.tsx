@@ -208,9 +208,10 @@ interface ReaderProps {
 function Delivery({ view, retried, busy, onRetry }: { view: SentView; retried: boolean; busy: boolean; onRetry: () => void }) {
   const words = t().screensMail.sent;
   const now = useNowUntil(view.retryAt);
+  const [hideRetried, setHideRetried] = useState(false);
   if (view.status === 'sent') {
-    return retried ? (
-      <Aviso tone="exito">
+    return retried && !hideRetried ? (
+      <Aviso tone="exito" autoHide={() => setHideRetried(true)}>
         <p>{words.retried}</p>
       </Aviso>
     ) : null;

@@ -67,7 +67,7 @@ function call(port: number, method: string, path: string, body?: string | object
 }
 
 const free = (id = ID, captchaToken = CAPTCHA) => ({ id, captchaToken });
-const fiat = (id = ID, cardToken = CARD, period = 'monthly') => ({ id, cardToken, period });
+const fiat = (id = ID, cardToken = CARD) => ({ id, cardToken });
 const status = (port: number, id = ID) => call(port, 'POST', '/v1/bono/status', { id });
 const ids = (n: number) => Array.from({ length: n }, (_, i) => (i + 1).toString(16).padStart(2, '0').repeat(32));
 
@@ -119,13 +119,21 @@ test('wrong CAPTCHA or card: 403 / 402, nothing is created, no quota is spent, a
   assert.ok(!text.includes('malo') && !text.includes('127.0.0.1') && !text.includes(CAPTCHA));
 });
 
-test('POST fiat: issues the paid plan, stores the period and the receipt carries it', async (t) => {
+test('POST fiat: issues the paid plan (Night Plus) without a period, the receipt carries none', async (t) => {
   const s = await start(t);
-  const r = await call(s.port, 'POST', '/v1/bono/fiat', fiat(ID, CARD, 'annual'));
+  const r = await call(s.port, 'POST', '/v1/bono/fiat', fiat());
   assert.equal(r.status, 200);
   assert.equal(r.body.plan, 'paid');
-  assert.equal(r.body.receipt.period, 'annual');
-  assert.equal(s.issuer.lookup(ID)?.period, 'annual');
+  assert.equal(r.body.receipt.period, 'none');
+  assert.equal(s.issuer.lookup(ID)?.period, null);
+});
+
+test('POST fiat from an older client: its period is accepted and ignored', async (t) => {
+  const s = await start(t);
+  const r = await call(s.port, 'POST', '/v1/bono/fiat', { ...fiat(), period: 'annual' });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.receipt.period, 'none');
+  assert.equal(s.issuer.lookup(ID)?.period, null);
 });
 
 test('the same id with the other plan is 409 id_conflict', async (t) => {
@@ -143,8 +151,9 @@ test('invalid bodies: 400 with the fixed error', async (t) => {
     ['/v1/bono/free', { id: ID.toUpperCase(), captchaToken: CAPTCHA }],
     ['/v1/bono/free', { id: ID.slice(2), captchaToken: CAPTCHA }],
     ['/v1/bono/free', { id: ID, captchaToken: 5 }],
-    ['/v1/bono/fiat', fiat(ID, CARD, 'weekly')],
-    ['/v1/bono/fiat', { id: ID, cardToken: CARD }],
+    ['/v1/bono/fiat', { ...fiat(), period: 'weekly' }],
+    ['/v1/bono/fiat', { ...fiat(), period: 5 }],
+    ['/v1/bono/fiat', { id: ID, period: 'monthly' }],
     ['/v1/bono/free', '[]'],
     ['/v1/bono/free', 'null'],
     ['/v1/bono/free', '{no es json'],

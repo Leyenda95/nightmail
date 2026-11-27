@@ -76,19 +76,12 @@ pub trait Chain: Send + Sync {
 
 // --- Issuer (apps/server/src/issuer/issuer-api.ts) -----------------------------------------------------------
 
-/// Simulated payment period (only displayed for now: the bono does not expire).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum BonoPeriod {
-    Monthly,
-    Annual,
-}
-
 /// What is requested from the Issuer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IssueRequest<'a> {
     Free { captcha_token: &'a str },
-    Fiat { card_token: &'a str, period: BonoPeriod },
+    /// Night Plus by simulated card. It has no period (no monthly or annual).
+    Fiat { card_token: &'a str },
 }
 
 impl IssueRequest<'_> {
@@ -99,12 +92,12 @@ impl IssueRequest<'_> {
         }
     }
 
-    /// Period text in the receipt (`none` for the free plan).
-    pub fn period_text(&self) -> &'static str {
+    /// The period the receipt must carry: `none` for the free plan. Night Plus has no period, but a card request made
+    /// before it was dropped comes back with `monthly` or `annual`: `None` accepts any valid one (it is still signed).
+    pub fn receipt_period(&self) -> Option<&'static str> {
         match self {
-            Self::Free { .. } => "none",
-            Self::Fiat { period: BonoPeriod::Monthly, .. } => "monthly",
-            Self::Fiat { period: BonoPeriod::Annual, .. } => "annual",
+            Self::Free { .. } => Some("none"),
+            Self::Fiat { .. } => None,
         }
     }
 }

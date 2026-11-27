@@ -18,14 +18,14 @@ test('without confirmed bonos there is no plan, a pending payment does not chang
 
 test('the offer: choose without a plan, switch to paid with the free one and, with the paid one, folded (no title)', () => {
   assert.equal(offerTitle('none'), 'Elige un plan');
-  assert.equal(offerTitle('free'), 'Pasar al plan de pago');
+  assert.equal(offerTitle('free'), 'Pasar a Night Plus');
   assert.equal(offerTitle('paid'), null);
 });
 
 test('a confirmed bono: title without counters, no tag and nothing to abandon', () => {
   const p = bonoParts(bono(true, true), 1000);
   assert.equal(p.kind, 'de pago');
-  assert.equal(p.title, 'Bono de pago');
+  assert.equal(p.title, 'Bono Night Plus');
   assert.equal(p.state, null);
   assert.equal(p.srOnly, 'Confirmado.');
   assert.equal(p.tone, 'exito');
@@ -41,7 +41,7 @@ test('a pending bono: "pendiente", the "Cancelar" button and its dialog dependin
   assert.equal(paid.icon, 'espera');
   assert.deepEqual(paid.abandon, {
     button: 'Cancelar',
-    label: 'Cancelar el pago pendiente del bono de pago',
+    label: 'Cancelar el pago pendiente del bono Night Plus',
     title: '¿Cancelar este pago pendiente?',
     note: 'Si ya se pagó y aún puede completarse, no se podrá cancelar.',
     yes: 'Sí, cancelar el pago',

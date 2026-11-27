@@ -32,7 +32,7 @@ use crate::mail::parser::{Breaker, parse_once};
 use crate::mail::send::Outbox;
 use crate::mail::sync::{MailSync, SyncTarget};
 use crate::orchestrator::http::{HttpIssuer, HttpRelayer};
-use crate::orchestrator::ports::{BonoPeriod, SystemEnv};
+use crate::orchestrator::ports::SystemEnv;
 use crate::orchestrator::sidecar::SidecarChain;
 use crate::orchestrator::{
     AddressView, BonoInfo, Deps, NameCheck, OrchError, OrchEvent, Orchestrator, OrchestratorConfig, PendingSlot,
@@ -833,15 +833,11 @@ impl Session {
         Ok(tracked(op, orch.request_free_plan()).await?)
     }
 
-    pub async fn pay_fiat(&self, period: PeriodInput, op: u64) -> Result<BonoInfo> {
+    pub async fn pay_fiat(&self, op: u64) -> Result<BonoInfo> {
         let _op = self.enter()?;
         self.require_recovered().await?;
-        let period = match period {
-            PeriodInput::Monthly => BonoPeriod::Monthly,
-            PeriodInput::Annual => BonoPeriod::Annual,
-        };
         let orch = self.orchestrator().await?;
-        Ok(tracked(op, orch.pay_fiat(period)).await?)
+        Ok(tracked(op, orch.pay_fiat()).await?)
     }
 
     pub async fn pay_shielded(&self, amount: String, op: u64) -> Result<BonoInfo> {

@@ -9,7 +9,7 @@ export default {
     plan: 'Plan y cartera',
     settings: 'Ajustes',
     addressesIntro: 'Cada dirección es un casillero independiente en el servidor. Solo tú sabes que son tuyas.',
-    planIntro: 'Un bono es tu derecho a tener direcciones. Queda apuntado en Midnight sin decir de quién es.',
+    planIntro: 'Un bono es tu derecho a tener direcciones. Queda registrado en Midnight sin decir de quién es.',
     settingsIntro: 'Cambian cómo se ve NightMail en este dispositivo.',
     pickMessage: 'Elige un mensaje para leerlo.',
   },
@@ -151,7 +151,6 @@ export default {
     discardYes: 'Descartar',
     replaceYes: 'Descartar y responder',
     sent: 'Mensaje enviado.',
-    viewSent: 'Ver en Enviados',
     dismiss: 'Cerrar el aviso',
   },
   // screens/Sent.tsx: the "Enviados" folder and its reader.

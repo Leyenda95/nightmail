@@ -34,10 +34,39 @@ test('the turn of spin.ts is the one of nm-fila__gira in app.css', () => {
 
 const iconsIn = (file: string) => readFileSync(new URL(`../src/screens/${file}`, import.meta.url), 'utf8').match(/<Icon name="arrows-rotate"[^>]*>/g) ?? [];
 
-test('the inbox refresh buttons turn while the sync works, like the sidebar one (also with reduced motion)', () => {
+test('the refresh turn is smooth and continuous, never in steps (it went by jerks)', () => {
+  const css = readFileSync(new URL('../src/styles/app.css', import.meta.url), 'utf8');
+  const rule = css.match(/^\.nm-fila__gira \{[^}]*\}/m)?.[0] ?? '';
+  assert.match(rule, /animation: nm-gira 1s linear infinite;/);
+  assert.doesNotMatch(rule, /steps\(/);
+});
+
+test('the inbox refresh buttons turn while the sync works, all from one shared state (also with reduced motion)', () => {
   const icons = iconsIn('Inbox.tsx');
   assert.equal(icons.length, 2);
-  for (const icon of icons) assert.match(icon, /spin\.spinning && 'nm-fila__gira keep-motion'/, icon);
+  for (const icon of icons) assert.match(icon, /\(\s*'nm-ic', spinning && 'nm-fila__gira keep-motion'\)/, icon);
+  const sidebar = readFileSync(new URL('../src/components/Sidebar.tsx', import.meta.url), 'utf8').match(/<Icon name="arrows-rotate"[^>]*>/g) ?? [];
+  assert.equal(sidebar.length, 1);
+  assert.match(sidebar[0] ?? '', /\(\s*'nm-ic', spinning && 'nm-fila__gira keep-motion'\)/);
+  // No inbox icon keeps a turn of its own: one `useSpin` in Main, kicked by any of the buttons.
+  assert.doesNotMatch(readFileSync(new URL('../src/screens/Inbox.tsx', import.meta.url), 'utf8'), /useSpin\(/);
+  const main = readFileSync(new URL('../src/screens/Main.tsx', import.meta.url), 'utf8');
+  assert.equal((main.match(/useSpin\(/g) ?? []).length, 1);
+  assert.match(main, /const syncSpin = useSpin\(inbox\.syncing\);/);
+  assert.match(main, /kickSpin\(\);\s*syncNow\(\);/);
+  // Sidebar, inbox list or empty inbox, and archive: the same turn and the same press.
+  assert.equal((main.match(/spinning=\{syncSpin\.spinning\}/g) ?? []).length, 3);
+  assert.equal((main.match(/onSync=\{onSync\}/g) ?? []).length, 5);
+  assert.doesNotMatch(main, /onSync=\{inbox\.syncNow\}/);
+});
+
+test('"Bloquear" and "Cerrar sesión" both lock and then show the profile list', () => {
+  const main = readFileSync(new URL('../src/screens/Main.tsx', import.meta.url), 'utf8');
+  assert.match(main, /onLock=\{\(\) => void lock\(\)\}/);
+  assert.match(main, /onLogOut=\{\(\) => void lock\(\)\}/);
+  assert.match(main, /await api\.lock\(\);/);
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  assert.match(app, /badgeLocked\(\);\s*\/\/[^\n]*\n\s*void showChooser\(true\)\.then\(refresh\);/);
 });
 
 test("Sent's refresh is local and instant: its turn is decoration and stops with reduced motion", () => {

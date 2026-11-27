@@ -112,9 +112,9 @@ test('en payment: balance, DUST line, offer and voucher rows', () => {
   assert.equal(cannotPay('1e3', wallet), "The price or the balance couldn't be read.");
   assert.deepEqual(dustSetupLine('activating'), { icon: 'espera', text: 'Activating DUST generation' });
   assert.equal(offerTitle('none'), 'Choose a plan');
-  assert.equal(offerTitle('free'), 'Switch to the paid plan');
+  assert.equal(offerTitle('free'), 'Switch to Night Plus');
   const confirmed = bonoParts({ paid: true, included: true, usableAt: null }, 1000);
-  assert.equal(confirmed.title, 'Paid voucher');
+  assert.equal(confirmed.title, 'Night Plus voucher');
   assert.equal(confirmed.srOnly, 'Confirmed.');
   const pending = bonoParts({ paid: false, included: false, usableAt: null }, 1000);
   assert.equal(pending.state, 'pending');
@@ -125,7 +125,7 @@ test('en payment: balance, DUST line, offer and voucher rows', () => {
     note: "If the request has already been accepted and can still complete, it can't be canceled.",
     yes: 'Yes, cancel the request',
   });
-  assert.equal(bonoParts({ paid: true, included: false, usableAt: null }, 1000).abandon?.label, 'Cancel the pending payment for the paid voucher');
+  assert.equal(bonoParts({ paid: true, included: false, usableAt: null }, 1000).abandon?.label, 'Cancel the pending payment for the Night Plus voucher');
   // The date goes in English's format, with no Spanish leftovers.
   const wait = bonoParts({ paid: false, included: true, usableAt: 2000 }, 1000).wait!;
   assert.match(wait, /^Can be used from /);

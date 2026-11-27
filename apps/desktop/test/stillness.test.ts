@@ -170,7 +170,7 @@ test('the wait indicators carry keep-motion (the base stylesheet stops the rest 
   const read = (f: string) => readFileSync(new URL(`../src/${f}`, import.meta.url), 'utf8');
   const icon = read('components/Icon.tsx');
   assert.ok(icon.includes("name === 'espera' ? 'nm-espera__gira keep-motion '"), 'wait icon');
-  assert.ok(read('components/Sidebar.tsx').includes("syncing && 'nm-fila__gira keep-motion'"), 'Actualizar spinner');
+  assert.ok(read('components/Sidebar.tsx').includes("spinning && 'nm-fila__gira keep-motion'"), 'Actualizar spinner');
   const luz = read('components/Luz.tsx');
   assert.ok(luz.includes("mode === 'trabaja' ? ' keep-motion' : ''"), 'working light');
   assert.ok(luz.includes('luzClass(mode, rhythm) + keep'), 'the class is added to the light');

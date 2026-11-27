@@ -78,7 +78,7 @@ function PasswordCard() {
       <h2 className="nm-tarjeta__titulo">{s.title}</h2>
       <p className="nm-suave">{s.text}</p>
       {changed && (
-        <Aviso tone="exito">
+        <Aviso tone="exito" autoHide={() => setChanged(false)}>
           <p>
             <strong>{s.changed}</strong> {s.changedNext}
           </p>

@@ -10,7 +10,7 @@ export default {
     plan: 'Plan & wallet',
     settings: 'Settings',
     addressesIntro: "Each address is a separate box on the server. Only you know they're yours.",
-    planIntro: "A voucher gives you the right to have addresses. It's recorded on Midnight without saying whose it is.",
+    planIntro: "A voucher gives you the right to have addresses. It's registered on Midnight without saying whose it is.",
     settingsIntro: 'These change how NightMail looks on this device.',
     pickMessage: 'Choose a message to read it.',
   },
@@ -152,7 +152,6 @@ export default {
     discardYes: 'Discard',
     replaceYes: 'Discard and reply',
     sent: 'Message sent.',
-    viewSent: 'View in Sent',
     dismiss: 'Dismiss notice',
   },
   // screens/Sent.tsx

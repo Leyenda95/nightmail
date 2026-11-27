@@ -13,7 +13,6 @@ import type { MessageView } from './bindings/MessageView.ts';
 import type { MidnightHealth } from './bindings/MidnightHealth.ts';
 import type { NameCheck } from './bindings/NameCheck.ts';
 import type { PendingSlot } from './bindings/PendingSlot.ts';
-import type { PeriodInput } from './bindings/PeriodInput.ts';
 import type { PlanView } from './bindings/PlanView.ts';
 import type { RecoveryReport } from './bindings/RecoveryReport.ts';
 import type { SeedDraft } from './bindings/SeedDraft.ts';
@@ -48,7 +47,7 @@ export const api = {
   changePassword: (current: string, next: string) => invoke<void>('change_password', { current, new: next }),
   getPlan: () => invoke<PlanView>('get_plan'),
   getFreePlan: (op: number) => invoke<BonoInfo>('get_free_plan', { op }),
-  payFiat: (period: PeriodInput, op: number) => invoke<BonoInfo>('pay_fiat', { period, op }),
+  payFiat: (op: number) => invoke<BonoInfo>('pay_fiat', { op }),
   getPrice: () => invoke<string>('get_price'),
   payShielded: (amount: string, op: number) => invoke<BonoInfo>('pay_shielded', { amount, op }),
   walletInfo: (op: number) => invoke<WalletView>('wallet_info', { op }),

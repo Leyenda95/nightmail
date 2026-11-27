@@ -81,7 +81,7 @@ async fn profile(label: &str) -> (Profile, Option<Duration>) {
             Ok(_) => {}
             Err(AppError::Orch(OrchError::RateLimited { .. })) => {
                 eprintln!("{label}: no free plan left for this IP today, paying with the simulated card");
-                session.pay_fiat(PeriodInput::Monthly, 1).await.unwrap_or_else(|e| panic!("{label}: card: {e:?}"));
+                session.pay_fiat(1).await.unwrap_or_else(|e| panic!("{label}: card: {e:?}"));
             }
             Err(e) => panic!("{label}: free plan: {e:?}"),
         }

@@ -5,7 +5,6 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { abandonedNote } from '../addresses.ts';
 import { api, nextOp } from '../api.ts';
 import type { BonoView } from '../bindings/BonoView.ts';
-import type { PeriodInput } from '../bindings/PeriodInput.ts';
 import type { PlanView } from '../bindings/PlanView.ts';
 import type { Quota } from '../bindings/Quota.ts';
 import type { WalletView } from '../bindings/WalletView.ts';
@@ -211,7 +210,8 @@ interface PaidOptionProps {
   onAskPrice: () => void;
   onConfirm: (price: string) => void;
   onCancel: () => void;
-  onFiat: (period: PeriodInput) => void;
+  /** The simulated card payment of Night Plus (one only: it has no monthly or annual period). */
+  onFiat: () => void;
 }
 
 /** "Night Plus" (the paid plan): private tokens as the main option and, below, the simulated card. No prices or quotas written by
@@ -238,13 +238,9 @@ function PaidOption({ quote, busy, disabled, onAskPrice, onConfirm, onCancel, on
       <div className="nm-pila nm-pila--s">
         <span className="nm-pista">{t().screensPlan.plan.cardHint}</span>
         <div className="nm-fila">
-          <button type="button" className={`${SMALL} button-outline-weak`} disabled={disabled} onClick={() => onFiat('monthly')}>
+          <button type="button" className={`${SMALL} button-outline-weak`} disabled={disabled} onClick={onFiat}>
             <Icon name="credit-card" className="nm-ic" />
-            {t().screensPlan.plan.fiatMonthly}
-          </button>
-          <button type="button" className={`${SMALL} button-outline-weak`} disabled={disabled} onClick={() => onFiat('annual')}>
-            <Icon name="credit-card" className="nm-ic" />
-            {t().screensPlan.plan.fiatAnnual}
+            {t().screensPlan.plan.fiat}
           </button>
         </div>
       </div>
@@ -436,7 +432,7 @@ export function PlanSection({ events, onChanged, reloadKey, otherBusy, onBusy }:
           onAskPrice={() => withWallet(askPrice)}
           onConfirm={(price) => withWallet(() => buy((o) => api.payShielded(price, o), 'pruebas'))}
           onCancel={cancelQuote}
-          onFiat={(period) => buy((o) => api.payFiat(period, o), 'red')}
+          onFiat={() => buy((o) => api.payFiat(o), 'red')}
         />
       </Offer>
     </>

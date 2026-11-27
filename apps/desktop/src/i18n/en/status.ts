@@ -9,6 +9,9 @@ import type { Messages } from '../index.ts';
 import { PAID_PLAN, TOKEN_NAME_PLURAL, tokenAmount } from '../brand.ts';
 import { plural } from '../locale.ts';
 
+/** A voucher title inside a sentence: "free voucher", "Night Plus voucher" (the plan keeps its capitals). */
+const bonoInSentence = (title: string): string => (title.startsWith(PAID_PLAN) ? title : title.toLowerCase());
+
 /** As in `es/status.ts`: a `null` note is not stored. */
 const stage = (title: string, note: string | null): ProgressText => (note === null ? { stage: title } : { stage: title, note });
 
@@ -110,20 +113,20 @@ export default {
     dustActivating: 'Activating DUST generation',
     dustFailed: "DUST generation couldn't be activated. It'll be tried again when you open the app again.",
     offerNone: 'Choose a plan',
-    offerFree: 'Switch to the paid plan',
-    bonoTitle: (paid: boolean): string => `${paid ? 'Paid' : 'Free'} voucher`,
+    offerFree: `Switch to ${PAID_PLAN}`,
+    bonoTitle: (paid: boolean): string => `${paid ? PAID_PLAN : 'Free'} voucher`,
     confirmed: 'Confirmed.',
     pending: 'pending',
     usableFrom: (at: string): string => `Can be used from ${at}`,
     cancel: 'Cancel',
     cancelPaid: {
-      label: (title: string): string => `Cancel the pending payment for the ${title.toLowerCase()}`,
+      label: (title: string): string => `Cancel the pending payment for the ${bonoInSentence(title)}`,
       title: 'Cancel this pending payment?',
       note: "If it's already been paid and can still complete, it can't be canceled.",
       yes: 'Yes, cancel the payment',
     },
     cancelFree: {
-      label: (title: string): string => `Cancel the pending request for the ${title.toLowerCase()}`,
+      label: (title: string): string => `Cancel the pending request for the ${bonoInSentence(title)}`,
       title: 'Cancel this pending request?',
       note: "If the request has already been accepted and can still complete, it can't be canceled.",
       yes: 'Yes, cancel the request',

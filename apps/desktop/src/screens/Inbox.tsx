@@ -20,7 +20,6 @@ import { senderSeal } from '../seal.ts';
 import { ErrorAviso } from './common.tsx';
 import { DeleteDialog } from './DeleteDialog.tsx';
 import { useAction } from './useAction.ts';
-import { useSpin } from './useSpin.ts';
 
 /** On mounting the list or the empty state (one replaces the other), if focus was left on `<body>` because the focused
  *  element unmounted, it goes to the title. If it is elsewhere, it is left alone. */
@@ -260,6 +259,8 @@ export function ListResizer() {
 
 interface SyncProps {
   syncing: boolean;
+  /** The refresh icon turns: one state for every inbox refresh icon (`useSpin` in `Main.tsx`). */
+  spinning: boolean;
   onSync: () => void;
 }
 
@@ -403,7 +404,7 @@ function SelectBar({ picked, total, allId, archived, onAll, onNone, onArchive, o
   );
 }
 
-export function Inbox({ messages, heading, addresses, openId, error, hidden, syncing, onSync, onOpen, label, titleId = LIST_TITLE_ID, empty, resizable = false, scope, archived = false, capped = false, onBulkDone }: InboxProps) {
+export function Inbox({ messages, heading, addresses, openId, error, hidden, syncing, spinning, onSync, onOpen, label, titleId = LIST_TITLE_ID, empty, resizable = false, scope, archived = false, capped = false, onBulkDone }: InboxProps) {
   useRescueFocus(titleId);
   const list = useMemo(() => messages ?? [], [messages]);
   const ids = useMemo(() => list.map((m) => m.id), [list]);
@@ -412,7 +413,6 @@ export function Inbox({ messages, heading, addresses, openId, error, hidden, syn
   const pickedSet = useMemo(() => new Set(picked), [picked]);
   const allId = useId();
   const shownError = error ?? bulk.error;
-  const spin = useSpin(syncing);
 
   // Ctrl/Cmd+A and Esc with focus in the list (rows, region or its bar). Not inside a dialog opened from here.
   function onListKey(e: KeyboardEvent<HTMLElement>) {
@@ -436,12 +436,9 @@ export function Inbox({ messages, heading, addresses, openId, error, hidden, syn
           type="button"
           className="button button-for-icon button-small button-ghost-weak nm-btn"
           title={syncLabel(syncing)}
-          onClick={() => {
-            spin.kick();
-            onSync();
-          }}
+          onClick={onSync}
         >
-          <Icon name="arrows-rotate" className={classes('nm-ic', spin.spinning && 'nm-fila__gira keep-motion')} />
+          <Icon name="arrows-rotate" className={classes('nm-ic', spinning && 'nm-fila__gira keep-motion')} />
           <span className="sr-only">{syncLabel(syncing)}</span>
         </button>
       </header>
@@ -592,10 +589,9 @@ function FirstUse({ planKey, onPlan, onNew }: { planKey: number; onPlan: () => v
 
 /** Instead of the empty list, full width: first use or the empty inbox. The title carries the `id` of the list's:
  *  if the last message is archived or deleted, focus goes there. */
-export function InboxEmpty({ state, error, syncing, onSync, onPlan, onNew, planKey }: EmptyProps) {
+export function InboxEmpty({ state, error, syncing, spinning, onSync, onPlan, onNew, planKey }: EmptyProps) {
   useRescueFocus();
   const words = t().screensMail.inbox;
-  const spin = useSpin(syncing);
   return (
     <section className="nm-vacio">
       <div className="nm-vacio__noche">
@@ -622,12 +618,9 @@ export function InboxEmpty({ state, error, syncing, onSync, onPlan, onNew, planK
           <button
             type="button"
             className="button button-medium button-outline-weak nm-btn"
-            onClick={() => {
-              spin.kick();
-              onSync();
-            }}
+            onClick={onSync}
           >
-            <Icon name="arrows-rotate" className={classes('nm-ic', spin.spinning && 'nm-fila__gira keep-motion')} />
+            <Icon name="arrows-rotate" className={classes('nm-ic', spinning && 'nm-fila__gira keep-motion')} />
             {syncLabel(syncing)}
           </button>
         </>

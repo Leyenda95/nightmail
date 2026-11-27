@@ -141,4 +141,14 @@ test('a notice that can be closed: a plain "X" with its name, after the actions'
   }
   const css = readFileSync(new URL('../src/styles/app.css', import.meta.url), 'utf8');
   assert.match(css, /\.nm-aviso__cerrar \{[^}]*border: 0;[^}]*background: none;/);
+  // Compact notices: 13px text, small icon, 20px close box with a 14px cross.
+  assert.match(css, /\.nm-aviso \{[^}]*padding: 0\.25rem 0\.75rem;[^}]*font-size: 0\.8125rem;/);
+  assert.match(css, /\.nm-aviso__cerrar \{[^}]*inline-size: 1\.25rem;[^}]*block-size: 1\.25rem;/);
+  assert.match(css, /\.nm-aviso__cerrar > \.nm-ic \{ inline-size: 0\.875rem; block-size: 0\.875rem;/);
+  assert.match(css, /\.nm-aviso--franja \{[^}]*padding: 0\.1875rem 1rem;/);
+});
+
+test("the info icon is small next to its label (12 px) and its button keeps a 20 px target", () => {
+  assert.match(css, /\.nm-info__boton \.nm-ic \{ inline-size: 0\.75rem; block-size: 0\.75rem; \}/);
+  assert.match(css, /\.nm-info__boton \{[^}]*inline-size: 1\.25rem;[^}]*block-size: 1\.25rem;/);
 });

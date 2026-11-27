@@ -1,7 +1,7 @@
 //! Orchestrator tests against the doubles in `fakes.rs`.
 
 use super::fakes::*;
-use super::ports::{BonoPeriod, IssuerError, RelayError, RelayOutcome, Submitted, TicketState};
+use super::ports::{IssuerError, RelayError, RelayOutcome, Submitted, TicketState};
 use super::*;
 use crate::protocol::{AddressEntry, AddressKind, CallProblem, FundsAsset, HashOp, NameProblem, codes};
 use crate::rpc::RpcError;
@@ -101,7 +101,7 @@ fn orchestrator_futures_are_send() {
     assert_send(&h.orch.provide_name(id, "x"));
     assert_send(&h.orch.check_name("x"));
     assert_send(&h.orch.request_free_plan());
-    assert_send(&h.orch.pay_fiat(BonoPeriod::Monthly));
+    assert_send(&h.orch.pay_fiat());
     assert_send(&h.orch.faucet("t", "1"));
     assert_send(&h.orch.current_price());
     assert_send(&h.orch.wallet_snapshot());
@@ -149,12 +149,23 @@ async fn usable_at_uses_the_random_delay() {
 }
 
 #[tokio::test]
+async fn a_card_claim_from_before_night_plus_is_resumed() {
+    let h = harness().await;
+    // A leaf claimed by card when the payment still had a period (`fiat:annual`): paying by card resumes it.
+    h.store.set_meta("method/0/0", b"fiat:annual").unwrap();
+    // Claiming it again as `fiat` would be another method (`StillPending`): the old claim is reused instead.
+    let paid = h.orch.pay_fiat().await.unwrap();
+    assert_eq!((paid.n, paid.k, paid.plan), (0, 0, crate::protocol::Plan::Paid));
+    assert_eq!(h.store.get_meta("method/0/0").unwrap().as_deref(), Some(&b""[..]), "released once included");
+}
+
+#[tokio::test]
 async fn upgrading_reuses_n_with_the_next_k() {
     let h = harness().await;
     free_bono(&h).await;
-    let paid = h.orch.pay_fiat(BonoPeriod::Monthly).await.unwrap();
+    let paid = h.orch.pay_fiat().await.unwrap();
     assert_eq!((paid.n, paid.k, paid.plan), (0, 1, crate::protocol::Plan::Paid));
-    let another = h.orch.pay_fiat(BonoPeriod::Annual).await.unwrap();
+    let another = h.orch.pay_fiat().await.unwrap();
     assert_eq!((another.n, another.k), (1, 0));
 }
 
@@ -191,7 +202,7 @@ async fn issuer_errors_and_busy() {
     let slept = h.env.slept.lock().unwrap().clone();
     assert!(slept.contains(&Duration::from_secs(5)) && slept.contains(&Duration::from_secs(300)), "capped wait");
     set(&h, |w| w.script_issue.extend((0..6).map(|_| Err(IssuerError::Busy { retry_after_s: 1 }))));
-    assert_eq!(h.orch.pay_fiat(BonoPeriod::Monthly).await, Err(OrchError::ServiceUnavailable));
+    assert_eq!(h.orch.pay_fiat().await, Err(OrchError::ServiceUnavailable));
 }
 
 #[tokio::test]
@@ -203,8 +214,8 @@ async fn pending_issue_is_waited_failed_issue_reported_and_retries_poll_the_stat
     });
     assert!(h.orch.request_free_plan().await.is_ok(), "a failed poll does not cut the wait short");
     set(&h, |w| w.issue_delay = 100);
-    assert_eq!(h.orch.pay_fiat(BonoPeriod::Monthly).await, Err(OrchError::StillPending));
-    // With a saved receipt nothing is requested again (not even with another period): keep waiting for that request.
+    assert_eq!(h.orch.pay_fiat().await, Err(OrchError::StillPending));
+    // With a saved receipt nothing is requested again: keep waiting for that request.
     let id = id_k(h.orch.bono_secret(0).expose(), 1);
     let mut issued = pending_reply(&id);
     issued.state = ports::IssueState::Issued;
@@ -213,7 +224,7 @@ async fn pending_issue_is_waited_failed_issue_reported_and_retries_poll_the_stat
         w.script_issue_status.push_back(Ok(issued));
     });
     let requests = h.calls("issuer.request");
-    assert!(h.orch.pay_fiat(BonoPeriod::Annual).await.is_ok());
+    assert!(h.orch.pay_fiat().await.is_ok());
     assert_eq!(h.calls("issuer.request"), requests);
 }
 
@@ -227,7 +238,7 @@ async fn failed_issue_and_conflict() {
     assert_eq!(h.orch.request_free_plan().await, Err(OrchError::IssueFailed));
     set(&h, |w| w.script_issue.push_back(Err(IssuerError::IdConflict)));
     assert_eq!(
-        h.orch.pay_fiat(BonoPeriod::Monthly).await,
+        h.orch.pay_fiat().await,
         Err(OrchError::StillPending),
         "409: the Issuer holds the leaf"
     );
@@ -310,7 +321,7 @@ async fn one_leaf_one_payment_method() {
     let h = harness().await;
     // Card payment pending (receipt saved): the same leaf cannot be paid shielded.
     set(&h, |w| w.issue_delay = 100);
-    assert_eq!(h.orch.pay_fiat(BonoPeriod::Monthly).await, Err(OrchError::StillPending));
+    assert_eq!(h.orch.pay_fiat().await, Err(OrchError::StillPending));
     assert_eq!(h.orch.pay_shielded(PRICE).await, Err(OrchError::StillPending));
     assert_eq!(h.calls("wallet.buyBono"), 0);
     // The user abandons it: it can then be paid shielded (n = 0 again, with the same id).
@@ -320,7 +331,7 @@ async fn one_leaf_one_payment_method() {
     set(&h, |w| w.script_buy.extend([RpcError::Timeout, RpcError::Timeout, RpcError::Timeout]));
     assert_eq!(h.orch.pay_shielded(PRICE).await, Err(OrchError::StillPending));
     // Shielded purchase in the journal: neither card nor abandoning.
-    assert_eq!(h.orch.pay_fiat(BonoPeriod::Monthly).await, Err(OrchError::StillPending));
+    assert_eq!(h.orch.pay_fiat().await, Err(OrchError::StillPending));
     assert_eq!(h.orch.forget_pending_bono(0, 0).await, Err(OrchError::StillPending));
 }
 
@@ -330,14 +341,14 @@ async fn a_failed_shielded_attempt_can_be_forgotten_35_min_later_without_unlocki
     let no_funds = remote(codes::INSUFFICIENT_FUNDS, serde_json::json!({ "asset": "token" }));
     set(&h, |w| w.script_buy.push_back(no_funds));
     assert_eq!(h.orch.pay_shielded(PRICE).await, Err(OrchError::InsufficientFunds { asset: FundsAsset::Token }));
-    assert_eq!(h.orch.pay_fiat(BonoPeriod::Monthly).await, Err(OrchError::StillPending), "leaf claimed");
+    assert_eq!(h.orch.pay_fiat().await, Err(OrchError::StillPending), "leaf claimed");
     assert_eq!(h.orch.forget_pending_bono(0, 0).await, Err(OrchError::StillPending), "the journal protects it");
     h.env.now.fetch_add(resume::BUY_CLEANUP_S + 1, std::sync::atomic::Ordering::SeqCst);
     // Without `resume` in between: abandoning first closes the expired journal purchases.
     h.orch.forget_pending_bono(0, 0).await.unwrap();
     assert!(h.store.list_journal().unwrap().is_empty());
     assert!(!h.orch.wallet_busy());
-    assert!(h.orch.pay_fiat(BonoPeriod::Monthly).await.is_ok(), "another method can now be used to pay");
+    assert!(h.orch.pay_fiat().await.is_ok(), "another method can now be used to pay");
 }
 
 #[tokio::test]
@@ -1421,7 +1432,7 @@ async fn resume_keeps_looking_at_a_leaf_with_a_receipt_in_its_window() {
     assert_eq!(h.orch.request_free_plan().await, Err(OrchError::RateLimited { retry_after_s: 9 }));
     assert_eq!(h.orch.payment_pending().await, Ok(false));
     set(&h, |w| w.issue_delay = 100);
-    assert_eq!(h.orch.pay_fiat(BonoPeriod::Monthly).await, Err(OrchError::StillPending));
+    assert_eq!(h.orch.pay_fiat().await, Err(OrchError::StillPending));
     assert_eq!(h.orch.payment_pending().await, Ok(true));
     let report = h.orch.resume().await.unwrap();
     assert!(report.failed.is_empty() && report.bonos_error.is_none(), "{report:?}");
@@ -1600,7 +1611,7 @@ async fn a_bono_not_yet_usable_is_reported_not_awaited() {
 #[tokio::test]
 async fn the_same_name_is_never_registered_twice() {
     let h = harness().await;
-    h.orch.pay_fiat(BonoPeriod::Monthly).await.unwrap();
+    h.orch.pay_fiat().await.unwrap();
     set(&h, |w| w.script_submit.push_back(Err(RelayError::NotRelayable)));
     assert_eq!(h.orch.create_mailbox("ana").await, Err(OrchError::RelayerRefused));
     h.orch.create_mailbox("ana").await.unwrap();
@@ -1611,18 +1622,18 @@ async fn the_same_name_is_never_registered_twice() {
 async fn a_lost_card_reply_blocks_a_shielded_payment_of_the_same_leaf() {
     let h = harness().await;
     set(&h, |w| w.script_issue.push_back(Err(IssuerError::Unavailable)));
-    assert_eq!(h.orch.pay_fiat(BonoPeriod::Annual).await, Err(OrchError::ServiceUnavailable));
+    assert_eq!(h.orch.pay_fiat().await, Err(OrchError::ServiceUnavailable));
     assert_eq!(h.orch.pay_shielded(PRICE).await, Err(OrchError::StillPending));
     assert_eq!(h.calls("wallet.open"), 0, "the wallet is not even opened");
-    // Retrying by card repeats that request (annual), even if monthly is asked for.
-    let paid = h.orch.pay_fiat(BonoPeriod::Monthly).await.unwrap();
+    // Retrying by card repeats that request.
+    let paid = h.orch.pay_fiat().await.unwrap();
     assert_eq!(paid.plan, crate::protocol::Plan::Paid);
 }
 
 #[tokio::test]
 async fn bono_operations_do_not_overlap() {
     let h = harness().await;
-    let (a, b) = tokio::join!(h.orch.pay_shielded(PRICE), h.orch.pay_fiat(BonoPeriod::Monthly));
+    let (a, b) = tokio::join!(h.orch.pay_shielded(PRICE), h.orch.pay_fiat());
     assert!(matches!((a, b), (Ok(_), Err(OrchError::Busy)) | (Err(OrchError::Busy), Ok(_))));
 }
 
@@ -1650,7 +1661,7 @@ async fn shutdown_closes_an_idle_wallet() {
 async fn forget_settles_a_leaf_already_in_the_tree() {
     let h = harness().await;
     set(&h, |w| w.issue_delay = 100);
-    assert_eq!(h.orch.pay_fiat(BonoPeriod::Monthly).await, Err(OrchError::StillPending));
+    assert_eq!(h.orch.pay_fiat().await, Err(OrchError::StillPending));
     h.env.now.fetch_add(4000, std::sync::atomic::Ordering::SeqCst);
     let id = id_k(h.orch.bono_secret(0).expose(), 0);
     set(&h, |w| w.issue(&id, crate::protocol::Plan::Paid));
@@ -1775,11 +1786,12 @@ fn the_free_quota_is_used_while_the_paid_leaf_is_not_usable() {
 async fn forget_after_a_lost_issuer_reply_asks_the_issuer_first() {
     let h = harness().await;
     set(&h, |w| w.script_issue.push_back(Err(IssuerError::Unavailable)));
-    assert_eq!(h.orch.pay_fiat(BonoPeriod::Monthly).await, Err(OrchError::ServiceUnavailable));
+    assert_eq!(h.orch.pay_fiat().await, Err(OrchError::ServiceUnavailable));
     // The Issuer did register it (charged): its receipt is valid and within its deadline.
     let id = id_k(h.orch.bono_secret(0).expose(), 0);
     let charged = {
         let w = h.world.lock().unwrap();
+        // A request from before Night Plus dropped the period: its `monthly` receipt is still valid.
         FakeIssuer::reply(&w, &id, crate::protocol::Plan::Paid, "monthly", ports::IssueState::Pending)
     };
     set(&h, |w| w.script_issue_status.push_back(Ok(charged)));
@@ -1791,7 +1803,7 @@ async fn forget_after_a_lost_issuer_reply_asks_the_issuer_first() {
         w.script_issue.push_back(Err(IssuerError::Unavailable));
         w.script_issue_status.push_back(Err(IssuerError::Unavailable));
     });
-    assert_eq!(h2.orch.pay_fiat(BonoPeriod::Monthly).await, Err(OrchError::ServiceUnavailable));
+    assert_eq!(h2.orch.pay_fiat().await, Err(OrchError::ServiceUnavailable));
     assert_eq!(h2.orch.forget_pending_bono(0, 0).await, Err(OrchError::StillPending));
     // The Issuer does not know it (404): it can be abandoned.
     h2.orch.forget_pending_bono(0, 0).await.unwrap();

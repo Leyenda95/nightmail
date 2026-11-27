@@ -30,11 +30,7 @@ test('en screensPlan: the fixed glossary', () => {
   assert.equal(en.plan.buyAnother, 'Buy another voucher');
   // The button is named without quotes.
   assert.equal(en.wallet.addressUnavailable, 'Not available right now. Press Refresh later.');
-  assert.equal(
-    en.wallet.faucetBlocked,
-    'You need NIGHT. The fee is paid with DUST, which is generated from NIGHT. Send NIGHT to the address above and ' +
-      'press Refresh.',
-  );
+  assert.equal(en.wallet.faucetBlocked, 'You need NIGHT. Send it to the address above and press Refresh.');
   assert.equal(en.wallet.faucetDone, "NightMail tokens requested. If they don't show up yet, press Refresh in a few seconds.");
   for (const text of [en.wallet.addressUnavailable, en.wallet.faucetBlocked, en.wallet.faucetDone]) {
     assert.doesNotMatch(text, /[“”"]/, text);
@@ -69,10 +65,11 @@ test('en screensPlan: what it says about payment matches the Spanish', () => {
   assert.equal(en.plan.amount('0'), '0 NightMail tokens');
   assert.equal(en.plan.amount('1'), '1 NightMail token');
   assert.equal(es.plan.amount('1'), '1 NightMail token');
-  assert.equal(en.wallet.tokenName, 'NightMail token (test currency)');
-  assert.equal(es.wallet.tokenName, 'NightMail token (moneda de prueba)');
-  assert.equal(en.wallet.requestToken, 'Request NightMail tokens');
-  assert.equal(es.wallet.requestToken, 'Pedir NightMail tokens de prueba');
+  // Next to the balance only the name, with no "test currency" label (the note below still says it has no value).
+  assert.equal(en.wallet.tokenName, 'NightMail token');
+  assert.equal(es.wallet.tokenName, 'NightMail token');
+  assert.equal(en.wallet.requestToken, 'Request NightMail token');
+  assert.equal(es.wallet.requestToken, 'Pedir NightMail token');
   assert.equal(
     en.wallet.tokenNote,
     "The NightMail token is a test currency with no real value. It's used to pay for the plan on this test network.",
@@ -105,11 +102,7 @@ test('es screensPlan: the usual Spanish', () => {
   assert.equal(es.addresses.seeMail, 'Ver correo');
   assert.equal(es.wallet.addressUnavailable, 'Ahora no está disponible. Pulsa Actualizar más tarde.');
   assert.equal(es.wallet.faucetDone, 'Se han pedido NightMail tokens. Si aún no aparecen, pulsa Actualizar en unos segundos.');
-  assert.equal(
-    es.wallet.faucetBlocked,
-    'Necesitas NIGHT. La comisión se paga con DUST, que se genera a partir del NIGHT. Envía NIGHT a la dirección de ' +
-      'arriba y pulsa Actualizar.',
-  );
+  assert.equal(es.wallet.faucetBlocked, 'Necesitas NIGHT. Envíalo a la dirección de arriba y pulsa Actualizar.');
   assert.equal(es.wallet.tokenNote, 'El NightMail token es una moneda de prueba, sin valor real. Sirve para pagar el plan en esta red de pruebas.');
   assert.equal(es.addresses.createdBold + es.addresses.createdRest, 'Dirección creada. Ya puede recibir correo. Nadie puede relacionarla con tus otras direcciones.');
 });
