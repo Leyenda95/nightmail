@@ -4,7 +4,7 @@
 use super::*;
 use crate::orchestrator::fakes::*;
 use crate::orchestrator::ports::BonoPeriod;
-use crate::protocol::{AddressEntry, AddressKind, PendingNameEntry};
+use crate::protocol::{AddressEntry, AddressKind};
 use crate::store::Address;
 
 fn set(world: &Shared, f: impl FnOnce(&mut World)) {
@@ -17,31 +17,6 @@ fn summary(addresses: Vec<Address>) -> Vec<(String, Option<String>, SlotKind, u3
     out
 }
 
-/// Puts an unrevealed reservation of `name` on chain in slot (0, mailbox, j), with our commitment.
-async fn unrevealed(h: &Harness, j: u32, name: &str) -> SlotKey {
-    let key = SlotKey { n: 0, kind: SlotKind::Mailbox, j };
-    let orch = &h.orch;
-    let nul = orch.slot_nul(key).await.unwrap();
-    let keys = orch.address_keys(key).unwrap();
-    let salt = crate::protocol::SecretHex::from_bytes(&orch.d.keys.mailbox_salt(0, j as u8));
-    let addr_key = orch.hash(HashOp::AddrKey { name: name.into() }).await.unwrap();
-    let commit = orch
-        .hash(HashOp::Commit {
-            addr_key,
-            enc_pk: hex::encode(keys.enc_public),
-            auth_pk: hex::encode(keys.auth_public),
-            salt,
-            slot_nul: nul.clone(),
-        })
-        .await
-        .unwrap();
-    set(&h.world, |w| {
-        w.nullifiers.insert(nul.clone());
-        w.pending.push(PendingNameEntry { slot_nul: nul, reserved_round: w.round.to_string(), commit });
-    });
-    key
-}
-
 async fn nul_of(h: &Harness, kind: SlotKind, j: u32) -> String {
     h.orch.slot_nul(SlotKey { n: 0, kind, j }).await.unwrap()
 }
@@ -49,13 +24,12 @@ async fn nul_of(h: &Harness, kind: SlotKind, j: u32) -> String {
 #[tokio::test]
 async fn a_clean_profile_restores_what_the_orchestrator_created() {
     let a = harness().await;
-    set(&a.world, |w| w.auto_round = true);
+    set(&a.world, |w| w.auto_time = true);
     a.orch.request_free_plan().await.unwrap();
     a.orch.pay_fiat(BonoPeriod::Monthly).await.unwrap();
     a.orch.create_mailbox("Juan").await.unwrap();
     a.orch.create_alias().await.unwrap();
     a.orch.create_alias().await.unwrap();
-    let pending = unrevealed(&a, 1, "pepe").await;
     // A burned slot (nullifier with nothing attached) and an address in our slot with foreign keys.
     let burned = nul_of(&a, SlotKind::Alias, 2).await;
     let foreign = nul_of(&a, SlotKind::Alias, 3).await;
@@ -76,26 +50,18 @@ async fn a_clean_profile_restores_what_the_orchestrator_created() {
     let report = b.orch.recover().await.unwrap();
     assert_eq!(
         report,
-        RecoveryReport { bonos: 1, addresses: 3, burned: 2, conflicts: 0, needs_name: vec![pending.into()] }
+        RecoveryReport { bonos: 1, addresses: 3, burned: 2, conflicts: 0, needs_name: vec![] }
     );
     assert_eq!(summary(b.store.list_addresses().unwrap()), summary(a.store.list_addresses().unwrap()));
     let bono = b.store.get_bono(0, 1).unwrap().unwrap();
     assert_eq!((bono.plan, bono.status), (Plan::Paid, BonoStatus::Included));
     assert_eq!(b.store.get_chain_cursor().unwrap().min_leaf_count, 2);
-    let stored = b.store.get_slot(pending).unwrap().unwrap();
-    assert_eq!((stored.status, stored.pending_name.as_deref()), (SlotStatus::Reserved, None));
 
     // Restoring again is harmless.
     assert_eq!(
         b.orch.recover().await.unwrap(),
-        RecoveryReport { bonos: 1, addresses: 3, burned: 0, conflicts: 0, needs_name: vec![pending.into()] }
+        RecoveryReport { bonos: 1, addresses: 3, burned: 0, conflicts: 0, needs_name: vec![] }
     );
-
-    // The app asks for the name; one that does not match the commitment spends nothing.
-    assert_eq!(b.orch.provide_name(pending.into(), "otro").await, Err(OrchError::WrongName));
-    assert_eq!(b.orch.resume().await.unwrap().needs_name, vec![SlotId::from(pending)]);
-    let mailbox = b.orch.provide_name(pending.into(), "Pepe").await.unwrap();
-    assert_eq!(mailbox.display, "pepe@nightmail.local");
     // Another alias on the paid plan continues at the first free slot.
     let next = b.orch.create_alias().await.unwrap();
     assert_eq!(next.slot.j, 4);
@@ -124,7 +90,7 @@ async fn nothing_on_chain_restores_nothing() {
 #[tokio::test]
 async fn an_unreadable_name_cipher_keeps_the_address_without_a_name() {
     let a = harness().await;
-    set(&a.world, |w| w.auto_round = true);
+    set(&a.world, |w| w.auto_time = true);
     a.orch.request_free_plan().await.unwrap();
     a.orch.create_mailbox("ana").await.unwrap();
     set(&a.world, |w| w.addresses[0].name_cipher = "ab".repeat(104));
@@ -146,7 +112,7 @@ fn slot_keys_follow_the_contract_quota() {
 #[tokio::test]
 async fn a_restored_mailbox_whose_name_does_not_match_asks_for_it() {
     let a = harness().await;
-    set(&a.world, |w| w.auto_round = true);
+    set(&a.world, |w| w.auto_time = true);
     a.orch.request_free_plan().await.unwrap();
     let ana = a.orch.create_mailbox("ana").await.unwrap();
     // `nameCipher` of a different name (correctly encrypted with our key): does not match `addrKey`.
@@ -166,7 +132,7 @@ async fn a_restored_mailbox_whose_name_does_not_match_asks_for_it() {
 #[tokio::test]
 async fn an_abandoned_mailbox_is_neither_counted_nor_asked_for_its_name() {
     let a = harness().await;
-    set(&a.world, |w| w.auto_round = true);
+    set(&a.world, |w| w.auto_time = true);
     a.orch.request_free_plan().await.unwrap();
     a.orch.create_mailbox("ana").await.unwrap();
     set(&a.world, |w| w.addresses[0].name_cipher = "ab".repeat(104));
@@ -212,10 +178,8 @@ async fn a_contradictory_local_slot_is_skipped_and_counted() {
         slot_nul: [9; 32],
         status: SlotStatus::Burned,
         addr_key: None,
-        round: None,
         pending_name: None,
-        reserve_attempts: 0,
-        reveal_attempts: 0,
+        attempts: 0,
         updated_at: 0,
     };
     b.store.insert_slot(&wrong).unwrap();
@@ -229,7 +193,7 @@ async fn a_contradictory_local_slot_is_skipped_and_counted() {
 async fn sent_messages_are_not_restored_and_survive_a_restore_on_the_same_profile() {
     use crate::store::{NewSentMessage, SentFilter, SentState};
     let a = harness().await;
-    set(&a.world, |w| w.auto_round = true);
+    set(&a.world, |w| w.auto_time = true);
     a.orch.request_free_plan().await.unwrap();
     a.orch.create_mailbox("ana").await.unwrap();
     let ana = a.store.list_addresses().unwrap().remove(0);

@@ -6,17 +6,21 @@ import CompactStandardLibrary;
 // A bono (voucher) is one leaf H(ctx, id, plan, validUntil) of `bonos`, with id = H(ctx, s, k): s is
 // the app's secret, k numbers the leaves of one bono. Each address spends a slot (kind, j < slotLimit)
 // whose nullifier H(ctx, s, kind, j, gen) ignores the leaf, so extra leaves or a plan upgrade never
-// exceed the paid quota. Named mailboxes register in two rounds (reserve a commitment, then reveal)
-// against mempool front-running. Commitments, alias keys and reservations are bound to the slot
-// nullifier, so a replayed transaction never blocks the victim. ctx (the contract address, read per
-// circuit because kernel.self() is zero in the constructor) makes nothing valid across deployments.
-// Hash separation: every preimage has a domain except aliasKey's, and all seven lengths differ
-// (64, 96, 100, 101, 102, 128, 192 bytes). A new hash must never have an undomained 96-byte preimage.
+// exceed the paid quota. Named mailboxes register in one transaction (registerMailbox): the name stays
+// a private input and only its hash addressKey(name) becomes public. Accepted risk: someone watching
+// pending transactions can guess a common name from its addressKey and race to register it first; the
+// loser's transaction is rejected whole (guaranteed part only), so it pays no fee and its slot is not
+// spent. Role names (postmaster, abuse, admin…) are reserved on chain in the constructor; the app's
+// list is a superset, checked before proving. Alias keys are bound to the slot nullifier, so a replayed
+// transaction never blocks the victim. ctx (the contract address, read per circuit because
+// kernel.self() is zero in the constructor) makes nothing valid across deployments.
+// Hash separation: every preimage has a domain except aliasKey's, and all six lengths differ
+// (64, 96, 100, 101, 102, 128 bytes). A new hash must never have an undomained 96-byte preimage.
 //
 // Privacy: nobody can link an address to its bono or two addresses of one bono. Public by design:
-// slot nullifiers, address records, name hash, round, commitment, and the coin paid in buyBono.
-// The operator sees issued ids, the server sees traffic, and whoever proves sees s, hence local proving.
-// buyBono always pays with a fresh coin so a previous sender cannot recognise it.
+// slot nullifiers, address records, name hash, and the coin paid in buyBono. The operator sees issued
+// ids, the server sees traffic, and whoever proves sees s, hence local proving. buyBono always pays
+// with a fresh coin so a previous sender cannot recognise it.
 //
 // Error messages are matched by the app and tests; do not reword them.
 //
@@ -37,26 +41,23 @@ export struct AddressRecord {
   slotNul: Bytes<32>;     // nullifier of the slot that created the address (renewal and recovery)
 }
 
-export struct PendingName {
-  reservedRound: Uint<64>;  // r: can be revealed once round > r
-  commit: Bytes<32>;
-}
-
 // --- State (order is final) -------------------------------------------------------------------------
-// Invariants: every pendingNames key and every addresses[*].slotNul is in slotNullifiers. A
-// reservation is only removed when revealed; it never expires, so if someone else took the name the
-// slot stays spent (cancelling and recycling slots through releasedSlots is planned).
-export ledger operatorPk: Bytes<32>;            // operatorKey(operator sk): issueBono, advanceRound,
-                                                // setPrice. Not sealed, so a circuit added later through
-                                                // the maintenance authority can rotate it if it leaks.
+// Invariant: every addresses[*].slotNul is in slotNullifiers (recycling slots through releasedSlots is
+// planned).
+export ledger operatorPk: Bytes<32>;            // operatorKey(operator sk): issueBono, setPrice. Not
+                                                // sealed, so a circuit added later through the
+                                                // maintenance authority can rotate it if it leaks.
 export sealed ledger paymentColor: Bytes<32>;   // shielded payment token (TestToken in the demo)
 export ledger price: Uint<64>;                  // exact price of the paid bono (token units), changed
                                                 // by the operator with setPrice.
 export ledger bonos: HistoricMerkleTree<20, Bytes<32>>;  // bono leaves (2^20); accepts past roots
 export ledger slotNullifiers: Set<Bytes<32>>;            // spent slots
 export ledger addresses: Map<Bytes<32>, AddressRecord>;  // addrKey -> address record
-export ledger pendingNames: Map<Bytes<32>, PendingName>; // slotNul -> unrevealed mailbox reservation
-export ledger round: Counter;                            // current round (advanced by the operator)
+export ledger reservedNames: Set<Bytes<32>>;            // addrKeys of role names nobody can register (fixed
+                                                         // in the constructor; position of the former
+                                                         // two-step reservations, so no path moves)
+export ledger spareCounter2: Counter;                    // spare (held the mailbox round before the
+                                                         // time-based reveal; kept so no path moves)
 // Reserved for expiry and slot recycling, empty for now:
 export ledger priceMonthly: Uint<64>;                     // per-period prices (not sealed)
 export ledger priceAnnual: Uint<64>;
@@ -87,6 +88,23 @@ constructor(opPk: Bytes<32>, color: Bytes<32>, bonoPrice: Uint<64>) {
   operatorPk = disclose(opPk);
   paymentColor = disclose(color);
   price = disclose(bonoPrice);
+  // Reserved role names (RFC 2142, certificate authority validation, mail system and our own): the app
+  // rejects them earlier with a longer list; these hold even for a client that skips that check.
+  reservedNames.insert(addressKey(pad(64, "postmaster")));
+  reservedNames.insert(addressKey(pad(64, "abuse")));
+  reservedNames.insert(addressKey(pad(64, "admin")));
+  reservedNames.insert(addressKey(pad(64, "administrator")));
+  reservedNames.insert(addressKey(pad(64, "root")));
+  reservedNames.insert(addressKey(pad(64, "hostmaster")));
+  reservedNames.insert(addressKey(pad(64, "webmaster")));
+  reservedNames.insert(addressKey(pad(64, "security")));
+  reservedNames.insert(addressKey(pad(64, "support")));
+  reservedNames.insert(addressKey(pad(64, "soporte")));
+  reservedNames.insert(addressKey(pad(64, "info")));
+  reservedNames.insert(addressKey(pad(64, "noreply")));
+  reservedNames.insert(addressKey(pad(64, "no-reply")));
+  reservedNames.insert(addressKey(pad(64, "mailer-daemon")));
+  reservedNames.insert(addressKey(pad(64, "nightmail")));
 }
 
 // --- Witnesses ---------------------------------------------------------------------------------------
@@ -159,13 +177,6 @@ export pure circuit aliasKey(encPk: Bytes<32>, authPk: Bytes<32>, slotNul: Bytes
   return persistentHash<Vector<3, Bytes<32>>>([encPk, authPk, slotNul]);
 }
 
-// Mailbox commitment. Including the slot nullifier means only the reserver can reveal it. The salt
-// (32 random seed-derived bytes) keeps it unguessable even when the name is guessable.
-export pure circuit nameCommit(addrKey: Bytes<32>, encPk: Bytes<32>, authPk: Bytes<32>, salt: Bytes<32>,
-                               slotNul: Bytes<32>): Bytes<32> {
-  return persistentHash<Vector<6, Bytes<32>>>([pad(32, "nightmail:name-commit:"), addrKey, encPk, authPk, salt, slotNul]);
-}
-
 // --- Internal --------------------------------------------------------------------------------------
 circuit ctx(): Bytes<32> {
   return ctxOf(kernel.self());
@@ -221,37 +232,20 @@ export circuit buyBono(coin: ShieldedCoinInfo, id: Bytes<32>): [] {
   insertBono(id, Plan.paid);
 }
 
-// --- Two-step mailbox ------------------------------------------------------------------------------
-// Bono holders. Spends a mailbox slot and stores the reservation keyed by its (always new) nullifier,
-// so a commitment copied from the mempool cannot block the victim. r is the app's current round + 1,
-// accepted while round <= r so an advanceRound before inclusion does not invalidate it. r = max
-// Uint<64> overflows and fails on purpose (it could never be revealed).
-export circuit reserveMailbox(commit: Bytes<32>, r: Uint<64>): [] {
-  const rr = disclose(r);
-  assert(round.lessThan((rr + 1) as Uint<64>), "Stale round");
+// --- Mailbox ---------------------------------------------------------------------------------------
+// Bono holders. Spends a mailbox slot and registers addressKey(name) in one transaction. name:
+// normalized 64-byte name (not published, only its hash). Requires a valid unused mailbox slot and a
+// free, non-reserved name; a taken name rejects the whole transaction (no fee, the slot stays unspent).
+export circuit registerMailbox(name: Bytes<64>, encPk: Bytes<32>, authPk: Bytes<32>,
+                               nameCipher: Bytes<104>): [] {
   const nul = checkSlot(Kind.mailbox);
-  slotNullifiers.insert(nul);
-  pendingNames.insert(nul, PendingName { reservedRound: rr, commit: disclose(commit) });
-}
-
-// Anyone with the commitment data (in practice, the reserver). name: normalized 64-byte name (not
-// published, only its hash); salt: the commitment salt; slotNul: that of the reserved slot.
-// Requires: the reservation exists, the commitment matches, it is from an earlier round (round > r)
-// and the name is free. Effects: addresses[addressKey(name)] = record (with slotNul); the
-// reservation is removed.
-export circuit revealMailbox(name: Bytes<64>, encPk: Bytes<32>, authPk: Bytes<32>, salt: Bytes<32>,
-                             slotNul: Bytes<32>, nameCipher: Bytes<104>): [] {
-  const nul = disclose(slotNul);
   const key = disclose(addressKey(name));
-  assert(pendingNames.member(nul), "Not reserved");
-  const p = pendingNames.lookup(nul);
-  assert(disclose(nameCommit(key, encPk, authPk, salt, nul) == p.commit), "Wrong reveal");
-  assert(!round.lessThan((p.reservedRound + 1) as Uint<64>), "Too early");
+  assert(!reservedNames.member(key), "Name reserved");
   assert(!addresses.member(key), "Address taken");
+  slotNullifiers.insert(nul);
   addresses.insert(key, AddressRecord {
     encPk: disclose(encPk), authPk: disclose(authPk), kind: Kind.mailbox,
     nameCipher: disclose(nameCipher), slotNul: nul });
-  pendingNames.remove(nul);
 }
 
 // --- Aliases ---------------------------------------------------------------------------------------
@@ -285,11 +279,4 @@ export circuit setPrice(newPrice: Uint<64>, oldPriceUntil: Uint<64>): [] {
   assert(blockTimeGte(until - oldPriceGraceMax()), "Grace too long"); // until <= block + 20 min
   oldPrices.insert(price, until);
   price = p;
-}
-
-// --- Rounds ----------------------------------------------------------------------------------------
-// Operator only (every ~30 s). Advances the round so reservations from earlier rounds can be revealed.
-export circuit advanceRound(): [] {
-  assertOperator();
-  round.increment(1);
 }

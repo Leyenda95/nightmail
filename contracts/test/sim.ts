@@ -2,7 +2,7 @@
 // Each test deploys a fresh contract; witnesses read the call's private state.
 import { randomBytes } from 'node:crypto';
 import {
-  CostModel, createCircuitContext, createConstructorContext, QueryContext, sampleContractAddress,
+  ContractState, CostModel, createCircuitContext, createConstructorContext, QueryContext, sampleContractAddress,
 } from '@midnight-ntwrk/compact-runtime';
 import { Contract, Kind, ledger, Plan, pureCircuits as pc } from '../managed/registry-sim/contract/index.js';
 
@@ -132,25 +132,19 @@ export async function deploy(opts: { color?: Uint8Array; price?: bigint; opPk?: 
       const a = ops.aliasFor(b, j, keys);
       return ops.createAlias(a).then(() => a);
     },
-    /** A mailbox that will spend slot (b, j): data and commitment, computed as the app does. */
+    /** A mailbox that will spend slot (b, j): its data, computed as the app does. */
     mailbox(name: string, b: Bono, j: bigint) {
       const m = {
-        name: nameBytes(name), encPk: rand(), authPk: rand(), salt: rand(),
+        name: nameBytes(name), encPk: rand(), authPk: rand(),
         nameCipher: rand(NAME_CIPHER_BYTES), bono: b, j, slotNul: slotNul(b, Kind.mailbox, j),
       };
-      return { ...m, addrKey: pc.addressKey(m.name), commit: ops.commitOf(m) };
+      return { ...m, addrKey: pc.addressKey(m.name) };
     },
-    commitOf(m: { name: Uint8Array; encPk: Uint8Array; authPk: Uint8Array; salt: Uint8Array; slotNul: Uint8Array }) {
-      return pc.nameCommit(pc.addressKey(m.name), m.encPk, m.authPk, m.salt, m.slotNul);
-    },
-    reserve(m: { bono: Bono; j: bigint; commit: Uint8Array }, r = view().round + 1n) {
-      return run('reserveMailbox', { bono: m.bono, j: m.j }, m.commit, r);
-    },
-    reveal(m: { name: Uint8Array; encPk: Uint8Array; authPk: Uint8Array; salt: Uint8Array; slotNul: Uint8Array; nameCipher: Uint8Array }) {
-      return run('revealMailbox', {}, m.name, m.encPk, m.authPk, m.salt, m.slotNul, m.nameCipher);
-    },
-    advanceRound(sk = opSk) {
-      return run('advanceRound', { opSk: sk });
+    /** The current state as a ContractState (data only, as the indexer's state bytes decode). */
+    contractState() {
+      const cs = new ContractState();
+      cs.data = state;
+      return cs;
     },
     /** Raw state shape: number of fields in each subarray the compiler splits them into. */
     stateShape: () => state.state.asArray()!.map((part: any) => part.asArray()!.length),
@@ -167,12 +161,10 @@ export async function deploy(opts: { color?: Uint8Array; price?: bigint; opPk?: 
     pay(value: bigint) {
       return ops.buy({ nonce: rand(), color: paymentColor, value });
     },
-    /** Reserves and reveals (two rounds later). */
-    async register(m: Parameters<typeof ops.reserve>[0] & Parameters<typeof ops.reveal>[0]) {
-      await ops.reserve(m);
-      await ops.advanceRound();
-      await ops.advanceRound();
-      await ops.reveal(m);
+    /** Registers a mailbox in one transaction (registerMailbox). */
+    register(m: { bono: Bono; j: bigint; name: Uint8Array; encPk: Uint8Array; authPk: Uint8Array; nameCipher: Uint8Array },
+      extra: Partial<PrivateState> = {}) {
+      return run('registerMailbox', { bono: m.bono, j: m.j, ...extra }, m.name, m.encPk, m.authPk, m.nameCipher);
     },
   };
   return ops;

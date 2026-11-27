@@ -1,7 +1,7 @@
-//! Address flows: name check, two-step mailbox and alias.
+//! Address flows: name check, mailbox and alias, each in one transaction.
 //!
-//! Each step moves the slot to its state before calling out (`reserving` → `reserved` → `revealing` → `used`), so
-//! [`Orchestrator::drive`] resumes any half-done slot (also after an app restart). Each step checks the chain first
+//! A slot is recorded as `reserving` before anything is proved and becomes `used` once its address lands, so
+//! [`Orchestrator::drive`] resumes any half-done slot (also after an app restart). Each turn checks the chain first
 //! (`settle.rs`), since an earlier proof may have landed; only if nothing is there is the proof cap checked (the slot
 //! is paused) and a new proof made. One address operation at a time (`ops`; `Queued` if it has to wait). A bono that
 //! is not usable yet is not waited for while holding the lock: `BonoNotReady { usable_at }`.
@@ -12,17 +12,13 @@ use ts_rs::TS;
 
 use super::ports::{Chain, Issuer, Relayer};
 use super::prove::Relayed;
-use super::settle::Facts;
 use super::types::{AddressView, OrchEvent, SlotId};
 use super::{OrchError, Orchestrator, Result, bytes32, slot_limit, to_protocol_kind, to_protocol_plan};
 use crate::crypto::{open_name, seal_name};
 use crate::keys::{AddressKeys, KeyManager};
 use crate::mail::sync::SyncTarget;
-use crate::protocol::{
-    CallProblem, CreateAliasArgs, HashOp, NameProblem, ProveCall, ReserveMailboxArgs, RevealMailboxArgs, SecretHex,
-    SlotWitnesses,
-};
-use crate::store::{Address, AttemptKind, BonoLeaf, BonoStatus, Plan, Slot, SlotKey, SlotKind, SlotPatch, SlotStatus};
+use crate::protocol::{CallProblem, CreateAliasArgs, HashOp, NameProblem, ProveCall, RegisterMailboxArgs, SlotWitnesses};
+use crate::store::{Address, BonoLeaf, BonoStatus, Plan, Slot, SlotKey, SlotKind, SlotStatus};
 
 /// Result of `check_name`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -133,35 +129,21 @@ fn suffix(alias_text: &str) -> &str {
     alias_text.rsplit('.').next().unwrap_or(alias_text)
 }
 
-fn attempts_used(slot: &Slot, attempt: AttemptKind) -> u32 {
-    match attempt {
-        AttemptKind::Reserve => slot.reserve_attempts,
-        AttemptKind::Reveal => slot.reveal_attempts,
-    }
-}
-
-/// Mailbox keys and values for a slot.
-pub(crate) struct MailboxCtx {
-    pub keys: AddressKeys,
-    pub salt: SecretHex,
-    pub slot_nul: String,
-    pub addr_key: String,
-}
-
 /// Maximum loop turns for one slot in one call; then `StillPending` (picked up by `resume`).
 const MAX_STEPS: u32 = 32;
-// A mailbox can use up both the reserve and the reveal cap in a single call (one turn per proof), so `MAX_STEPS`
-// must not cut in before the cap.
-const _: () = assert!(MAX_STEPS > 2 * super::MAX_PROOFS);
-/// States of an unfinished slot.
-const OPEN_STATES: [SlotStatus; 3] = [SlotStatus::Reserving, SlotStatus::Reserved, SlotStatus::Revealing];
+// A slot can use up its proof cap in a single call (one turn per proof), so `MAX_STEPS` must not cut in before it.
+const _: () = assert!(MAX_STEPS > super::MAX_PROOFS);
 
 impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
     /// Is the name valid and free in the contract state?
+    /// One of our own addresses counts too: right after it lands the indexer (which follows finalized blocks) may not
+    /// show it yet.
     pub async fn check_name(&self, name: &str) -> Result<NameCheck> {
         let (normalized, addr_key) = self.normalize(name).await?;
         let view = self.chain_view().await?;
-        Ok(NameCheck { available: !view.has_addr_key(&addr_key), normalized })
+        let wanted = normalized.clone();
+        let ours = self.db(move |s| s.list_addresses()).await?.iter().any(|a| a.name.as_deref() == Some(&wanted));
+        Ok(NameCheck { available: !view.has_addr_key(&addr_key) && !ours, normalized })
     }
 
     /// Normalised name and its `addrKey` (`NAME_REJECTED` → `NameRejected`).
@@ -177,9 +159,9 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
         Ok((normalized, addr_key))
     }
 
-    /// Mailbox with a chosen name: check → reserve (r = round + 1) → wait for round > r → reveal. The name is checked
-    /// again right before proving (after the random delay). A half-done mailbox with that name is resumed. Syncs again
-    /// on its own first (`sync_for_user_address_op`).
+    /// Mailbox with a chosen name in one transaction (`registerMailbox`). The name is checked again right before
+    /// proving. A half-done mailbox with that name is resumed. Syncs again on its own first
+    /// (`sync_for_user_address_op`).
     pub async fn create_mailbox(&self, name: &str) -> Result<AddressView> {
         let check = self.check_name(name).await?;
         if !check.available {
@@ -187,7 +169,6 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
         }
         let _guard = self.address_lock().await;
         self.sync_for_user_address_op().await?;
-        self.pace().await;
         let key = self.mailbox_slot(check.normalized).await?;
         self.run_slot(key).await
     }
@@ -197,7 +178,6 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
     pub async fn create_alias(&self) -> Result<AddressView> {
         let _guard = self.address_lock().await;
         self.sync_for_user_address_op().await?;
-        self.pace().await;
         let pending = self.db(|s| s.slots_by_status(SlotStatus::Reserving)).await?;
         let key = match pending.into_iter().find(|s| s.key.kind == SlotKind::Alias) {
             Some(slot) => slot.key,
@@ -206,21 +186,17 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
         self.run_slot(key).await
     }
 
-    /// A half-done mailbox (`reserving`, `reserved` or `revealing`) with that name is resumed (never two reservations
-    /// of the same name); a `reserving` one with another name and no attempts is released.
+    /// A half-done mailbox with that name is resumed (never two registrations of the same name); one with another
+    /// name and no attempts is released.
     async fn mailbox_slot(&self, name: String) -> Result<SlotKey> {
-        for status in OPEN_STATES {
-            for slot in self.db(move |s| s.slots_by_status(status)).await? {
-                if slot.key.kind != SlotKind::Mailbox {
-                    continue;
-                }
-                if slot.pending_name.as_deref() == Some(name.as_str()) {
-                    return Ok(slot.key);
-                }
-                if status == SlotStatus::Reserving {
-                    self.release_untouched(slot.key).await;
-                }
+        for slot in self.db(|s| s.slots_by_status(SlotStatus::Reserving)).await? {
+            if slot.key.kind != SlotKind::Mailbox {
+                continue;
             }
+            if slot.pending_name.as_deref() == Some(name.as_str()) {
+                return Ok(slot.key);
+            }
+            self.release_untouched(slot.key).await;
         }
         self.start_slot(SlotKind::Mailbox, Some(name)).await
     }
@@ -260,8 +236,7 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
             let done = match (slot.status, key.kind) {
                 (SlotStatus::Used, _) => return self.used_address(&slot).await,
                 (SlotStatus::Burned, _) => return Err(OrchError::SlotBurned),
-                (SlotStatus::Reserving, SlotKind::Mailbox) => self.reserve(&slot).await.map(|()| None)?,
-                (_, SlotKind::Mailbox) => self.reveal(&slot).await?,
+                (_, SlotKind::Mailbox) => self.register_mailbox(&slot).await?,
                 (_, SlotKind::Alias) => self.spend_alias(&slot).await?,
             };
             if let Some(address) = done {
@@ -271,8 +246,8 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
         Err(OrchError::StillPending)
     }
 
-    /// A restored reservation without a name, or a mailbox without a readable name: the user types it, and it is
-    /// checked against the chain (commitment or `addrKey`) before anything is spent.
+    /// A mailbox without a readable name: the user types it, and it is checked against the chain (`addrKey`) before it
+    /// is accepted.
     pub async fn provide_name(&self, slot: SlotId, name: &str) -> Result<AddressView> {
         let _guard = self.address_lock().await;
         self.sync_for_user_address_op().await?;
@@ -283,25 +258,10 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
             (SlotKind::Mailbox, SlotStatus::Used, _) => self.name_used(&slot, &normalized, &addr_key).await,
             (_, SlotStatus::Burned, _) => Err(OrchError::SlotBurned),
             (SlotKind::Mailbox, _, Some(known)) if known == normalized => self.drive(key).await,
-            (SlotKind::Mailbox, SlotStatus::Reserved, None) => self.name_reserved(&slot, normalized).await,
             (SlotKind::Mailbox, _, _) => Err(OrchError::WrongName),
             (SlotKind::Alias, _, _) => Err(OrchError::Internal),
         };
         address.map(|a| AddressView::from(&a))
-    }
-
-    async fn name_reserved(&self, slot: &Slot, normalized: String) -> Result<Address> {
-        let ctx = self.mailbox_ctx(slot, &normalized).await?;
-        let commit = self.commit(&ctx).await?;
-        let view = self.chain_view().await?;
-        let pending = view.pending_by_nul(&ctx.slot_nul).ok_or(OrchError::StaleState)?;
-        if pending.commit != commit {
-            return Err(OrchError::WrongName);
-        }
-        let (key, now) = (slot.key, self.now());
-        let patch = SlotPatch { pending_name: Some(normalized), ..SlotPatch::default() };
-        self.db(move |s| s.transition_slot(key, SlotStatus::Reserved, &patch, now)).await?;
-        self.drive(key).await
     }
 
     /// Mailbox already registered: the name must yield its `addrKey`; if it already had a name, only that one is valid.
@@ -346,10 +306,8 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
             slot_nul,
             status: SlotStatus::Reserving,
             addr_key: None,
-            round: None,
             pending_name: name,
-            reserve_attempts: 0,
-            reveal_attempts: 0,
+            attempts: 0,
             updated_at: self.now(),
         };
         self.db(move |s| s.insert_slot(&slot)).await?;
@@ -416,8 +374,8 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
     }
 
     /// The slot's proof cap (checked after looking at the chain): when exhausted the slot stays paused.
-    fn check_cap(&self, slot: &Slot, attempt: AttemptKind) -> Result<()> {
-        if attempts_used(slot, attempt) >= self.d.config.retry.max_proofs {
+    fn check_cap(&self, slot: &Slot) -> Result<()> {
+        if slot.attempts >= self.d.config.retry.max_proofs {
             Err(OrchError::AttemptsExhausted)
         } else {
             Ok(())
@@ -426,54 +384,55 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
 
     // --- Mailbox ---------------------------------------------------------------------------------------------
 
-    pub(crate) async fn mailbox_ctx(&self, slot: &Slot, name: &str) -> Result<MailboxCtx> {
-        let j = u8::try_from(slot.key.j).map_err(|_| OrchError::Internal)?;
-        Ok(MailboxCtx {
-            keys: self.address_keys(slot.key)?,
-            salt: SecretHex::from_bytes(&self.d.keys.mailbox_salt(slot.key.n, j)),
-            slot_nul: hex::encode(slot.slot_nul),
-            addr_key: self.hash(HashOp::AddrKey { name: name.into() }).await?,
-        })
-    }
-
-    pub(crate) async fn commit(&self, ctx: &MailboxCtx) -> Result<String> {
-        self.hash(HashOp::Commit {
-            addr_key: ctx.addr_key.clone(),
-            enc_pk: hex::encode(ctx.keys.enc_public),
-            auth_pk: hex::encode(ctx.keys.auth_public),
-            salt: ctx.salt.clone(),
-            slot_nul: ctx.slot_nul.clone(),
-        })
-        .await
-    }
-
-    /// `reserveMailbox(commit, r)` with r = round + 1 (agreed with the RoundTicker), using the round from the same
-    /// state in which the name was confirmed free.
-    async fn reserve(&self, slot: &Slot) -> Result<()> {
+    /// `registerMailbox`: `Some(address)` if it landed; `None` if another turn is needed. The name is checked against
+    /// the state read just before proving. If it already belongs to someone else (seen in the state, or the contract
+    /// rejects it locally), nothing of this slot was spent and no proof of it can land, so the slot is freed
+    /// ([`Self::name_taken`]). If another registration takes the name between the proof and its block, the node
+    /// rejects the whole transaction (no fee, slot not spent) and the next turn sees the name taken.
+    async fn register_mailbox(&self, slot: &Slot) -> Result<Option<Address>> {
         let name = slot.pending_name.clone().ok_or(OrchError::NeedsName)?;
-        let ctx = self.mailbox_ctx(slot, &name).await?;
-        let facts = self.facts(slot, Some(&ctx.addr_key)).await?;
+        let addr_key = self.hash(HashOp::AddrKey { name: name.clone() }).await?;
+        if slot.attempts > 0 {
+            self.catch_up_unless_refused(slot.key).await?;
+        }
+        let facts = self.facts(slot, Some(&addr_key)).await?;
         if self.settled(slot, &facts).await? {
-            return Ok(());
+            return Ok(None);
+        }
+        // A spent nullifier with no address of ours contradicts the contract: never free such a slot.
+        if facts.spent {
+            return Err(OrchError::StaleState);
         }
         if facts.name_taken {
-            self.release_untouched(slot.key).await;
-            return Err(OrchError::NameTaken);
+            return self.name_taken(slot).await;
         }
-        self.check_cap(slot, AttemptKind::Reserve)?;
-        let round = facts.round + 1;
-        let args = ReserveMailboxArgs { commit: self.commit(&ctx).await?, round: round.to_string() };
-        let call = ProveCall::ReserveMailbox { args, witnesses: self.witnesses(slot.key).await? };
-        match self.prove_and_relay(&call, slot.key, AttemptKind::Reserve).await? {
-            Relayed::Included => {
-                let (key, now) = (slot.key, self.now());
-                let patch = SlotPatch { round: Some(round), ..SlotPatch::default() };
-                self.db(move |s| s.transition_slot(key, SlotStatus::Reserved, &patch, now)).await
+        self.check_cap(slot)?;
+        let keys = self.address_keys(slot.key)?;
+        let args = RegisterMailboxArgs {
+            name: name.clone(),
+            enc_pk: hex::encode(keys.enc_public),
+            auth_pk: hex::encode(keys.auth_public),
+            name_cipher: self.sealed_name(&slot.slot_nul, &name)?,
+        };
+        let call = ProveCall::RegisterMailbox { args, witnesses: self.witnesses(slot.key).await? };
+        match self.prove_and_relay(&call, slot.key).await? {
+            Relayed::Included => self.finish(slot, bytes32(&addr_key)?, Some(name)).await.map(Some),
+            Relayed::Retry => Ok(None),
+            Relayed::Rejected(CallProblem::SlotAlreadyUsed) => {
+                self.settle_used(slot, Some(&addr_key)).await.map(|()| None)
             }
-            Relayed::Rejected(CallProblem::StaleRound) | Relayed::Retry => Ok(()),
-            Relayed::Rejected(CallProblem::SlotAlreadyUsed) => self.settle_used(slot, Some(&ctx.addr_key)).await,
+            Relayed::Rejected(CallProblem::AddressTaken) => self.name_taken(slot).await,
             Relayed::Rejected(reason) => Err(OrchError::CallRejected { reason }),
         }
+    }
+
+    /// The name belongs to another address: frees the slot (even with attempts: none of its proofs can land, they
+    /// would all fail as taken) so it can register another name, and reports `NameTaken`.
+    async fn name_taken<T>(&self, slot: &Slot) -> Result<T> {
+        let key = slot.key;
+        self.db(move |s| s.free_name_taken_slot(key)).await?;
+        self.stuck.lock().unwrap_or_else(|e| e.into_inner()).retain(|(k, _)| *k != key);
+        Err(OrchError::NameTaken)
     }
 
     /// `nameCipher` of the name, round-trip checked before sending.
@@ -484,69 +443,6 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
             Ok(back) if back == name => Ok(hex::encode(sealed)),
             _ => Err(OrchError::Internal),
         }
-    }
-
-    /// `revealMailbox`: `Some(address)` if it landed; `None` if another turn is needed.
-    async fn reveal(&self, slot: &Slot) -> Result<Option<Address>> {
-        let name = slot.pending_name.clone().ok_or(OrchError::NeedsName)?;
-        self.wait_round_above(slot.round.ok_or(OrchError::Internal)?).await?;
-        let ctx = self.mailbox_ctx(slot, &name).await?;
-        let facts = self.facts(slot, Some(&ctx.addr_key)).await?;
-        if !self.reveal_still_needed(slot, &facts, &ctx).await? {
-            return Ok(None);
-        }
-        self.check_cap(slot, AttemptKind::Reveal)?;
-        let (key, now) = (slot.key, self.now());
-        self.db(move |s| s.transition_slot(key, SlotStatus::Revealing, &SlotPatch::default(), now)).await?;
-        let args = RevealMailboxArgs {
-            name: name.clone(),
-            enc_pk: hex::encode(ctx.keys.enc_public),
-            auth_pk: hex::encode(ctx.keys.auth_public),
-            salt: ctx.salt.clone(),
-            slot_nul: ctx.slot_nul.clone(),
-            name_cipher: self.sealed_name(&slot.slot_nul, &name)?,
-        };
-        match self.prove_and_relay(&ProveCall::RevealMailbox { args }, key, AttemptKind::Reveal).await {
-            Ok(Relayed::Included) => self.finish(slot, bytes32(&ctx.addr_key)?, Some(name)).await.map(Some),
-            Ok(Relayed::Rejected(CallProblem::TooEarly)) | Ok(Relayed::Retry) => {
-                self.sleep(self.d.config.pacing.poll).await;
-                Ok(None)
-            }
-            // The next turn checks the chain: our address, someone else's name, or a vanished reservation.
-            Ok(Relayed::Rejected(CallProblem::NotReserved | CallProblem::AddressTaken)) => Ok(None),
-            Ok(Relayed::Rejected(reason)) => self.back_to_reserved(key, OrchError::CallRejected { reason }).await,
-            Err(e) => self.back_to_reserved(key, e).await,
-        }
-    }
-
-    /// Before revealing: our address → adopted; someone else's name confirmed on chain → slot burned; no reservation →
-    /// the indexer contradicts the store (`StaleState`, nothing burned); a reservation with another commitment → the
-    /// stored name is not the reserved one: drop it and ask (`NeedsName`).
-    async fn reveal_still_needed(&self, slot: &Slot, facts: &Facts, ctx: &MailboxCtx) -> Result<bool> {
-        if let Some(entry) = &facts.address {
-            self.adopt(slot, entry).await?;
-            return Ok(false);
-        }
-        if facts.name_taken {
-            self.reconcile(slot.key, SlotStatus::Burned, SlotPatch::default()).await?;
-            return Ok(false);
-        }
-        let Some(pending) = &facts.pending else {
-            return self.back_to_reserved(slot.key, OrchError::StaleState).await;
-        };
-        if pending.commit != self.commit(ctx).await? {
-            let (key, round, now) =
-                (slot.key, crate::orchestrator::chain::parse_round(&pending.reserved_round)?, self.now());
-            self.db(move |s| s.reconcile_reserved(key, round, false, now)).await?;
-            return Err(OrchError::NeedsName);
-        }
-        Ok(true)
-    }
-
-    async fn back_to_reserved<T>(&self, key: SlotKey, error: OrchError) -> Result<T> {
-        let now = self.now();
-        let _ = self.db(move |s| s.transition_slot(key, SlotStatus::Reserved, &SlotPatch::default(), now)).await;
-        Err(error)
     }
 
     /// Closes the slot with its address (atomic in the store).
@@ -591,6 +487,9 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
     // --- Alias ---------------------------------------------------------------------------------------------
 
     async fn spend_alias(&self, slot: &Slot) -> Result<Option<Address>> {
+        if slot.attempts > 0 {
+            self.catch_up_unless_refused(slot.key).await?;
+        }
         let facts = self.facts(slot, None).await?;
         if self.settled(slot, &facts).await? {
             return Ok(None);
@@ -598,7 +497,7 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
         if facts.spent {
             return Err(OrchError::StaleState);
         }
-        self.check_cap(slot, AttemptKind::Reserve)?;
+        self.check_cap(slot)?;
         let keys = self.address_keys(slot.key)?;
         let (enc_pk, auth_pk) = (hex::encode(keys.enc_public), hex::encode(keys.auth_public));
         let op = HashOp::AliasAddrKey {
@@ -610,7 +509,7 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
         self.check_suffix_free(&addr_key).await?;
         let witnesses = self.witnesses(slot.key).await?;
         let call = ProveCall::CreateAlias { args: CreateAliasArgs { enc_pk, auth_pk }, witnesses };
-        match self.prove_and_relay(&call, slot.key, AttemptKind::Reserve).await? {
+        match self.prove_and_relay(&call, slot.key).await? {
             Relayed::Included => self.finish(slot, bytes32(&addr_key)?, None).await.map(Some),
             Relayed::Retry => Ok(None),
             Relayed::Rejected(CallProblem::SlotAlreadyUsed) => self.settle_used(slot, None).await.map(|()| None),

@@ -304,7 +304,7 @@ A bono is a plan voucher (free or paid) that holds a set of address slots. `bono
 | `bono/<n>` | `s` of bono `n` |
 | `addr/<n>/<kind>/<j>/enc` | X25519 secret key of the address in slot (n, kind, j); its public key is `encPk` |
 | `addr/<n>/<kind>/<j>/auth` | Ed25519 seed (RFC 8032) of that address; its public key is `authPk` |
-| `salt/<n>/mailbox/<j>` | `salt` of the `reserveMailbox` commitment |
+| `salt/<n>/mailbox/<j>` | `salt` of the former `reserveMailbox` commitment (unused since the one-step `registerMailbox`, 2026-11-27) |
 | `names` | XChaCha20-Poly1305 key of `nameCipher` (3.4) |
 | `wallet` | seed of the embedded wallet (`wallet.open.seed`) |
 | `wallet-state` | `stateKey` of the encrypted wallet state (`wallet.open.stateKey`) |

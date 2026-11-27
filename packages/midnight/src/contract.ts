@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 export {
   Contract, Kind, Plan, ledger, pureCircuits,
-  type AddressRecord as ContractAddressRecord, type Ledger, type PendingName as ContractPendingName, type Witnesses,
+  type AddressRecord as ContractAddressRecord, type Ledger, type Witnesses,
 } from '@nightmail/contracts/managed/registry/contract/index.js';
 
 /**

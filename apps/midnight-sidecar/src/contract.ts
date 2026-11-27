@@ -2,7 +2,7 @@
 // circuits, mailbox names, state reading) lives in @nightmail/midnight, shared with the server; this file only
 // validates parameters, maps to the protocol and talks to the indexer through net.ts.
 import {
-  addrKey, aliasAddrKey, aliasAddress, bonoPositions, type CallStates, commit, ctx, fetchCallStates, fetchRegistry, fromHex,
+  addrKey, aliasAddrKey, aliasAddress, bonoPositions, type CallStates, ctx, fetchCallStates, fetchRegistry, fromHex,
   type GraphQL, idK, IndexerError, IndexerUnavailable, InvalidInput, Kind, leaf, mailboxName, NameRejected,
   NotRegistryState, page, Plan, readJsonCapped, type RegistryAt, slotNul, toHex, uint,
 } from '@nightmail/midnight';
@@ -51,8 +51,6 @@ const HASH_OPS: Record<string, (o: Params, c: Uint8Array) => string> = {
   normalizeName: (o) => mailboxName(text(o.name, 'name')),
   addrKey: (o) => toHex(addrKey(text(o.name, 'name'))),
   aliasAddrKey: (o) => toHex(aliasAddrKey(b32(o.encPk, 'encPk'), b32(o.authPk, 'authPk'), b32(o.slotNul, 'slotNul'))),
-  commit: (o) => toHex(commit(b32(o.addrKey, 'addrKey'), b32(o.encPk, 'encPk'), b32(o.authPk, 'authPk'),
-    b32(o.salt, 'salt'), b32(o.slotNul, 'slotNul'))),
   aliasAddress: (o) => aliasAddress(b32(o.addrKey, 'addrKey')),
 };
 
@@ -87,8 +85,8 @@ function hashes(params: unknown): ContractHashesResult {
 
 // --- contract.snapshot ----------------------------------------------------------------------------
 
-type Offsets = Pick<SnapshotCursor, 'slotNullifiers' | 'addresses' | 'pendingNames'>;
-const FIRST_PAGE: Offsets = { slotNullifiers: 0, addresses: 0, pendingNames: 0 };
+type Offsets = Pick<SnapshotCursor, 'slotNullifiers' | 'addresses'>;
+const FIRST_PAGE: Offsets = { slotNullifiers: 0, addresses: 0 };
 
 const isCount = (v: unknown) => Number.isSafeInteger(v) && (v as number) >= 0;
 const isOffset = (v: unknown) => v === null || isCount(v);
@@ -97,7 +95,7 @@ const isOffset = (v: unknown) => v === null || isCount(v);
 function parseCursor(v: unknown): { height: number | undefined; at: Offsets } {
   if (v === undefined || v === null) return { height: undefined, at: FIRST_PAGE };
   if (!isObject(v) || !isCount(v.blockHeight)) throw invalid();
-  if (![v.slotNullifiers, v.addresses, v.pendingNames].every(isOffset)) throw invalid();
+  if (![v.slotNullifiers, v.addresses].every(isOffset)) throw invalid();
   return { height: v.blockHeight as number, at: v as Offsets };
 }
 
@@ -118,21 +116,18 @@ export function snapshotPage(state: RegistryAt, at: Offsets, limit: number): Con
   const { blockHeight, snapshot: s } = state;
   const nuls = slice(s.slotNullifiers, at.slotNullifiers, limit);
   const addresses = slice(s.addresses, at.addresses, limit);
-  const pending = slice(s.pendingNames, at.pendingNames, limit);
-  const more = nuls.next !== null || addresses.next !== null || pending.next !== null;
+  const more = nuls.next !== null || addresses.next !== null;
   return {
     blockHeight,
     blockHash: state.blockHash,
     blockTimestamp: state.blockTimestamp,
-    round: s.round.toString(),
     price: s.price.toString(),
     oldPrices: s.oldPrices.map((p) => ({ price: p.price.toString(), until: p.until.toString() })),
     bonos: { leafCount: Number(s.bonos.leafCount), root: s.bonos.root.toString() },
-    totals: { slotNullifiers: s.slotNullifiers.length, addresses: s.addresses.length, pendingNames: s.pendingNames.length },
+    totals: { slotNullifiers: s.slotNullifiers.length, addresses: s.addresses.length },
     slotNullifiers: nuls.items,
     addresses: addresses.items.map((a) => ({ ...a, kind: KIND_NAMES[a.kind] })),
-    pendingNames: pending.items.map((p) => ({ ...p, reservedRound: p.reservedRound.toString() })),
-    next: more ? { blockHeight, slotNullifiers: nuls.next, addresses: addresses.next, pendingNames: pending.next } : null,
+    next: more ? { blockHeight, slotNullifiers: nuls.next, addresses: addresses.next } : null,
   };
 }
 

@@ -1,5 +1,5 @@
 // Devnet end to end (npm run test:e2e -w apps/server). The test plays the core against the real sidecar
-// (JSON-RPC over stdio) and the server (HTTP): free plan from the Issuer, two-step registration of
+// (JSON-RPC over stdio) and the server (HTTP): free plan from the Issuer, one-step registration of
 // `juan.perez`, 2 aliases, the 3rd rejected. The public relayer pays; the operator wallet is never touched.
 // Requires, already running (without NIGHTMAIL_NETWORK they target preprod):
 //   NIGHTMAIL_NETWORK=undeployed npm run operator-wallet -w apps/server
@@ -89,7 +89,7 @@ function assertReceipt(reply: any, id: string): void {
 type Outcome = { outcome: string; retryAfterS?: number; [k: string]: unknown };
 
 /**
- * One relayer submission and the wait for its ticket (payer queue + random delay). 503 = `busy`; a 422
+ * One relayer submission and the wait for its ticket (payer queue). 503 = `busy`; a 422
  * `bad-ttl` (the transaction is close to expiry, which happens after several long `busy`) = `expired`,
  * so a fresh one must be proved.
  */
@@ -121,7 +121,7 @@ async function proveAndRelay(label: string, call: object): Promise<void> {
     assert.ok(attempt < MAX_RELAY_ATTEMPTS && (busy || reprove), `${label}: ${JSON.stringify(result)}`);
     if (busy) await sleep(Math.min(result.retryAfterS ?? 5, MAX_BUSY_WAIT_S) * 1000);
     else {
-      // Against the same state a state-dependent rejection would repeat (storage margin, round advance), so
+      // Against the same state a state-dependent rejection would repeat (storage margin), so
       // before proving again wait until the indexer is past the block the proof was made against.
       await eventually('a later block', () => snapshot(null, 1), (snap) => snap.blockHeight > proved.blockHeight);
       reproved = true;
@@ -136,8 +136,6 @@ let sidecar: Sidecar;
 
 const hashes = async (ops: object[]): Promise<string[]> => (await sidecar.call('contract.hashes', { contractAddress: R, ops })).results;
 const snapshot = (cursor: object | null = null, limit?: number) => sidecar.call('contract.snapshot', { contractAddress: R, cursor, limit });
-const round = async () => BigInt((await snapshot(null, 1)).round);
-
 /** Proves the call locally (sidecar + proof server); on a retryable failure, asks for another. */
 async function proveCall(label: string, call: object): Promise<Proved> {
   const proved = await proveCallOf(sidecar, { contractAddress: R, ...call }, (ms, code) => note(`${label}: error ${code}`, `asking for another (${seconds(ms)})`));
@@ -145,7 +143,7 @@ async function proveCall(label: string, call: object): Promise<Proved> {
   return proved;
 }
 
-type Collection = 'addresses' | 'pendingNames';
+type Collection = 'addresses';
 
 /** The first entry of the collection matching `match` in the latest state (all pages). */
 async function findEntry(collection: Collection, match: (entry: any) => boolean): Promise<any> {
@@ -221,36 +219,22 @@ step('free plan: the Issuer signs the receipt, the payer issues the bono and its
   note('findBonos: leaf in the tree', `position ${found.positions[0]} of ${found.leafCount}`);
 });
 
-step(`mailbox ${NAME} in two steps: reservation through the relayer, the server advances the round, and reveal`, async (t) => {
+step(`mailbox ${NAME} in one transaction: registerMailbox through the relayer`, async (t) => {
   const [firstKey] = await hashes([{ op: 'addrKey', name: NAME }]);
   // The devnet registry keeps earlier runs: if the name exists, use a new one with the same prefix.
   const name = (await addressRecord(firstKey)) ? `${NAME}.${Date.now().toString(36)}` : NAME;
   t.diagnostic(`mailbox: ${name}`);
   const keys = addressKeys('addr/mailbox/0');
-  const salt = toHex(derive('salt/mailbox/0'));
   const nameCipher = randomBytes(104).toString('hex');
   const [nul, addrKey] = await hashes([{ op: 'slotNul', s, kind: 'mailbox', j: 0, gen: 0 }, { op: 'addrKey', name }]);
   assert.equal(await addressRecord(addrKey), undefined, `${name} is free`);
-  const [commit] = await hashes([{ op: 'commit', addrKey, ...keys, salt, slotNul: nul }]);
 
-  // The app always reserves with r = round + 1 (matching the RoundTicker's MAX_ROUNDS_AHEAD).
-  const r = (await round()) + 1n;
-  await proveAndRelay('reserveMailbox', { circuit: 'reserveMailbox', args: { commit, round: r.toString() }, witnesses: witnesses(0) });
-
-  // Nobody asks the server to advance: its RoundTicker does it on seeing the waiting reservation. The test
-  // only sees the round pass r; in the documented setup no other process advances rounds, because
-  // test:devnet needs the payer stopped.
   const t0 = performance.now();
-  await eventually('the round advance', round, (now) => now > r, 100, 3000);
-  note('server: round > r', seconds(performance.now() - t0));
-
-  await proveAndRelay('revealMailbox', { circuit: 'revealMailbox', args: { name, ...keys, salt, slotNul: nul, nameCipher } });
-
+  await proveAndRelay('registerMailbox', { circuit: 'registerMailbox', args: { name, ...keys, nameCipher }, witnesses: witnesses(0) });
   const mailbox = await recorded(name, addrKey);
   assert.deepEqual([mailbox.kind, mailbox.encPk, mailbox.authPk, mailbox.slotNul, mailbox.nameCipher],
     ['mailbox', keys.encPk, keys.authPk, nul, nameCipher]);
-  assert.equal(await findEntry('pendingNames', (p) => p.slotNul === nul), undefined, 'the reservation is deleted on reveal');
-  note('mailbox registered', name);
+  note('mailbox registered', `${name} (${seconds(performance.now() - t0)})`);
 });
 
 step(`${FREE_ALIASES} aliases on the free plan, the next one is rejected before being proven`, async () => {

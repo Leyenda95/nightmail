@@ -6,6 +6,7 @@
 import pkg from '../package.json' with { type: 'json' };
 import { AppError, codes } from './codes.ts';
 import { contractHandlers } from './contract.ts';
+import { headHandlers } from './head.ts';
 import { net, validateEndpoints } from './net.ts';
 import { proveHandlers } from './prove.ts';
 import { walletHandlers } from './walletHandlers.ts';
@@ -14,7 +15,7 @@ import type { InitializeParams } from './protocol/InitializeParams.ts';
 import type { InitializeResult } from './protocol/InitializeResult.ts';
 import type { PingResult } from './protocol/PingResult.ts';
 
-export const PROTOCOL_VERSION = '1.5';
+export const PROTOCOL_VERSION = '2.0';
 export const SIDECAR_VERSION: string = pkg.version;
 
 const major = (v: string) => v.split('.')[0];
@@ -95,6 +96,7 @@ export function createHandlers(state: SidecarState): Record<string, Handler> {
 
     ...contractHandlers(() => endpoints().indexer, { log }),
     ...proveHandlers(initialized, { log }),
+    ...headHandlers(initialized),
     ...wallet.handlers,
   };
   return handlers;

@@ -292,8 +292,8 @@ test('the English word guards catch what they should and let look-alikes pass', 
     ['Activating the name', EN_REVEAL],
   ];
   for (const [s, re] of misses) assert.doesNotMatch(s, re, s);
-  // Keys ("'stale-round': ...") and types are not shown texts. Comments are not either.
-  const code = "const x = { 'stale-round': 'too late', 'wrong-reveal': 'no match' };\n// round\ntype K = 'round';";
+  // Keys ("'stale-reservation': ...") and types are not shown texts. Comments are not either.
+  const code = "const x = { 'stale-reservation': 'too late', 'wrong-reveal': 'no match' };\n// round\ntype K = 'round';";
   assert.deepEqual(visibleTexts('caso.ts', code), ['too late', 'no match']);
 });
 

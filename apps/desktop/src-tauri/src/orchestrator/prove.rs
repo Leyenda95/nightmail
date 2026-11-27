@@ -13,7 +13,7 @@ use std::sync::atomic::Ordering;
 use super::ports::{Chain, Issuer, RelayError, RelayOutcome, Relayer, Submitted, TicketState};
 use super::{OrchError, Orchestrator, Progress, Result};
 use crate::protocol::{CallProblem, ContractProveCallParams, ContractProveCallResult, ProveCall};
-use crate::store::{AttemptKind, SlotKey};
+use crate::store::SlotKey;
 
 /// How a call ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,26 +80,21 @@ fn received(reply: &std::result::Result<Submitted, RelayError>) -> bool {
 const TICKET_POLL_FACTOR: u32 = 3;
 
 impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
-    /// One proof of `call` and its submission; accepted attempts count on slot `slot` (counter `attempt`).
-    pub(crate) async fn prove_and_relay(
-        &self,
-        call: &ProveCall,
-        slot: SlotKey,
-        attempt: AttemptKind,
-    ) -> Result<Relayed> {
+    /// One proof of `call` and its submission; accepted attempts count on slot `slot`.
+    pub(crate) async fn prove_and_relay(&self, call: &ProveCall, slot: SlotKey) -> Result<Relayed> {
         self.relay_allowed()?;
         self.wait_for_relayer().await?;
         let proved = match self.prove(call).await {
             Ok(proved) => proved,
             Err(OrchError::CallRejected { reason }) => {
                 if reason == CallProblem::NotABono {
-                    self.count_attempt(slot, attempt).await?;
+                    self.count_attempt(slot).await?;
                 }
                 return Ok(Relayed::Rejected(reason));
             }
             Err(e) => return Err(e),
         };
-        let end = self.relay(&proved.tx, slot, attempt).await.inspect_err(|e| self.note_rate_limit(*e))?;
+        let end = self.relay(&proved.tx, slot).await.inspect_err(|e| self.note_rate_limit(*e))?;
         match end {
             RelayEnd::Included => {
                 // One of our proofs was included, so the indexer was up to date.
@@ -124,7 +119,7 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
     /// useless for the next turn (it carries a TTL and is computed over the current chain state). With no answer it
     /// waits like a resend (`Holdup::Unreachable`) and, if still silent, returns `ServerUnreachable` without having
     /// proved or counted any slot attempt. If the relayer goes down during the proof, `relay` resends the same bytes.
-    async fn wait_for_relayer(&self) -> Result<()> {
+    pub(crate) async fn wait_for_relayer(&self) -> Result<()> {
         let mut tries = 0;
         while !self.d.relayer.reachable().await {
             self.busy_wait(&mut tries, self.d.config.retry.transient_wait.as_secs(), Holdup::Unreachable).await?;
@@ -140,9 +135,9 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
         }
     }
 
-    async fn count_attempt(&self, slot: SlotKey, attempt: AttemptKind) -> Result<()> {
+    async fn count_attempt(&self, slot: SlotKey) -> Result<()> {
         let now = self.now();
-        self.db(move |s| s.bump_slot_attempts(slot, attempt, now)).await.map(drop)
+        self.db(move |s| s.bump_slot_attempts(slot, now)).await.map(drop)
     }
 
     /// `contract.proveCall` with the ratchet and the shared policy; `CALL_REJECTED` comes out as `CallRejected`.
@@ -150,14 +145,17 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
         self.emit(Progress::Proving);
         let (chain, contract) = (&self.d.chain, self.contract());
         self.call_sidecar(true, |min| {
-            let params =
-                ContractProveCallParams { contract_address: contract.clone(), call: call.clone(), min_leaf_count: min };
+            let params = ContractProveCallParams {
+                contract_address: contract.clone(),
+                call: call.clone(),
+                min_leaf_count: min,
+            };
             async move { chain.prove_call(&params).await }
         })
         .await
     }
 
-    async fn relay(&self, tx: &str, slot: SlotKey, attempt: AttemptKind) -> Result<RelayEnd> {
+    async fn relay(&self, tx: &str, slot: SlotKey) -> Result<RelayEnd> {
         self.emit(Progress::Relaying);
         let mut busy = 0;
         let mut counted = false;
@@ -168,11 +166,18 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
             // it); resending the same bytes does not count. If it never got it (no answer, 5xx, "busy", 429), it
             // does not count: the relayer may go down during the proof.
             if !counted && received(&reply) {
-                self.count_attempt(slot, attempt).await?;
+                self.count_attempt(slot).await?;
                 counted = true;
             }
+            if counted {
+                // Until the outcome is known, the proof may land.
+                self.note_refused(slot, false);
+            }
             let (wait, holdup) = match reply {
-                Ok(Submitted::BadTtl) => return Ok(RelayEnd::Reprove),
+                Ok(Submitted::BadTtl) => {
+                    self.note_refused(slot, true);
+                    return Ok(RelayEnd::Reprove);
+                }
                 Ok(Submitted::Busy { retry_after_s }) => (retry_after_s, Holdup::Busy),
                 Err(RelayError::Unavailable) => (transient, Holdup::Busy),
                 Err(RelayError::Unreachable) => (transient, Holdup::Unreachable),
@@ -181,13 +186,35 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
                     RelayOutcome::Included => return Ok(RelayEnd::Included),
                     RelayOutcome::Refused => return Err(OrchError::RelayerRefused),
                     RelayOutcome::Busy { retry_after_s } => (retry_after_s, Holdup::Busy),
-                    RelayOutcome::Expired | RelayOutcome::Rejected | RelayOutcome::Unknown | RelayOutcome::Failed => {
+                    RelayOutcome::Rejected => {
+                        self.note_refused(slot, true);
+                        return Ok(RelayEnd::Reprove);
+                    }
+                    RelayOutcome::Expired | RelayOutcome::Unknown | RelayOutcome::Failed => {
                         return Ok(RelayEnd::Reprove);
                     }
                 },
             };
             self.busy_wait(&mut busy, wait, holdup).await?;
         }
+    }
+
+    /// Records whether the slot's last proof was definitely refused (the node rejected it, or the relayer sent it back
+    /// with `bad-ttl`): then it cannot land later, and the next turn need not wait for the indexer to catch up.
+    fn note_refused(&self, slot: SlotKey, refused: bool) {
+        let mut list = self.refused.lock().unwrap_or_else(|e| e.into_inner());
+        list.retain(|k| *k != slot);
+        if refused {
+            list.push(slot);
+        }
+    }
+
+    /// Before another proof for `slot` after one was sent: wait for the indexer to catch up with the node
+    /// ([`Self::catch_up_with_node`]) unless the last one was definitely refused. After a restart nothing is known, so
+    /// it waits.
+    pub(crate) async fn catch_up_unless_refused(&self, slot: SlotKey) -> Result<()> {
+        let refused = self.refused.lock().unwrap_or_else(|e| e.into_inner()).contains(&slot);
+        if refused { Ok(()) } else { self.catch_up_with_node().await }
     }
 
     /// Waits before calling the relayer or Issuer again, with a cap on count and duration. When exhausted, the error

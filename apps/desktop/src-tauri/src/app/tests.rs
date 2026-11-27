@@ -313,10 +313,8 @@ async fn the_mail_of_an_abandoned_address_is_hidden_and_it_cannot_be_named() {
         slot_nul: [5; 32],
         status: SlotStatus::Used,
         addr_key: Some([7; 32]),
-        round: None,
         pending_name: None,
-        reserve_attempts: 0,
-        reveal_attempts: 0,
+        attempts: 0,
         updated_at: 0,
     };
     session
@@ -432,10 +430,8 @@ async fn half_done_alias(session: &Session) {
         slot_nul: [7; 32],
         status: SlotStatus::Reserving,
         addr_key: None,
-        round: None,
         pending_name: None,
-        reserve_attempts: 0,
-        reveal_attempts: 0,
+        attempts: 0,
         updated_at: 0,
     };
     session.store.with(move |s| s.insert_slot(&slot)).await.unwrap();

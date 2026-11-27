@@ -13,7 +13,7 @@ function adapter(reply: Reply | Error | Array<Reply>) {
     const next = list ? list.shift()! : (reply as Reply | Error);
     return next instanceof Error ? Promise.reject(next) : Promise.resolve(next);
   };
-  const payer = adaptPayer({ issue: answer, advanceRound: answer }, capturingLogger(logs));
+  const payer = adaptPayer({ issue: answer }, capturingLogger(logs));
   return { payer, logs };
 }
 
@@ -90,18 +90,4 @@ test('issue: 400, 404, other 4xx and 503 no-contract are failed (retrying does n
   const warns = logs.filter((l) => l.startsWith('warn '));
   assert.equal(warns.length, 4, warns.join('\n'));
   assert.ok(warns[0]!.includes('bad-request') && warns[2]!.includes('no-contract'));
-});
-
-test('advanceRound: advanced, unknown (with validUntil if present) and failed', async () => {
-  assert.deepEqual(await adapter({ status: 200, body: { status: 'advanced', round: 9, txHash: 'aa' } }).payer.advanceRound(), { status: 'advanced', round: 9 });
-  assert.deepEqual(await adapter({ status: 200, body: { status: 'advanced', round: null, txHash: 'aa' } }).payer.advanceRound(), { status: 'advanced', round: null });
-  assert.deepEqual(await adapter({ status: 200, body: { status: 'unknown', txHash: 'aa', validUntil: 5 } }).payer.advanceRound(), { status: 'unknown', validUntil: 5 });
-  assert.deepEqual(await adapter({ status: 200, body: { status: 'unknown', validUntil: 'x' } }).payer.advanceRound(), { status: 'unknown' });
-  assert.deepEqual(await adapter({ status: 200, body: { status: 'failed', reason: 'rejected' } }).payer.advanceRound(), { status: 'failed' });
-});
-
-test('advanceRound: a 5xx, a 503 or a cut are unknown (it may have been paid)', async () => {
-  assert.deepEqual(await adapter({ status: 500, body: { error: 'internal' } }).payer.advanceRound(), { status: 'unknown' });
-  assert.deepEqual(await adapter({ status: 503, body: { error: 'dust-unavailable' } }).payer.advanceRound(), { status: 'unknown' });
-  assert.deepEqual(await adapter(new Error('x')).payer.advanceRound(), { status: 'unknown' });
 });

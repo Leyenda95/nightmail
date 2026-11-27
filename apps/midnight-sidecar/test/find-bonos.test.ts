@@ -8,7 +8,7 @@ import { setFetchForTests } from '../src/net.ts';
 import { AppError, codes } from '../src/codes.ts';
 import { MAX_FIND_LEAVES } from '../src/contract.ts';
 import { Plan } from '@nightmail/midnight';
-import { advanceRoundState, deploy, hex } from '../../../packages/midnight/test/helpers.ts';
+import { contractStateOf, deploy, hex } from '../../../packages/midnight/test/helpers.ts';
 import { ADDRESS, appError, ctx, failure, fakeChain, INDEXER, json, ready } from './helpers.ts';
 
 afterEach(() => setFetchForTests((...args) => fetch(...args)));
@@ -18,7 +18,7 @@ async function threeBonos() {
   const c = await deploy();
   const bonos = [await c.issue(Plan.free), await c.issue(Plan.paid), await c.issue(Plan.free)];
   const leaves: string[] = bonos.map((b) => hex(c.leafOf(b)));
-  return { leaves, stateHex: hex((await advanceRoundState(c)).serialize()) };
+  return { leaves, stateHex: hex(contractStateOf(c).serialize()) };
 }
 
 const find = async (params: unknown, h?: Awaited<ReturnType<typeof ready>>) => (h ?? (await ready()))['contract.findBonos'](params, ctx());
@@ -41,7 +41,7 @@ test('contract.findBonos: a repeated leaf (two purchases of the same id) does no
   const other = await c.issue(Plan.free);
   const bought = await c.buy(undefined, new Uint8Array(32).fill(7), 0n);
   await c.buy(undefined, bought.s, 0n);
-  fakeChain({ state: hex((await advanceRoundState(c)).serialize()) });
+  fakeChain({ state: hex(contractStateOf(c).serialize()) });
   assert.deepEqual(await find({ contractAddress: ADDRESS, leaves: [hex(c.leafOf(bought)), hex(c.leafOf(other))] }),
     { blockHeight: 100, leafCount: 3, positions: [1, 0] });
 });
@@ -62,7 +62,7 @@ test('contract.findBonos with minLeafCount: with fewer leaves than already seen,
 });
 
 test('contract.findBonos: tree without leaves', async () => {
-  fakeChain({ state: hex((await advanceRoundState(await deploy())).serialize()) });
+  fakeChain({ state: hex(contractStateOf(await deploy()).serialize()) });
   assert.deepEqual(await find({ contractAddress: ADDRESS, leaves: ['ee'.repeat(32)] }), { blockHeight: 100, leafCount: 0, positions: [null] });
 });
 

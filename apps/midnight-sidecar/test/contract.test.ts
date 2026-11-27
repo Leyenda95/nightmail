@@ -9,6 +9,7 @@ import { AppError, codes } from '../src/codes.ts';
 import { contractHandlers, MAX_HASH_OPS, MAX_SNAPSHOT_LIMIT } from '../src/contract.ts';
 import type { ContractSnapshot } from '../src/protocol/ContractSnapshot.ts';
 // Real NightMailRegistry state built with the simulator (helper from the package's tests).
+import { Kind } from '@nightmail/midnight';
 import { hex, registryState } from '../../../packages/midnight/test/helpers.ts';
 
 const vectors = new URL('../../../packages/test-vectors/', import.meta.url);
@@ -53,7 +54,7 @@ test('the hashes RPC vector matches the contract vectors', () => {
   const rpc = json('rpc/contract-hashes.json').result.results;
   const c = json('contract/registry.json');
   assert.deepEqual(rpc, [c.bonoId, c.bonoLeafFree, c.bonoLeafPaid, c.slotNullifierMailbox3, c.slotNullifierAlias3,
-    c.slotNullifierMailbox3Gen1, 'juan.perez', c.addressKey, c.aliasKey, c.nameCommit, 'around.rubber.hc9n6db283sn']);
+    c.slotNullifierMailbox3Gen1, 'juan.perez', c.addressKey, c.aliasKey, 'around.rubber.hc9n6db283sn']);
 });
 
 test('contract.hashes exige initialize', async () => {
@@ -139,17 +140,17 @@ test('contract.snapshot: all pages from the same block and, together, the full s
   const requests = fakeIndexer(stateHex);
   const h = await ready();
   const pages = await allPages(h, 1);
-  assert.equal(pages.length, 3, 'the longest collection (3 nullifiers) sets the pages');
+  const longest = Math.max(expected.slotNullifiers.length, expected.addresses.length);
+  assert.equal(pages.length, longest, 'the longest collection sets the pages');
   assert.ok(pages.every((p) => p.blockHeight === 100 && p.blockHash === hashAt(100) && p.blockTimestamp === timeAt(100)));
   const first = pages[0];
-  assert.deepEqual([first.round, first.price], [expected.round.toString(), '8']);
+  assert.equal(first.price, '8');
+  assert.ok(!('round' in first) && !('pendingNames' in first), 'no round and no reservations: mailboxes register in one step');
   assert.deepEqual(first.oldPrices, expected.oldPrices.map((o) => ({ price: '5', until: o.until.toString() })));
   assert.deepEqual(first.bonos, { leafCount: 1, root: expected.bonos.root.toString() });
-  assert.deepEqual(first.totals, { slotNullifiers: 3, addresses: 2, pendingNames: 1 });
-  assert.deepEqual(pages.flatMap((p) => p.pendingNames),
-    expected.pendingNames.map((p) => ({ ...p, reservedRound: p.reservedRound.toString() })));
+  assert.deepEqual(first.totals, { slotNullifiers: expected.slotNullifiers.length, addresses: expected.addresses.length });
   assert.deepEqual(pages.flatMap((p) => p.slotNullifiers), expected.slotNullifiers);
-  assert.deepEqual(pages.flatMap((p) => p.addresses), expected.addresses.map((a) => ({ ...a, kind: 'alias' })));
+  assert.deepEqual(pages.flatMap((p) => p.addresses), expected.addresses.map((a) => ({ ...a, kind: a.kind === Kind.mailbox ? 'mailbox' : 'alias' })));
   assert.deepEqual(pages.at(-1)!.next, null);
   // One request for the latest block and another for the state at it; later pages do not ask again.
   assert.deepEqual(requests.map((r) => r.variables.offset ?? null), [null, { height: 100 }]);
@@ -163,15 +164,17 @@ test('contract.snapshot paginates each collection with its offset and stops retu
   await h['contract.snapshot']({ contractAddress: ADDRESS }, ctx());
   const at = (cursor: object) => h['contract.snapshot']({ contractAddress: ADDRESS, cursor, limit: 1 }, ctx()) as Promise<ContractSnapshot>;
   // Only addresses remain: the next cursor continues with them alone.
-  const onlyAddresses = await at({ blockHeight: 100, slotNullifiers: null, addresses: 0, pendingNames: null });
-  assert.deepEqual([onlyAddresses.slotNullifiers.length, onlyAddresses.addresses.length, onlyAddresses.pendingNames.length], [0, 1, 0]);
-  assert.deepEqual(onlyAddresses.next, { blockHeight: 100, slotNullifiers: null, addresses: 1, pendingNames: null });
-  const onlyPending = await at({ blockHeight: 100, slotNullifiers: null, addresses: null, pendingNames: 0 });
-  assert.deepEqual([onlyPending.pendingNames.length, onlyPending.next], [1, null]);
-  const done = await at({ blockHeight: 100, slotNullifiers: null, addresses: 1, pendingNames: null });
+  const onlyAddresses = await at({ blockHeight: 100, slotNullifiers: null, addresses: 0 });
+  assert.deepEqual([onlyAddresses.slotNullifiers.length, onlyAddresses.addresses.length], [0, 1]);
+  assert.deepEqual(onlyAddresses.next, { blockHeight: 100, slotNullifiers: null, addresses: 1 });
+  const onlyNullifiers = await at({ blockHeight: 100, slotNullifiers: 0, addresses: null });
+  assert.deepEqual([onlyNullifiers.slotNullifiers.length, onlyNullifiers.addresses.length], [1, 0]);
+  assert.deepEqual(onlyNullifiers.next, { blockHeight: 100, slotNullifiers: 1, addresses: null });
+  const total = (await at({ blockHeight: 100, slotNullifiers: null, addresses: null })).totals.addresses;
+  const done = await at({ blockHeight: 100, slotNullifiers: null, addresses: total - 1 });
   assert.deepEqual([done.addresses.length, done.next], [1, null]);
-  const past = await at({ blockHeight: 100, slotNullifiers: 5, addresses: 5, pendingNames: 5 });
-  assert.deepEqual([past.slotNullifiers, past.addresses, past.pendingNames, past.next], [[], [], [], null]);
+  const past = await at({ blockHeight: 100, slotNullifiers: 5, addresses: 5 });
+  assert.deepEqual([past.slotNullifiers, past.addresses, past.next], [[], [], null]);
 });
 
 test('contract.snapshot with the shape of the RPC vector shared with Rust', async () => {
@@ -200,14 +203,14 @@ test('contract.snapshot: no contract, or the state of another contract → CONTR
 test('contract.snapshot: malformed params → INVALID_PARAMS, without initialize → NOT_INITIALIZED', async () => {
   fakeIndexer('00');
   const h = await ready();
-  const cursor = { blockHeight: 100, slotNullifiers: 0, addresses: 0, pendingNames: 0 };
+  const cursor = { blockHeight: 100, slotNullifiers: 0, addresses: 0 };
   const bad = [
     null, [], {}, { contractAddress: 'AD'.repeat(32) }, { contractAddress: ADDRESS, limit: 0 },
     { contractAddress: ADDRESS, limit: MAX_SNAPSHOT_LIMIT + 1 }, { contractAddress: ADDRESS, limit: '5' },
     { contractAddress: ADDRESS, cursor: 'x' }, { contractAddress: ADDRESS, cursor: { ...cursor, blockHeight: -1 } },
     { contractAddress: ADDRESS, cursor: { ...cursor, blockHeight: 1.5 } }, { contractAddress: ADDRESS, cursor: { ...cursor, addresses: -1 } },
-    { contractAddress: ADDRESS, cursor: { ...cursor, pendingNames: 'a' } }, { contractAddress: ADDRESS, cursor: { blockHeight: 1 } },
-    { contractAddress: ADDRESS, cursor: { slotNullifiers: 0, addresses: 0, pendingNames: 0 } },
+    { contractAddress: ADDRESS, cursor: { ...cursor, slotNullifiers: 'a' } }, { contractAddress: ADDRESS, cursor: { blockHeight: 1 } },
+    { contractAddress: ADDRESS, cursor: { slotNullifiers: 0, addresses: 0 } },
     { contractAddress: ADDRESS, cursor: { ...cursor, blockHeight: null } }, { contractAddress: ADDRESS, cursor: { ...cursor, blockHeight: '100' } },
   ];
   for (const p of bad) assert.equal(await code(h['contract.snapshot'](p, ctx())), codes.INVALID_PARAMS, JSON.stringify(p));
@@ -218,7 +221,7 @@ test('contract.snapshot: malformed params → INVALID_PARAMS, without initialize
 test('contract.snapshot: a cursor whose state the sidecar no longer has → SNAPSHOT_EXPIRED', async () => {
   const { stateHex } = await registryState();
   const requests = fakeIndexer(stateHex);
-  const cursor = { blockHeight: 100, slotNullifiers: 0, addresses: 0, pendingNames: 0 };
+  const cursor = { blockHeight: 100, slotNullifiers: 0, addresses: 0 };
   const h = await ready();
   const expired = async (handlers: Handlers, params: object) => {
     const err = await failure(handlers['contract.snapshot'](params, ctx()));

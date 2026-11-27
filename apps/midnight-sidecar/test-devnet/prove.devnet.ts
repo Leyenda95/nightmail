@@ -52,7 +52,7 @@ function record(label: string, o: Outcome): Outcome {
   return o;
 }
 
-/** Operator call (issueBono, advanceRound) with its own proof. */
+/** Operator call (issueBono) with its own proof. */
 async function operator(circuit: string, args: unknown[]): Promise<void> {
   const blank = { bono: { s: randomBytes(32), k: 0n, plan: Plan.free, validUntil: BigInt(NO_EXPIRY) }, j: 0n, opSk };
   const o = record(`operador: ${circuit}`, await registry.call(R, circuit, blank, args));
@@ -153,33 +153,17 @@ test('proveCall is cancelled with $/cancel while proving', async () => {
   assert.equal((await sidecar.call('ping', null)).pong, true);
 });
 
-test('two-step mailbox with proveCall: reserveMailbox, two rounds and revealMailbox', async () => {
+test('one-step mailbox with proveCall: registerMailbox spends the slot and registers the name', async () => {
   const name = `p2.${Date.now().toString(36)}`;
-  const m = { encPk: rand(), authPk: rand(), salt: rand(), nameCipher: rand(104) };
+  const m = { encPk: rand(), authPk: rand(), nameCipher: rand(104) };
   const [nul, addrKey] = await hashes([{ op: 'slotNul', s, kind: 'mailbox', j: 0, gen: 0 }, { op: 'addrKey', name }]);
-  const [commit] = await hashes([{ op: 'commit', addrKey, encPk: m.encPk, authPk: m.authPk, salt: m.salt, slotNul: nul }]);
-  const round = BigInt((await sidecar.call('contract.snapshot', { contractAddress: R, limit: 1 })).round);
-
-  const reserve = await proveCall({ circuit: 'reserveMailbox', args: { commit, round: (round + 1n).toString() }, witnesses: witnesses(0) });
-  assert.equal((await relay('reserveMailbox (proveCall + relay)', reserve.tx, reserve.proveMs)).status, 'SucceedEntirely');
-
-  const reveal = { circuit: 'revealMailbox', args: { name, encPk: m.encPk, authPk: m.authPk, salt: m.salt, slotNul: nul, nameCipher: m.nameCipher } };
-  // Once the indexer sees the reservation: revealing in its own round (or the proposal's) is too early.
-  // (Another process may be advancing rounds on the devnet: only checked if the round has not passed yet.)
-  const reserved = await eventually('the reservation', () => sidecar.call('contract.snapshot', { contractAddress: R }),
-    (snap) => snap.pendingNames.some((p: { slotNul: string }) => p.slotNul === nul));
-  if (BigInt(reserved.round) <= round + 1n) {
-    const early = await rpcError(sidecar.call('contract.proveCall', { contractAddress: R, ...reveal }));
-    assert.deepEqual(early, { code: CALL_REJECTED, message: 'Call rejected', data: { reason: 'too-early' } });
-  }
-
-  for (let i = 0; i < 2; i++) await operator('advanceRound', []);
-  await eventually('the two rounds', () => sidecar.call('contract.snapshot', { contractAddress: R, limit: 1 }), (snap) => BigInt(snap.round) > round + 1n);
-  const revealed = await proveCall(reveal);
-  assert.equal((await relay('revealMailbox (proveCall + relay)', revealed.tx, revealed.proveMs)).status, 'SucceedEntirely');
+  const register = { circuit: 'registerMailbox', args: { name, ...m }, witnesses: witnesses(0) };
+  const proved = await proveCall(register);
+  assert.equal((await relay('registerMailbox (proveCall + relay)', proved.tx, proved.proveMs)).status, 'SucceedEntirely');
 
   const ledger = await registry.ledgerState(R);
   const record = ledger.addresses.lookup(Buffer.from(addrKey, 'hex'));
   assert.equal(Buffer.from(record.slotNul).toString('hex'), nul);
-  assert.equal(ledger.pendingNames.member(Buffer.from(nul, 'hex')), false, 'the reservation is deleted on reveal');
+  assert.equal(Buffer.from(record.nameCipher).toString('hex'), m.nameCipher);
+  assert.equal(ledger.slotNullifiers.member(Buffer.from(nul, 'hex')), true, 'the slot is spent');
 });

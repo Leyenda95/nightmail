@@ -1,5 +1,5 @@
 // NightMailRegistry witnesses (same names and types as declared by the contract). They read each
-// call's private state. The operator only uses operatorSecret (issueBono, advanceRound), but the
+// call's private state. The operator only uses operatorSecret (issueBono), but the
 // contract requires all of them to be constructed, including at deploy time.
 import { CompactTypeBytes, StateValue, type ChargedState } from '@midnight-ntwrk/compact-runtime';
 

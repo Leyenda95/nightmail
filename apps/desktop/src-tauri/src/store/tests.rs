@@ -72,10 +72,9 @@ fn alias_key() -> SlotKey {
     }
 }
 
-fn data(round: Option<u64>, name: Option<&str>, addr: Option<u8>) -> SlotPatch {
+fn data(name: Option<&str>, addr: Option<u8>) -> SlotPatch {
     SlotPatch {
         addr_key: addr.map(|b| [b; 32]),
-        round,
         pending_name: name.map(String::from),
     }
 }
@@ -86,28 +85,21 @@ fn slot_at(key: SlotKey, status: SlotStatus, d: SlotPatch) -> Slot {
         slot_nul: [key.j as u8 + 100; 32],
         status,
         addr_key: d.addr_key,
-        round: d.round,
         pending_name: d.pending_name,
-        reserve_attempts: 0,
-        reveal_attempts: 0,
+        attempts: 0,
         updated_at: 1,
     }
 }
 
-fn reserved_data() -> SlotPatch {
-    data(Some(7), Some("juan"), None)
-}
-
 /// A mailbox in `reserving` already carries its name.
 fn reserving_data() -> SlotPatch {
-    data(None, Some("juan"), None)
+    data(Some("juan"), None)
 }
 
 /// A mailbox in the given state, with the data that state requires.
 fn mailbox_in(s: &LocalStore, status: SlotStatus) {
     let d = match status {
-        SlotStatus::Reserved | SlotStatus::Revealing => reserved_data(),
-        SlotStatus::Used => data(None, None, Some(5)),
+        SlotStatus::Used => data(None, Some(5)),
         SlotStatus::Reserving => reserving_data(),
         SlotStatus::Burned => SlotPatch::default(),
     };
@@ -389,7 +381,7 @@ fn close_checkpoints_the_wal() {
 fn debug_output_hides_personal_data() {
     let mut a = address(1);
     a.name = Some("NOMBRE-PRIVADO".into());
-    let slot = slot_at(key(), SlotStatus::Reserved, data(Some(1), Some("NOMBRE-PRIVADO"), None));
+    let slot = slot_at(key(), SlotStatus::Reserving, data(Some("NOMBRE-PRIVADO"), None));
     let mut m = message(1, "s", 1);
     m.parsed.subject = Some("ASUNTO-PRIVADO".into());
     let shown = format!(
@@ -397,7 +389,7 @@ fn debug_output_hides_personal_data() {
         a,
         slot,
         m,
-        data(Some(1), Some("NOMBRE-PRIVADO"), None),
+        data(Some("NOMBRE-PRIVADO"), None),
         JournalEntry {
             payload: b"PAYLOAD-PRIVADO".to_vec(),
             ..entry("j", 1)
@@ -625,24 +617,12 @@ fn bono_usable_at_is_stored() {
 // ---------- slots ----------
 
 #[test]
-fn can_become_matrix_for_both_kinds() {
+fn can_become_matrix() {
     use SlotStatus::*;
-    let mailbox = [
-        (Reserving, Reserved),
-        (Reserving, Burned),
-        (Reserved, Revealing),
-        (Reserved, Burned),
-        (Revealing, Reserved),
-        (Revealing, Used),
-        (Revealing, Burned),
-    ];
-    let alias = [(Reserving, Used), (Reserving, Burned)];
-    for (kind, valid) in [(SlotKind::Mailbox, &mailbox[..]), (SlotKind::Alias, &alias[..])] {
-        for from in SlotStatus::ALL {
-            for to in SlotStatus::ALL {
-                let expected = valid.contains(&(*from, *to));
-                assert_eq!(from.can_become(kind, *to), expected, "{kind:?}: {from:?} -> {to:?}");
-            }
+    let valid = [(Reserving, Used), (Reserving, Burned)];
+    for from in SlotStatus::ALL {
+        for to in SlotStatus::ALL {
+            assert_eq!(from.can_become(*to), valid.contains(&(*from, *to)), "{from:?} -> {to:?}");
         }
     }
 }
@@ -652,20 +632,11 @@ fn reconcile_matrix() {
     use SlotStatus::*;
     let valid = [
         (Reserving, Reserving),
-        (Reserved, Reserved),
-        (Revealing, Revealing),
         (Used, Used),
         (Burned, Burned),
         (Reserving, Used),
         (Reserving, Burned),
-        (Reserved, Used),
-        (Reserved, Burned),
-        (Revealing, Used),
-        (Revealing, Burned),
         (Burned, Used),
-        (Reserving, Reserved),
-        (Revealing, Reserved),
-        (Burned, Reserved),
     ];
     for from in SlotStatus::ALL {
         for to in SlotStatus::ALL {
@@ -679,16 +650,11 @@ fn reconcile_matrix() {
 }
 
 #[test]
-fn mailbox_full_flow_keeps_name_and_round_and_clears_name_at_the_end() {
+fn mailbox_flow_keeps_the_name_until_used_and_clears_it_at_the_end() {
     let (_d, s) = fresh();
     mailbox_in(&s, SlotStatus::Reserving);
-    go(&s, SlotStatus::Reserved, &reserved_data()).unwrap();
-    go(&s, SlotStatus::Revealing, &SlotPatch::default()).unwrap();
-    let mid = s.get_slot(key()).unwrap().unwrap();
-    assert_eq!((mid.round, mid.pending_name.as_deref()), (Some(7), Some("juan")));
-    go(&s, SlotStatus::Reserved, &SlotPatch::default()).unwrap(); // failed reveal
-    go(&s, SlotStatus::Revealing, &SlotPatch::default()).unwrap();
-    go(&s, SlotStatus::Used, &data(None, None, Some(5))).unwrap();
+    assert_eq!(s.get_slot(key()).unwrap().unwrap().pending_name.as_deref(), Some("juan"));
+    go(&s, SlotStatus::Used, &data(None, Some(5))).unwrap();
     let end = s.get_slot(key()).unwrap().unwrap();
     assert_eq!(
         (end.status, end.addr_key, end.pending_name),
@@ -697,44 +663,27 @@ fn mailbox_full_flow_keeps_name_and_round_and_clears_name_at_the_end() {
 }
 
 #[test]
-fn alias_goes_straight_to_used_and_never_through_reserved() {
+fn alias_goes_straight_to_used() {
     let (_d, s) = fresh();
     s.insert_slot(&slot_at(alias_key(), SlotStatus::Reserving, SlotPatch::default()))
         .unwrap();
-    let to_reserved = s.transition_slot(alias_key(), SlotStatus::Reserved, &reserved_data(), 1);
-    assert_eq!(to_reserved, Err(StoreError::InvalidTransition));
-    s.transition_slot(alias_key(), SlotStatus::Used, &data(None, None, Some(4)), 2)
+    s.transition_slot(alias_key(), SlotStatus::Used, &data(None, Some(4)), 2)
         .unwrap();
-    let bad = slot_at(SlotKey { j: 8, ..alias_key() }, SlotStatus::Reserved, reserved_data());
-    assert_eq!(s.insert_slot(&bad), Err(StoreError::InvalidTransition));
+    assert_eq!(s.get_slot(alias_key()).unwrap().unwrap().status, SlotStatus::Used);
 }
 
 #[test]
 fn slot_invalid_transitions_and_final_states() {
     use SlotStatus::*;
-    for (from, to) in [
-        (Reserving, Revealing),
-        (Reserved, Used),
-        (Reserved, Reserving),
-        (Revealing, Reserving),
-    ] {
+    for (from, to) in [(Used, Burned), (Burned, Used), (Used, Reserving), (Burned, Reserving)] {
         let (_d, s) = fresh();
         mailbox_in(&s, from);
         assert_eq!(
-            go(&s, to, &data(Some(1), Some("x"), Some(1))),
-            Err(StoreError::InvalidTransition),
-            "{from:?}->{to:?}"
-        );
-        assert_eq!(s.get_slot(key()).unwrap().unwrap().status, from);
-    }
-    for (from, to) in [(Used, Burned), (Burned, Used), (Used, Reserved), (Burned, Reserved)] {
-        let (_d, s) = fresh();
-        mailbox_in(&s, from);
-        assert_eq!(
-            go(&s, to, &reserved_data()),
+            go(&s, to, &data(Some("x"), Some(1))),
             Err(StoreError::Conflict),
             "{from:?}->{to:?}"
         );
+        assert_eq!(s.get_slot(key()).unwrap().unwrap().status, from);
     }
 }
 
@@ -742,15 +691,10 @@ fn slot_invalid_transitions_and_final_states() {
 fn repeating_a_transition_is_harmless_unless_data_differs() {
     let (_d, s) = fresh();
     mailbox_in(&s, SlotStatus::Reserving);
-    go(&s, SlotStatus::Reserved, &reserved_data()).unwrap();
-    go(&s, SlotStatus::Reserved, &reserved_data()).unwrap();
-    go(&s, SlotStatus::Reserved, &SlotPatch::default()).unwrap();
+    go(&s, SlotStatus::Reserving, &reserving_data()).unwrap();
+    go(&s, SlotStatus::Reserving, &SlotPatch::default()).unwrap();
     assert_eq!(
-        go(&s, SlotStatus::Reserved, &data(Some(8), None, None)),
-        Err(StoreError::Conflict)
-    );
-    assert_eq!(
-        go(&s, SlotStatus::Reserved, &data(None, Some("otro"), None)),
+        go(&s, SlotStatus::Reserving, &data(Some("otro"), None)),
         Err(StoreError::Conflict)
     );
 }
@@ -759,16 +703,6 @@ fn repeating_a_transition_is_harmless_unless_data_differs() {
 fn transitions_require_their_data() {
     let (_s_dir, s) = fresh();
     mailbox_in(&s, SlotStatus::Reserving);
-    assert_eq!(
-        go(&s, SlotStatus::Reserved, &SlotPatch::default()),
-        Err(StoreError::MissingData)
-    ); // no round
-    assert_eq!(
-        go(&s, SlotStatus::Reserved, &data(None, Some("juan"), None)),
-        Err(StoreError::MissingData)
-    );
-    go(&s, SlotStatus::Reserved, &data(Some(7), None, None)).unwrap();
-    go(&s, SlotStatus::Revealing, &SlotPatch::default()).unwrap(); // the name came from `reserving`
     assert_eq!(
         go(&s, SlotStatus::Used, &SlotPatch::default()),
         Err(StoreError::MissingData)
@@ -782,64 +716,34 @@ fn transitions_require_their_data() {
 }
 
 #[test]
-fn recovered_reservation_without_name_is_representable_and_asks_for_the_name_later() {
-    let (_d, s) = fresh();
-    mailbox_in(&s, SlotStatus::Burned);
-    s.reconcile_slot(key(), SlotStatus::Reserved, &data(Some(3), None, None), 5)
-        .unwrap();
-    let got = s.get_slot(key()).unwrap().unwrap();
-    assert_eq!(
-        (got.status, got.round, got.pending_name),
-        (SlotStatus::Reserved, Some(3), None)
-    );
-    assert_eq!(
-        go(&s, SlotStatus::Revealing, &SlotPatch::default()),
-        Err(StoreError::MissingData)
-    );
-    go(&s, SlotStatus::Reserved, &data(None, Some("ana"), None)).unwrap(); // the app asks for the name and fills it in
-    go(&s, SlotStatus::Revealing, &SlotPatch::default()).unwrap();
-    assert_eq!(s.get_slot(key()).unwrap().unwrap().pending_name.as_deref(), Some("ana"));
-}
-
-#[test]
 fn a_transition_never_overwrites_fixed_data() {
     let (_d, s) = fresh();
-    mailbox_in(&s, SlotStatus::Reserved); // round 7, name "juan"
+    mailbox_in(&s, SlotStatus::Reserving); // name "juan"
     assert_eq!(
-        go(&s, SlotStatus::Revealing, &data(Some(8), None, None)),
+        go(&s, SlotStatus::Used, &data(Some("otro"), Some(5))),
         Err(StoreError::Conflict)
     );
+    go(&s, SlotStatus::Used, &data(None, Some(5))).unwrap();
     assert_eq!(
-        go(&s, SlotStatus::Revealing, &data(None, Some("otro"), None)),
-        Err(StoreError::Conflict)
-    );
-    assert_eq!(
-        go(&s, SlotStatus::Revealing, &data(Some(7), Some("juan"), None)),
-        Ok(())
-    ); // same data: fine
-    go(&s, SlotStatus::Used, &data(None, None, Some(5))).unwrap();
-    assert_eq!(
-        go(&s, SlotStatus::Used, &data(None, None, Some(6))),
+        go(&s, SlotStatus::Used, &data(None, Some(6))),
         Err(StoreError::Conflict)
     );
 }
 
 #[test]
-fn missing_slot_and_huge_round() {
+fn missing_slot() {
     let (_d, s) = fresh();
     assert_eq!(
         go(&s, SlotStatus::Burned, &SlotPatch::default()),
         Err(StoreError::NotFound)
     );
-    let huge = slot_at(key(), SlotStatus::Reserved, data(Some(u64::MAX), Some("x"), None));
-    assert_eq!(s.insert_slot(&huge), Err(StoreError::OutOfRange));
 }
 
 #[test]
 fn reconcile_follows_the_chain() {
     let (_d, s) = fresh();
-    mailbox_in(&s, SlotStatus::Reserved);
-    s.reconcile_slot(key(), SlotStatus::Used, &data(None, None, Some(6)), 20)
+    mailbox_in(&s, SlotStatus::Reserving);
+    s.reconcile_slot(key(), SlotStatus::Used, &data(None, Some(6)), 20)
         .unwrap();
     assert_eq!(s.get_slot(key()).unwrap().unwrap().status, SlotStatus::Used);
     assert_eq!(
@@ -850,7 +754,7 @@ fn reconcile_follows_the_chain() {
     mailbox_in(&s2, SlotStatus::Reserving);
     s2.reconcile_slot(key(), SlotStatus::Burned, &SlotPatch::default(), 1)
         .unwrap();
-    s2.reconcile_slot(key(), SlotStatus::Used, &data(None, None, Some(6)), 2)
+    s2.reconcile_slot(key(), SlotStatus::Used, &data(None, Some(6)), 2)
         .unwrap(); // burned → used
     assert_eq!(s2.get_slot(key()).unwrap().unwrap().status, SlotStatus::Used);
 }
@@ -859,14 +763,12 @@ fn reconcile_follows_the_chain() {
 fn complete_slot_is_atomic() {
     let (_d, s) = fresh();
     mailbox_in(&s, SlotStatus::Reserving);
-    go(&s, SlotStatus::Reserved, &reserved_data()).unwrap();
-    go(&s, SlotStatus::Revealing, &SlotPatch::default()).unwrap();
     s.put_journal(&entry("reveal-1", 1)).unwrap();
     // Another key already holds (n, kind, j): everything is rolled back.
     s.insert_address(&mailbox_address(1)).unwrap();
     let clash = s.complete_slot(key(), &mailbox_address(2), Some("reveal-1"), 30);
     assert_eq!(clash, Err(StoreError::Conflict));
-    assert_eq!(s.get_slot(key()).unwrap().unwrap().status, SlotStatus::Revealing);
+    assert_eq!(s.get_slot(key()).unwrap().unwrap().status, SlotStatus::Reserving);
     assert_eq!(s.list_journal().unwrap().len(), 1);
 }
 
@@ -874,8 +776,6 @@ fn complete_slot_is_atomic() {
 fn complete_slot_success_and_repeat() {
     let (_d, s) = fresh();
     mailbox_in(&s, SlotStatus::Reserving);
-    go(&s, SlotStatus::Reserved, &reserved_data()).unwrap();
-    go(&s, SlotStatus::Revealing, &SlotPatch::default()).unwrap();
     s.put_journal(&entry("reveal-1", 1)).unwrap();
     s.complete_slot(key(), &mailbox_address(1), Some("reveal-1"), 30)
         .unwrap();
@@ -895,20 +795,15 @@ fn complete_slot_rejects_an_address_of_another_slot() {
 }
 
 #[test]
-fn attempt_counters_are_separate_and_never_reset() {
+fn the_attempt_counter_never_resets_on_its_own() {
     let (_d, s) = fresh();
     mailbox_in(&s, SlotStatus::Reserving);
-    assert_eq!(s.bump_slot_attempts(key(), AttemptKind::Reserve, 5).unwrap(), 1);
-    assert_eq!(s.bump_slot_attempts(key(), AttemptKind::Reserve, 6).unwrap(), 2);
-    assert_eq!(s.bump_slot_attempts(key(), AttemptKind::Reveal, 7).unwrap(), 1);
-    go(&s, SlotStatus::Reserved, &reserved_data()).unwrap();
-    let slot = s.get_slot(key()).unwrap().unwrap();
-    assert_eq!((slot.reserve_attempts, slot.reveal_attempts), (2, 1));
+    assert_eq!(s.bump_slot_attempts(key(), 5).unwrap(), 1);
+    assert_eq!(s.bump_slot_attempts(key(), 6).unwrap(), 2);
+    go(&s, SlotStatus::Burned, &SlotPatch::default()).unwrap();
+    assert_eq!(s.get_slot(key()).unwrap().unwrap().attempts, 2);
     let missing = SlotKey { j: 99, ..key() };
-    assert_eq!(
-        s.bump_slot_attempts(missing, AttemptKind::Reveal, 1),
-        Err(StoreError::NotFound)
-    );
+    assert_eq!(s.bump_slot_attempts(missing, 1), Err(StoreError::NotFound));
 }
 
 #[test]
@@ -916,17 +811,34 @@ fn release_only_a_never_attempted_reserving_slot() {
     let (_d, s) = fresh();
     assert_eq!(s.release_slot(key()), Err(StoreError::NotFound));
     mailbox_in(&s, SlotStatus::Reserving);
-    s.bump_slot_attempts(key(), AttemptKind::Reserve, 1).unwrap();
+    s.bump_slot_attempts(key(), 1).unwrap();
     assert_eq!(s.release_slot(key()), Err(StoreError::InvalidTransition)); // cannot release once attempted
     let other = SlotKey { j: 5, ..key() };
     s.insert_slot(&slot_at(other, SlotStatus::Reserving, reserving_data()))
         .unwrap();
     s.release_slot(other).unwrap();
     assert_eq!(s.get_slot(other).unwrap(), None);
-    let reserved = SlotKey { j: 6, ..key() };
-    s.insert_slot(&slot_at(reserved, SlotStatus::Reserved, reserved_data()))
+    let used = SlotKey { j: 6, ..key() };
+    s.insert_slot(&slot_at(used, SlotStatus::Used, data(None, Some(6))))
         .unwrap();
-    assert_eq!(s.release_slot(reserved), Err(StoreError::InvalidTransition));
+    assert_eq!(s.release_slot(used), Err(StoreError::InvalidTransition));
+}
+
+#[test]
+fn free_name_taken_slot_frees_only_a_reserving_mailbox_even_with_attempts() {
+    let (_d, s) = fresh();
+    mailbox_in(&s, SlotStatus::Reserving);
+    s.bump_slot_attempts(key(), 1).unwrap();
+    s.free_name_taken_slot(key()).unwrap();
+    assert_eq!(s.get_slot(key()).unwrap(), None, "freed with an attempt counted");
+    s.free_name_taken_slot(key()).unwrap(); // nothing left: harmless
+    let used = SlotKey { j: 6, ..key() };
+    s.insert_slot(&slot_at(used, SlotStatus::Used, data(None, Some(6)))).unwrap();
+    s.free_name_taken_slot(used).unwrap();
+    assert_eq!(s.get_slot(used).unwrap().unwrap().status, SlotStatus::Used, "a used slot stays");
+    s.insert_slot(&slot_at(alias_key(), SlotStatus::Reserving, SlotPatch::default())).unwrap();
+    s.free_name_taken_slot(alias_key()).unwrap();
+    assert!(s.get_slot(alias_key()).unwrap().is_some(), "an alias is never freed this way");
 }
 
 #[test]
@@ -944,20 +856,6 @@ fn slot_unique_nullifier_listing_and_by_status() {
     assert!(s.slots_by_status(SlotStatus::Used).unwrap().is_empty());
 }
 
-#[test]
-fn open_slots_lists_the_half_done_ones_once_in_order() {
-    let (_d, s) = fresh();
-    s.insert_slot(&slot_at(SlotKey { j: 7, ..key() }, SlotStatus::Revealing, reserved_data())).unwrap();
-    s.insert_slot(&slot_at(SlotKey { j: 9, ..key() }, SlotStatus::Used, data(None, None, Some(5)))).unwrap();
-    s.insert_slot(&slot_at(SlotKey { j: 8, ..key() }, SlotStatus::Reserved, reserved_data())).unwrap();
-    mailbox_in(&s, SlotStatus::Reserving);
-    let open: Vec<(u32, SlotStatus)> = s.open_slots().unwrap().iter().map(|x| (x.key.j, x.status)).collect();
-    assert_eq!(
-        open,
-        [(key().j, SlotStatus::Reserving), (7, SlotStatus::Revealing), (8, SlotStatus::Reserved)],
-        "the three half-done states, without the finished ones, by slot"
-    );
-}
 
 // ---------- addresses ----------
 
@@ -1230,14 +1128,6 @@ fn journal_put_list_remove() {
 // ---------- atomic operations ----------
 
 #[test]
-fn reveal_attempts_also_block_release() {
-    let (_d, s) = fresh();
-    mailbox_in(&s, SlotStatus::Reserving);
-    s.bump_slot_attempts(key(), AttemptKind::Reveal, 1).unwrap();
-    assert_eq!(s.release_slot(key()), Err(StoreError::InvalidTransition));
-}
-
-#[test]
 fn mark_included_and_raise_is_atomic_for_real() {
     let (_d, s) = fresh();
     s.insert_bono(&leaf(9, 0, Plan::Free)).unwrap();
@@ -1283,12 +1173,7 @@ fn reconcile_address_creates_slot_and_address_when_missing() {
 
 #[test]
 fn reconcile_address_upgrades_an_existing_slot() {
-    for from in [
-        SlotStatus::Reserved,
-        SlotStatus::Burned,
-        SlotStatus::Revealing,
-        SlotStatus::Reserving,
-    ] {
+    for from in [SlotStatus::Burned, SlotStatus::Reserving] {
         let (_d, s) = fresh();
         mailbox_in(&s, from);
         s.reconcile_address(&recovered_slot(SlotStatus::Used), &mailbox_address(1), 50)
@@ -1525,25 +1410,13 @@ fn include_bono_sets_usable_at_only_once_and_closes_the_journal() {
 fn reset_slot_attempts_only_for_open_slots() {
     let (_d, s) = fresh();
     mailbox_in(&s, SlotStatus::Reserving);
-    s.bump_slot_attempts(key(), AttemptKind::Reserve, 2).unwrap();
-    s.bump_slot_attempts(key(), AttemptKind::Reveal, 2).unwrap();
+    s.bump_slot_attempts(key(), 2).unwrap();
+    s.bump_slot_attempts(key(), 2).unwrap();
     s.reset_slot_attempts(key(), 3).unwrap();
-    let slot = s.get_slot(key()).unwrap().unwrap();
-    assert_eq!((slot.reserve_attempts, slot.reveal_attempts), (0, 0));
+    assert_eq!(s.get_slot(key()).unwrap().unwrap().attempts, 0);
     go(&s, SlotStatus::Burned, &SlotPatch::default()).unwrap();
     assert_eq!(s.reset_slot_attempts(key(), 4), Err(StoreError::InvalidTransition));
     assert_eq!(s.reset_slot_attempts(alias_key(), 4), Err(StoreError::NotFound));
-}
-
-#[test]
-fn clear_slot_name_only_when_reserved() {
-    let (_d, s) = fresh();
-    mailbox_in(&s, SlotStatus::Reserving);
-    assert_eq!(s.clear_slot_name(key(), 2), Err(StoreError::InvalidTransition));
-    go(&s, SlotStatus::Reserved, &reserved_data()).unwrap();
-    s.clear_slot_name(key(), 3).unwrap();
-    assert_eq!(s.get_slot(key()).unwrap().unwrap().pending_name, None);
-    assert_eq!(s.clear_slot_name(alias_key(), 4), Err(StoreError::NotFound));
 }
 
 #[test]
@@ -1576,17 +1449,6 @@ fn claim_bono_leaf_keeps_one_method_per_leaf() {
 }
 
 #[test]
-fn reconcile_reserved_can_forget_the_name() {
-    let (_d, s) = fresh();
-    mailbox_in(&s, SlotStatus::Reserving);
-    s.reconcile_reserved(key(), 9, false, 2).unwrap();
-    let slot = s.get_slot(key()).unwrap().unwrap();
-    assert_eq!((slot.status, slot.round, slot.pending_name), (SlotStatus::Reserved, Some(9), None));
-    s.reconcile_reserved(key(), 9, true, 3).unwrap();
-    assert_eq!(s.reconcile_reserved(key(), 8, true, 4), Err(StoreError::Conflict), "another round contradicts");
-}
-
-#[test]
 fn abandon_reserving_slot_is_one_operation() {
     let (_d, s) = fresh();
     // `Slot::abandonable` predicts what the SQL does in each case (the UI uses it to show the button).
@@ -1595,12 +1457,12 @@ fn abandon_reserving_slot_is_one_operation() {
     assert!(predicts(0));
     assert!(s.abandon_reserving_slot(key(), 0).unwrap(), "no attempts: always");
     mailbox_in(&s, SlotStatus::Reserving);
-    s.bump_slot_attempts(key(), AttemptKind::Reserve, 100).unwrap();
+    s.bump_slot_attempts(key(), 100).unwrap();
     assert!(!predicts(100));
     assert!(!s.abandon_reserving_slot(key(), 100).unwrap(), "last proof not before the limit");
     assert!(predicts(101));
     assert!(s.abandon_reserving_slot(key(), 101).unwrap());
-    mailbox_in(&s, SlotStatus::Reserved);
+    mailbox_in(&s, SlotStatus::Burned);
     assert!(!predicts(i64::MAX));
     assert!(!s.abandon_reserving_slot(key(), i64::MAX).unwrap(), "only `reserving`");
 }
@@ -2189,4 +2051,33 @@ fn a_failed_v3_migration_leaves_the_v2_database_untouched() {
     assert!(s.conn().prepare("SELECT x FROM sent_messages").is_err(), "the half migration must not remain");
     s.close().unwrap();
     assert_eq!(open_in(&dir).schema_version().unwrap(), CURRENT);
+}
+
+// ---------- one-step mailboxes (migration v5) ----------
+
+#[test]
+fn migration_v5_burns_the_two_step_reservations() {
+    let dir = TempDir::new().unwrap();
+    {
+        let s = LocalStore::open_with_migrations(&db_path(&dir), &KEY, &scope(), &schema::MIGRATIONS[..4]).unwrap();
+        assert_eq!(s.schema_version().unwrap(), 4);
+        let insert = "INSERT INTO slots (n, kind, j, slot_nul, status, addr_key, round, pending_name, reserve_attempts, \
+                      reveal_attempts, updated_at) VALUES (1, 'mailbox', ?1, ?2, ?3, NULL, 7, ?4, 1, ?5, 1)";
+        s.conn().execute(insert, params![0, [1u8; 32], "reserved", Option::<String>::None, 0]).unwrap();
+        s.conn().execute(insert, params![1, [2u8; 32], "revealing", Some("juan"), 1]).unwrap();
+        s.conn().execute(insert, params![2, [3u8; 32], "reserving", Some("ana"), 0]).unwrap();
+    }
+    let s = open_in(&dir);
+    assert_eq!(s.schema_version().unwrap(), CURRENT);
+    let slots = s.list_slots(1).unwrap();
+    let got: Vec<(u32, SlotStatus, Option<String>)> =
+        slots.into_iter().map(|x| (x.key.j, x.status, x.pending_name)).collect();
+    assert_eq!(
+        got,
+        [
+            (0, SlotStatus::Burned, None),
+            (1, SlotStatus::Burned, None),
+            (2, SlotStatus::Reserving, Some("ana".into())),
+        ]
+    );
 }

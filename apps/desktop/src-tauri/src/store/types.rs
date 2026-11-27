@@ -23,11 +23,11 @@ sql_enum!(
 );
 
 sql_enum!(
-    /// State of a touched slot (free slots have no row).
+    /// State of a touched slot (free slots have no row). `reserving`: being registered (mailbox or alias, one
+    /// transaction each). The `reserved` and `revealing` texts of the old two-step mailbox no longer exist (migration
+    /// v5).
     SlotStatus {
         Reserving => "reserving",
-        Reserved => "reserved",
-        Revealing => "revealing",
         Used => "used",
         Burned => "burned",
     }
@@ -78,28 +78,14 @@ impl SlotStatus {
         matches!(self, Self::Used | Self::Burned)
     }
 
-    /// Normal flow transitions.
-    /// - Mailbox: `reserving → reserved | burned`, `reserved → revealing | burned`,
-    ///   `revealing → reserved (failed reveal) | used | burned`.
-    /// - Alias (single step): `reserving → used | burned`.
-    pub fn can_become(self, kind: SlotKind, to: SlotStatus) -> bool {
-        use SlotStatus::*;
-        match kind {
-            SlotKind::Alias => matches!((self, to), (Reserving, Used | Burned)),
-            SlotKind::Mailbox => matches!(
-                (self, to),
-                (Reserving, Reserved | Burned) | (Reserved, Revealing | Burned) | (Revealing, Reserved | Used | Burned)
-            ),
-        }
+    /// Normal flow transitions (mailbox and alias alike, one transaction each): `reserving → used | burned`.
+    pub fn can_become(self, to: SlotStatus) -> bool {
+        matches!((self, to), (Self::Reserving, Self::Used | Self::Burned))
     }
 
-    /// `Recovery` transitions, which read the truth from the chain: from any non-final state to `used`/`burned`;
-    /// `burned → used` (believed burned, but the chain says used); and to `reserved` (unrevealed reservation found
-    /// in `pendingNames`) from `reserving`, `revealing` or `burned`. `used → *` does not exist.
+    /// `Recovery` transitions, which read the truth from the chain: from any non-final state to `used`/`burned`, and
+    /// `burned → used` (believed burned, but the chain says used). `used → *` does not exist.
     pub fn reconcile_ok(self, to: SlotStatus) -> bool {
-        self == to
-            || (matches!(to, Self::Used | Self::Burned) && !self.is_final())
-            || (self == Self::Burned && to == Self::Used)
-            || (to == Self::Reserved && matches!(self, Self::Reserving | Self::Revealing | Self::Burned))
+        self == to || (matches!(to, Self::Used | Self::Burned) && !self.is_final()) || (self == Self::Burned && to == Self::Used)
     }
 }

@@ -1,4 +1,4 @@
-// Adapts the raw payer client (payer/client.ts: HTTP status + body) to what the Issuer and RoundTicker need:
+// Adapts the raw payer client (payer/client.ts: HTTP status + body) to what the Issuer needs:
 // a closed set of outcomes and no exceptions.
 //
 // Only `issued` and `already-issued` mean the `bono` exists. Everything else is retried with the same id
@@ -22,22 +22,14 @@ export type IssueOutcome =
   /** Not issued; `reason` is a fixed payer code (or `id-conflict`, `fee-over-cap`, `http-<status>`). */
   | { status: 'failed'; reason: string };
 
-export type AdvanceOutcome =
-  | { status: 'advanced'; round: number | null }
-  /** May have been paid and sent (drop, 5xx, timeout), so it is not treated as "did not advance". `validUntil`: Unix ms. */
-  | { status: 'unknown'; validUntil?: number }
-  | { status: 'failed' };
-
 export type PayerClient = {
   issue(id: string, plan: IssuePlan): Promise<IssueOutcome>;
-  advanceRound(): Promise<AdvanceOutcome>;
 };
 
 type Reply = { status: number; body: unknown };
 /** The subset of the raw client used here (satisfied by `payerClient(...)` from payer/client.ts). */
 export type RawPayer = {
   issue(id: string, plan: IssuePlan): Promise<Reply>;
-  advanceRound(): Promise<Reply>;
 };
 
 const CODE_RE = /^[a-z0-9-]{1,40}$/;
@@ -88,18 +80,6 @@ function failedWith(reason: 'fee-over-cap' | 'id-conflict', log: Logger): IssueO
   return { status: 'failed', reason };
 }
 
-function advanceOutcome({ status, body }: Reply): AdvanceOutcome {
-  if (status !== 200) return { status: 'unknown' }; // a 5xx doesn't guarantee nothing was paid
-  const state = field(body, 'status');
-  if (state === 'advanced') {
-    const round = field(body, 'round');
-    return { status: 'advanced', round: typeof round === 'number' ? round : null };
-  }
-  if (state === 'failed') return { status: 'failed' };
-  const validUntil = field(body, 'validUntil');
-  return { status: 'unknown', ...(typeof validUntil === 'number' && Number.isFinite(validUntil) && { validUntil }) };
-}
-
 export function adaptPayer(raw: RawPayer, log: Logger): PayerClient {
   const issueOutcome = issueOutcomes(log);
   return {
@@ -108,13 +88,6 @@ export function adaptPayer(raw: RawPayer, log: Logger): PayerClient {
         return issueOutcome(await raw.issue(id, plan));
       } catch {
         return { status: 'unavailable', reason: 'unreachable' }; // the Issuer logs the pause
-      }
-    },
-    async advanceRound() {
-      try {
-        return advanceOutcome(await raw.advanceRound());
-      } catch {
-        return { status: 'unknown' };
       }
     },
   };

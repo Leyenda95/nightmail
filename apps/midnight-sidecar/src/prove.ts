@@ -1,5 +1,4 @@
-// `contract.proveCall`: builds and proves a call to NightMailRegistry (reserveMailbox, revealMailbox or
-// createAlias) and returns the proven, unbalanced transaction, which the core sends to the relayer.
+// `contract.proveCall`: builds and proves a call to NightMailRegistry (registerMailbox or createAlias) and returns the proven, unbalanced transaction, which the core sends to the relayer.
 //
 // - No wallet: the call is built with `createUnprovenCallTxFromInitialStates` from the state read from the
 //   indexer through net.ts. The coin and encryption keys midnight-js asks for are zeros: these circuits neither
@@ -56,7 +55,7 @@ export const MAX_CLOCK_BEHIND_MS = 60_000;
  * - It does not come from the local clock: midnight-js computes it as "now + ttlSeconds", which would publish the
  *   prover's clock (a constant offset would let transactions be linked) and how long execution took.
  * - Rounded, so it does not reveal the exact block that was read (every transaction in the same 10-min slot
- *   carries the same value), which would defeat the relayer's random delay. Rounded down to land between 20 and
+ *   carries the same value). Rounded down to land between 20 and
  *   30 min: the relayer accepts no more than 35 min ahead (TTL_MAX_AHEAD_MS in apps/server/src/relayer/validate.ts).
  * It is set on the intent before proving (the ttl is writable until the transaction is bound).
  */
@@ -72,10 +71,7 @@ export const NO_WALLET_KEY = '0'.repeat(64);
 
 /** Witnesses of the membership proof: leaf `k` of bono `s` and the slot `j` being spent. */
 type Bono = { s: Uint8Array; k: bigint; plan: Plan; validUntil: bigint; j: bigint };
-/**
- * A validated call: the arguments in circuit order, the bono if it spends a slot and the core's
- * `minLeafCount` (0 if absent).
- */
+/** A validated call: the arguments in circuit order, the bono if it spends a slot and the core's `minLeafCount` (0 if absent). */
 type Call = { args: unknown[]; bono?: Bono; minLeafCount: number };
 
 /**
@@ -103,21 +99,11 @@ function bonoOf(witnesses: unknown, d: Decoders): Bono {
   };
 }
 
-/**
- * reserveMailbox round: Uint<64> in decimal, without the maximum (the contract computes `r + 1`, and with the
- * maximum the sum overflows and the reservation could never be revealed).
- */
-function roundOf(value: unknown): bigint {
-  if (typeof value !== 'string' || !/^(?:0|[1-9]\d{0,19})$/.test(value)) throw invalid();
-  return uint(BigInt(value) + 1n, 64, 'round') - 1n;
-}
-
 /** The circuits proven without a wallet, with their arguments in contract order. */
 const CIRCUITS: Record<string, (args: Params, witnesses: unknown, d: Decoders) => Omit<Call, 'minLeafCount'>> = {
-  reserveMailbox: (a, w, d) => ({ args: [d.b32(a.commit, 'commit'), roundOf(a.round)], bono: bonoOf(w, d) }),
-  revealMailbox: (a, _w, d) => ({
-    args: [d.name(a.name), d.b32(a.encPk, 'encPk'), d.b32(a.authPk, 'authPk'), d.b32(a.salt, 'salt'),
-      d.b32(a.slotNul, 'slotNul'), d.hex(a.nameCipher, 104, 'nameCipher')],
+  registerMailbox: (a, w, d) => ({
+    args: [d.name(a.name), d.b32(a.encPk, 'encPk'), d.b32(a.authPk, 'authPk'), d.hex(a.nameCipher, 104, 'nameCipher')],
+    bono: bonoOf(w, d),
   }),
   createAlias: (a, w, d) => ({ args: [d.b32(a.encPk, 'encPk'), d.b32(a.authPk, 'authPk')], bono: bonoOf(w, d) }),
 };
@@ -128,7 +114,8 @@ function parseCall(params: unknown, seen: Uint8Array[]): { address: string; circ
   if (!isObject(params.args)) throw invalid();
   const address = contractAddress(params);
   const minLeafCount = minLeafCountOf(params);
-  return { address, circuit: params.circuit, call: { ...CIRCUITS[params.circuit](params.args, params.witnesses, decoders(seen)), minLeafCount } };
+  const call = { ...CIRCUITS[params.circuit](params.args, params.witnesses, decoders(seen)), minLeafCount };
+  return { address, circuit: params.circuit, call };
 }
 
 /** Wipes the bytes of the arguments and witnesses (public ones too: no need to tell them apart). */
@@ -207,10 +194,6 @@ const PROBLEMS: Record<string, CallProblem> = {
   'Not a bono': 'not-a-bono',
   'No slots left': 'no-slots-left',
   'Slot already used': 'slot-already-used',
-  'Stale round': 'stale-round',
-  'Not reserved': 'not-reserved',
-  'Wrong reveal': 'wrong-reveal',
-  'Too early': 'too-early',
   'Address taken': 'address-taken',
   // buyBono (wallet.buyBono)
   'Wrong token': 'wrong-token',
@@ -220,10 +203,15 @@ const PROBLEMS: Record<string, CallProblem> = {
 
 const rejected = (reason: CallProblem) => new AppError(codes.CALL_REJECTED, 'Call rejected', { reason });
 
-/** CALL_REJECTED if the error is a contract assert that failed while running the circuit locally. */
+/**
+ * CALL_REJECTED if the error is a contract assert that failed while running the circuit locally. The
+ * on-chain reserved names ("Name reserved") come out as NAME_REJECTED `reserved`, like the app's own list
+ * (a superset, normally checked before proving).
+ */
 export function rejectionOf(error: unknown): AppError | undefined {
   const failedAssert = error instanceof Error ? /^failed assert: (.*)$/.exec(error.message) : null;
   if (!failedAssert) return undefined;
+  if (failedAssert[1] === 'Name reserved') return new AppError(codes.NAME_REJECTED, 'Name rejected', { reason: 'reserved' });
   return rejected(Object.hasOwn(PROBLEMS, failedAssert[1]) ? PROBLEMS[failedAssert[1]] : 'other');
 }
 

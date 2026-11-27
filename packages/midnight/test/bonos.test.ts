@@ -4,10 +4,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ContractState } from '@midnight-ntwrk/compact-runtime';
 import { bonoPositions, decodeState, InvalidInput, NotRegistryState, Plan } from '../src/index.ts';
-import { advanceRoundState, deploy, hex } from './helpers.ts';
+import { contractStateOf, deploy, hex } from './helpers.ts';
 
 /** The state as it comes from the indexer (hex), decoded again. */
-const viaIndexer = async (c: any) => decodeState(hex((await advanceRoundState(c)).serialize()));
+const viaIndexer = async (c: any) => decodeState(hex(contractStateOf(c).serialize()));
 
 test('tree without leaves: empty index', async () => {
   assert.deepEqual(bonoPositions(await viaIndexer(await deploy())), { positions: new Map(), leafCount: 0 });
@@ -56,7 +56,7 @@ test('the state of another contract is not a registry: NotRegistryState', () => 
 
 test('decodeState: the state in hex as the indexer serves it: anything else is InvalidInput', async () => {
   const c = await deploy();
-  const cs = await advanceRoundState(c);
+  const cs = contractStateOf(c);
   assert.deepEqual(decodeState(hex(cs.serialize())).serialize(), cs.serialize());
   for (const bad of ['', 'zz', 'ABCD', '0', '00', 42, null]) {
     assert.throws(() => decodeState(bad as string), (e) => e instanceof InvalidInput && !(e instanceof NotRegistryState), String(bad));

@@ -7,24 +7,22 @@ import { ContractState } from '@midnight-ntwrk/compact-runtime';
 import {
   decodeActionState, decodeRegistry, InvalidInput, Kind, newAddressesBetween, NotRegistryState, page, Plan, readRegistry,
 } from '../src/index.ts';
-import { advanceRoundState, deploy, hex, registryState } from './helpers.ts';
+import { contractStateOf, deploy, hex, registryState } from './helpers.ts';
 
 const sorted = (xs: string[]) => [...xs].sort();
 
-test('freshly deployed contract: round 0, initial price, empty collections and tree without leaves', async () => {
+test('freshly deployed contract: initial price, empty collections and tree without leaves', async () => {
   const c = await deploy({ price: 7n });
   const s = readRegistry(c.view());
-  assert.equal(s.round, 0n);
   assert.equal(s.price, 7n);
   assert.deepEqual(s.oldPrices, []);
   assert.deepEqual(s.slotNullifiers, []);
   assert.deepEqual(s.addresses, []);
-  assert.deepEqual(s.pendingNames, []);
   assert.equal(s.bonos.leafCount, 0n);
   assert.equal(s.bonos.root, c.view().bonos.root().field);
 });
 
-test('full model: addresses, reservations, nullifiers, old prices and tree summary', async () => {
+test('full model: addresses, nullifiers, old prices and tree summary', async () => {
   const c = await deploy();
   const emptyRoot = readRegistry(c.view()).bonos.root;
   const free = await c.issue(Plan.free);
@@ -32,21 +30,17 @@ test('full model: addresses, reservations, nullifiers, old prices and tree summa
   const a1 = await c.alias(free, 0n);
   const a2 = await c.alias(paid, 4n);
   const juan = c.mailbox('juan.perez', paid, 0n);
-  await c.register(juan); // two rounds
-  const pending = c.mailbox('ana', free, 0n);
-  await c.reserve(pending);
+  await c.register(juan);
   await c.setPrice(150n);
-  await c.advanceRound();
 
   const s = readRegistry(c.view());
-  assert.equal(s.round, 3n);
   assert.equal(s.price, 150n);
   assert.deepEqual(s.oldPrices, [{ price: 100n, until: c.time() + 900n }]);
   assert.equal(s.bonos.leafCount, 2n);
   assert.notEqual(s.bonos.root, emptyRoot);
   assert.equal(s.bonos.root, c.view().bonos.root().field);
 
-  const nuls = [a1, a2].map((a) => hex(c.slotNul(a.bono, Kind.alias, a.j))).concat(hex(juan.slotNul), hex(pending.slotNul));
+  const nuls = [a1, a2].map((a) => hex(c.slotNul(a.bono, Kind.alias, a.j))).concat(hex(juan.slotNul));
   assert.deepEqual(s.slotNullifiers, sorted(nuls), 'sorted by value');
 
   assert.deepEqual(s.addresses.map((a) => a.addrKey), sorted([a1, a2, juan].map((a) => hex(a.addrKey))));
@@ -59,8 +53,6 @@ test('full model: addresses, reservations, nullifiers, old prices and tree summa
     addrKey: hex(a2.addrKey), encPk: hex(a2.encPk), authPk: hex(a2.authPk), kind: Kind.alias,
     nameCipher: '00'.repeat(104), slotNul: hex(c.slotNul(paid, Kind.alias, 4n)),
   });
-
-  assert.deepEqual(s.pendingNames, [{ slotNul: hex(pending.slotNul), reservedRound: 3n, commit: hex(pending.commit) }]);
 });
 
 test('several old prices, sorted by amount (numeric, not as text)', async () => {
@@ -77,11 +69,10 @@ test('several old prices, sorted by amount (numeric, not as text)', async () => 
 test('decodeRegistry reads the state bytes as the indexer serves them (hex)', async () => {
   const c = await deploy({ price: 9n });
   await c.issue(Plan.free);
-  const cs = await advanceRoundState(c);
+  const cs = contractStateOf(c);
   const decoded = decodeRegistry(hex(cs.serialize()));
   assert.deepEqual(decoded, readRegistry(c.view()));
   assert.equal(decoded.price, 9n);
-  assert.equal(decoded.round, 1n);
 });
 
 test('decodeRegistry rejects what is not a NightMailRegistry state', () => {

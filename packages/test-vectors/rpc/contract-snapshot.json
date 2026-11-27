@@ -1,12 +1,11 @@
 {
-  "note": "Example of the shape of contract.snapshot (an intermediate page; illustrative values, not from a real state). Bytes in hex; round, price, oldPrices, reservedRound and the root (Field) in decimal.",
+  "note": "Example of the shape of contract.snapshot (an intermediate page; illustrative values, not from a real state). Bytes in hex; price, oldPrices and the root (Field) in decimal.",
   "params": {
     "contractAddress": "adadadadadadadadadadadadadadadadadadadadadadadadadadadadadadadad",
     "cursor": {
       "blockHeight": 9860,
       "slotNullifiers": 2,
-      "addresses": 2,
-      "pendingNames": 0
+      "addresses": 2
     },
     "limit": 2
   },
@@ -14,7 +13,6 @@
     "blockHeight": 9860,
     "blockHash": "2bbbc33431b1f593fa28634bcea339cd4f962a5e5fed9fdef8f7589b601f36da",
     "blockTimestamp": 1794940000000,
-    "round": "3",
     "price": "150",
     "oldPrices": [
       {
@@ -28,8 +26,7 @@
     },
     "totals": {
       "slotNullifiers": 5,
-      "addresses": 3,
-      "pendingNames": 1
+      "addresses": 3
     },
     "slotNullifiers": [
       "5f1cf3b9e2515b8b450a241d37d988943a89fae05b1cd4d78b8a7956adee403e",
@@ -45,18 +42,10 @@
         "slotNul": "5f1cf3b9e2515b8b450a241d37d988943a89fae05b1cd4d78b8a7956adee403e"
       }
     ],
-    "pendingNames": [
-      {
-        "slotNul": "d16cd513a552583fe5c1f718aa72a50f24a50fa2341a380a42a2e080008a95ec",
-        "reservedRound": "4",
-        "commit": "2ca50a6c52377d4da657691710fdcd2c9f37473a0f261ce874acf78b00f4f855"
-      }
-    ],
     "next": {
       "blockHeight": 9860,
       "slotNullifiers": 4,
-      "addresses": null,
-      "pendingNames": null
+      "addresses": null
     }
   }
 }

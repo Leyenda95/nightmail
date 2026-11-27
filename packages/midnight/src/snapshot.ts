@@ -18,17 +18,14 @@ export type RegistryAddress = {
   nameCipher: string;
   slotNul: string;
 };
-export type PendingEntry = { slotNul: string; reservedRound: bigint; commit: string };
 /** A replaced price and the block time (Unix seconds, exclusive) until which it is still accepted. */
 export type OldPrice = { price: bigint; until: bigint };
 
 export type RegistrySnapshot = {
-  round: bigint;
   price: bigint;
   oldPrices: OldPrice[];
   slotNullifiers: string[];
   addresses: RegistryAddress[];
-  pendingNames: PendingEntry[];
   /** leafCount = leaves inserted (= first free position, as they are inserted in order); root = Field. */
   bonos: { leafCount: bigint; root: bigint };
 };
@@ -47,17 +44,12 @@ export function readRegistry(l: Ledger): RegistrySnapshot {
     addrKey: toHex(key), encPk: toHex(r.encPk), authPk: toHex(r.authPk), kind: r.kind,
     nameCipher: toHex(r.nameCipher), slotNul: toHex(r.slotNul),
   }));
-  const pendingNames: PendingEntry[] = [...l.pendingNames].map(([nul, p]) => ({
-    slotNul: toHex(nul), reservedRound: p.reservedRound, commit: toHex(p.commit),
-  }));
   const oldPrices: OldPrice[] = [...l.oldPrices].map(([price, until]) => ({ price, until }));
   return {
-    round: l.round,
     price: l.price,
     oldPrices: sortedBy(oldPrices, amountKey),
     slotNullifiers: [...l.slotNullifiers].map(toHex).sort(),
     addresses: sortedBy(addresses, (a) => a.addrKey),
-    pendingNames: sortedBy(pendingNames, (p) => p.slotNul),
     bonos: { leafCount: l.bonos.firstFree(), root: l.bonos.root().field },
   };
 }

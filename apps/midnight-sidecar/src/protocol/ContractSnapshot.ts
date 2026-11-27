@@ -2,7 +2,6 @@
 import type { AddressEntry } from "./AddressEntry.ts";
 import type { BonosSummary } from "./BonosSummary.ts";
 import type { OldPrice } from "./OldPrice.ts";
-import type { PendingNameEntry } from "./PendingNameEntry.ts";
 import type { SnapshotCursor } from "./SnapshotCursor.ts";
 import type { SnapshotTotals } from "./SnapshotTotals.ts";
 
@@ -14,7 +13,7 @@ export type ContractSnapshot = { blockHeight: number,
 /**
  * Block hash (hex) and time (Unix ms), to detect a reorg.
  */
-blockHash: string, blockTimestamp: number, round: string, price: string, oldPrices: Array<OldPrice>, bonos: BonosSummary, totals: SnapshotTotals, slotNullifiers: Array<string>, addresses: Array<AddressEntry>, pendingNames: Array<PendingNameEntry>, 
+blockHash: string, blockTimestamp: number, price: string, oldPrices: Array<OldPrice>, bonos: BonosSummary, totals: SnapshotTotals, slotNullifiers: Array<string>, addresses: Array<AddressEntry>, 
 /**
  * `null` on the last page.
  */

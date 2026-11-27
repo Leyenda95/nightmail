@@ -1,12 +1,8 @@
-// NightMailRegistry in the simulator: bonos, slots, two-step mailboxes and aliases.
+// NightMailRegistry in the simulator: bonos, slots, mailboxes and aliases.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { deploy, hex, Kind, NAME_CIPHER_BYTES, nameBytes, NO_EXPIRY, pc, Plan, PRICE, rand, T0 } from './sim.ts';
-
-const advance = async (c: Awaited<ReturnType<typeof deploy>>, n: number) => {
-  for (let i = 0; i < n; i++) await c.advanceRound();
-};
 
 // --- Bono issuance ---------------------------------------------------------------------------
 
@@ -57,8 +53,8 @@ test('free quota: 1 mailbox and 2 aliases', async () => {
   await c.alias(b, 0n);
   await c.alias(b, 1n);
   await assert.rejects(c.alias(b, 2n), /No slots left/);
-  await c.reserve(c.mailbox('ana', b, 0n));
-  await assert.rejects(c.reserve(c.mailbox('ana2', b, 1n)), /No slots left/);
+  await c.register(c.mailbox('ana', b, 0n));
+  await assert.rejects(c.register(c.mailbox('ana2', b, 1n)), /No slots left/);
 });
 
 test('paid quota: 5 mailboxes and 20 aliases', async () => {
@@ -66,8 +62,8 @@ test('paid quota: 5 mailboxes and 20 aliases', async () => {
   const b = await c.issue(Plan.paid);
   for (let j = 0n; j < 20n; j++) await c.alias(b, j);
   await assert.rejects(c.alias(b, 20n), /No slots left/);
-  for (let j = 0n; j < 5n; j++) await c.reserve(c.mailbox(`buzon${j}`, b, j));
-  await assert.rejects(c.reserve(c.mailbox('buzon5', b, 5n)), /No slots left/);
+  for (let j = 0n; j < 5n; j++) await c.register(c.mailbox(`buzon${j}`, b, j));
+  await assert.rejects(c.register(c.mailbox('buzon5', b, 5n)), /No slots left/);
   assert.equal(c.view().slotNullifiers.size(), 25n);
 });
 
@@ -76,14 +72,14 @@ test('a slot already used cannot be used again', async () => {
   const b = await c.issue(Plan.free);
   await c.alias(b, 0n);
   await assert.rejects(c.alias(b, 0n), /Slot already used/);
-  await c.reserve(c.mailbox('ana', b, 0n));
-  await assert.rejects(c.reserve(c.mailbox('otra', b, 0n)), /Slot already used/);
+  await c.register(c.mailbox('ana', b, 0n));
+  await assert.rejects(c.register(c.mailbox('otra', b, 0n)), /Slot already used/);
 });
 
 test('mailbox and alias are different slots: mailbox 0 does not spend alias 0', async () => {
   const c = await deploy();
   const b = await c.issue(Plan.free);
-  await c.reserve(c.mailbox('ana', b, 0n));
+  await c.register(c.mailbox('ana', b, 0n));
   await c.alias(b, 0n);
 });
 
@@ -92,17 +88,17 @@ test('another leaf of the same bono gives no extra quota: upgrading the plan lea
   const free = await c.issue(Plan.free);
   await c.alias(free, 0n);
   await c.alias(free, 1n);
-  await c.reserve(c.mailbox('ana', free, 0n));
+  await c.register(c.mailbox('ana', free, 0n));
   const free2 = await c.issue(Plan.free, free.s, 1n); // another free leaf with the same s
   await assert.rejects(c.alias(free2, 0n), /Slot already used/);
   await assert.rejects(c.alias(free2, 2n), /No slots left/);
   const paid = await c.buy(undefined, free.s, 2n); // upgrade with the same s
   await assert.rejects(c.alias(paid, 1n), /Slot already used/); // slots already spent still count
-  await assert.rejects(c.reserve(c.mailbox('otra', paid, 0n)), /Slot already used/);
+  await assert.rejects(c.register(c.mailbox('otra', paid, 0n)), /Slot already used/);
   for (let j = 2n; j < 20n; j++) await c.alias(paid, j);
   await assert.rejects(c.alias(paid, 20n), /No slots left/);
-  for (let j = 1n; j < 5n; j++) await c.reserve(c.mailbox(`b${j}`, paid, j));
-  await assert.rejects(c.reserve(c.mailbox('b5', paid, 5n)), /No slots left/);
+  for (let j = 1n; j < 5n; j++) await c.register(c.mailbox(`b${j}`, paid, j));
+  await assert.rejects(c.register(c.mailbox('b5', paid, 5n)), /No slots left/);
 });
 
 test('a repeated leaf (operator retry) gives no extra slots', async () => {
@@ -175,17 +171,13 @@ test('copying the keys of an alias from the mempool is useless: it gives another
   assert.equal(hex(c.view().addresses.lookup(victim.addrKey).slotNul), hex(c.slotNul(victimBono, Kind.alias, 0n)));
 });
 
-// --- Two-step mailbox -------------------------------------------------------------------------
+// --- Mailbox (one step) ----------------------------------------------------------------------
 
-test('reservation and reveal: the full record, with the slotNul, and the reservation is deleted', async () => {
+test('registerMailbox: one transaction spends the slot and stores the full record, with the slotNul', async () => {
   const c = await deploy();
   const b = await c.issue(Plan.free);
   const m = c.mailbox('juan.perez', b, 0n);
-  await c.reserve(m);
-  const pending = c.view().pendingNames.lookup(m.slotNul);
-  assert.equal(hex(pending.commit), hex(m.commit));
-  await advance(c, 2);
-  await c.reveal(m);
+  await c.register(m);
   const rec = c.view().addresses.lookup(m.addrKey);
   assert.equal(hex(m.addrKey), hex(pc.addressKey(nameBytes('juan.perez'))));
   assert.equal(hex(rec.encPk), hex(m.encPk));
@@ -193,88 +185,90 @@ test('reservation and reveal: the full record, with the slotNul, and the reserva
   assert.equal(rec.kind, Kind.mailbox);
   assert.equal(hex(rec.nameCipher), hex(m.nameCipher));
   assert.equal(hex(rec.slotNul), hex(c.slotNul(b, Kind.mailbox, 0n)));
-  assert.ok(!c.view().pendingNames.member(m.slotNul));
+  assert.ok(c.view().slotNullifiers.member(m.slotNul));
 });
 
-test('a repeated reveal (the same transaction again) is rejected', async () => {
+test('a repeated registration (the same transaction again) is rejected', async () => {
   const c = await deploy();
   const b = await c.issue(Plan.free);
   const m = c.mailbox('ana', b, 0n);
+  const proved = await c.prove('registerMailbox', { bono: b, j: 0n }, m.name, m.encPk, m.authPk, m.nameCipher);
+  c.verifyNow(proved);
   await c.register(m);
-  await assert.rejects(c.reveal(m), /Not reserved/);
+  await assert.rejects(c.register(m), /Slot already used/);
+  assert.throws(() => c.verifyNow(proved), /mismatch/, 'the node rejects the replayed transaction');
   assert.equal(c.view().addresses.size(), 1n);
 });
 
-test('the reservation stores the proposed round: with the maximum round the sum does not fit and it is rejected', async () => {
+test('a taken name rejects the whole registration and the slot stays unspent', async () => {
   const c = await deploy();
-  const b = await c.issue(Plan.paid);
-  const m = c.mailbox('ana', b, 0n);
-  await c.reserve(m, 7n);
-  assert.equal(c.view().pendingNames.lookup(m.slotNul).reservedRound, 7n);
-  await assert.rejects(c.reserve(c.mailbox('otra', b, 1n), 2n ** 64n - 1n), /cast .* failed/);
-  assert.ok(!c.view().slotNullifiers.member(c.slotNul(b, Kind.mailbox, 1n)), 'the rejection does not spend the slot');
+  const first = await c.issue(Plan.free);
+  const second = await c.issue(Plan.free);
+  await c.register(c.mailbox('ana', first, 0n));
+  const loser = c.mailbox('ana', second, 0n);
+  await assert.rejects(c.register(loser), /Address taken/);
+  assert.ok(!c.view().slotNullifiers.member(loser.slotNul), 'the rejection does not spend the slot');
+  // The same slot registers another name afterwards.
+  await c.register(c.mailbox('ana2', second, 0n));
+  assert.equal(c.view().addresses.size(), 2n);
 });
 
-test('the reveal must be from a round after the reserved one', async () => {
-  const c = await deploy();
-  const b = await c.issue(Plan.paid);
-  const m = c.mailbox('ana', b, 0n);
-  await c.reserve(m); // r = current round + 1
-  await assert.rejects(c.reveal(m), /Too early/);
-  await c.advanceRound();
-  await assert.rejects(c.reveal(m), /Too early/); // round == r
-  await c.advanceRound();
-  await c.reveal(m);
-});
-
-test('reserving with a past round is not valid: with the current one it is', async () => {
-  const c = await deploy();
-  const b = await c.issue(Plan.paid);
-  await advance(c, 2);
-  await assert.rejects(c.reserve(c.mailbox('ana', b, 0n), 0n), /Stale round/);
-  await c.reserve(c.mailbox('ana', b, 0n), c.view().round);
-});
-
-test('copying a commitment from the mempool neither blocks the victim nor steals the mailbox', async () => {
+test('a registration proved while the name was free is rejected by the node if someone takes the name first, without spending the slot', async () => {
+  // The accepted front-running risk: someone guesses the name from addressKey in a pending transaction and races.
   const c = await deploy();
   const victimBono = await c.issue(Plan.free);
   const attackerBono = await c.issue(Plan.free);
   const victim = c.mailbox('ana', victimBono, 0n);
-  // The attacker first reserves the same commitment with its own slot.
-  await c.reserve({ bono: attackerBono, j: 0n, commit: victim.commit });
-  await c.reserve(victim); // the victim's reservation still goes through
-  await advance(c, 2);
-  // Seeing the reveal, the attacker replays it with its slot: the commitment does not match.
-  const attackerNul = c.slotNul(attackerBono, Kind.mailbox, 0n);
-  await assert.rejects(c.reveal({ ...victim, slotNul: attackerNul }), /Wrong reveal/);
-  await c.reveal(victim);
-  assert.equal(hex(c.view().addresses.lookup(victim.addrKey).slotNul), hex(victim.slotNul));
+  const pending = await c.prove('registerMailbox', { bono: victimBono, j: 0n }, victim.name, victim.encPk, victim.authPk, victim.nameCipher);
+  await c.register(c.mailbox('ana', attackerBono, 0n));
+  assert.throws(() => c.verifyNow(pending), /mismatch/);
+  assert.ok(!c.view().slotNullifiers.member(victim.slotNul));
+  await c.register(c.mailbox('ana.b', victimBono, 0n));
 });
 
-test('revealing a different name, or different keys, than the commitment\'s is rejected', async () => {
-  const c = await deploy();
-  const b = await c.issue(Plan.free);
-  const m = c.mailbox('ana', b, 0n);
-  await assert.rejects(c.reveal(m), /Not reserved/);
-  await c.reserve(m);
-  await advance(c, 2);
-  await assert.rejects(c.reveal({ ...m, name: nameBytes('ana2') }), /Wrong reveal/);
-  await assert.rejects(c.reveal({ ...m, encPk: rand() }), /Wrong reveal/);
-  await assert.rejects(c.reveal({ ...m, authPk: rand() }), /Wrong reveal/);
-  await assert.rejects(c.reveal({ ...m, salt: rand() }), /Wrong reveal/);
-  await c.reveal(m);
-});
-
-test('an already registered name is rejected (the first to reveal wins)', async () => {
+test('a registration proved earlier stays valid through unrelated changes', async () => {
   const c = await deploy();
   const b = await c.issue(Plan.paid);
-  const first = c.mailbox('ana', b, 0n);
-  const second = c.mailbox('ana', b, 1n);
-  await c.reserve(first);
-  await c.reserve(second);
-  await advance(c, 2);
-  await c.reveal(first);
-  await assert.rejects(c.reveal(second), /Address taken/);
+  const m = c.mailbox('ana', b, 0n);
+  const proved = await c.prove('registerMailbox', { bono: b, j: 0n }, m.name, m.encPk, m.authPk, m.nameCipher);
+  const other = await c.issue(Plan.free);
+  await c.alias(other, 0n);
+  await c.register(c.mailbox('bea', b, 1n));
+  c.setTime(c.time() + 600n);
+  c.verifyNow(proved);
+});
+
+test('registering without a bono, with another user path or a leaf from another deployment, is rejected', async () => {
+  const c = await deploy();
+  const victim = await c.issue(Plan.free);
+  const attacker = { s: rand(), k: 0n, plan: Plan.free, validUntil: NO_EXPIRY }; // never issued
+  await assert.rejects(c.register(c.mailbox('ana', attacker, 0n), { pathOf: c.leafOf(victim) }), /Path is for another bono/);
+  const other = await deploy();
+  const foreign = await other.issue(Plan.free);
+  await assert.rejects(c.register(c.mailbox('ana', foreign, 0n), { path: c.pathClaiming(victim, foreign) }), /Not a bono/);
+  assert.equal(c.view().addresses.size(), 0n);
+});
+
+const RESERVED = ['postmaster', 'abuse', 'admin', 'administrator', 'root', 'hostmaster', 'webmaster', 'security',
+  'support', 'soporte', 'info', 'noreply', 'no-reply', 'mailer-daemon', 'nightmail'];
+
+test('the constructor reserves the role names on chain: exactly those, by addressKey', async () => {
+  const c = await deploy();
+  const v = c.view();
+  assert.equal(v.reservedNames.size(), BigInt(RESERVED.length));
+  for (const name of RESERVED) assert.ok(v.reservedNames.member(pc.addressKey(nameBytes(name))), name);
+});
+
+test('registering a reserved name is rejected and does not spend the slot; another name still works', async () => {
+  const c = await deploy();
+  const b = await c.issue(Plan.paid);
+  for (const name of RESERVED) {
+    const m = c.mailbox(name, b, 0n);
+    await assert.rejects(c.register(m), /Name reserved/, name);
+    assert.ok(!c.view().slotNullifiers.member(m.slotNul), `${name}: the slot is not spent`);
+  }
+  await c.register(c.mailbox('postmaster2', b, 0n));
+  assert.equal(c.view().addresses.size(), 1n);
 });
 
 test('the contract does NOT prevent a mailbox with the text of someone else\'s alias: the server resolves aliases first', async () => {
@@ -291,15 +285,6 @@ test('the contract does NOT prevent a mailbox with the text of someone else\'s a
   await c.register(m);
   assert.equal(c.view().addresses.lookup(alias.addrKey).kind, Kind.alias);
   assert.equal(c.view().addresses.lookup(m.addrKey).kind, Kind.mailbox, 'both records coexist');
-});
-
-// --- Rounds -------------------------------------------------------------------------------------
-
-test('only the operator advances the round', async () => {
-  const c = await deploy();
-  await c.advanceRound();
-  assert.equal(c.view().round, 1n);
-  await assert.rejects(c.advanceRound(rand()), /Not the operator/);
 });
 
 // --- Price ---------------------------------------------------------------------------------------
@@ -533,7 +518,7 @@ test('the path of each field in the state is the deployment one: adding a field,
   const c = await deploy();
   assert.deepEqual(c.stateShape(), [6, 15]);
   const first = ['operatorPk', 'paymentColor', 'price', 'bonos', 'slotNullifiers', 'addresses'];
-  const second = ['pendingNames', 'round', 'priceMonthly', 'priceAnnual', 'period', 'renewNullifiers', 'addressPaidUntil',
+  const second = ['reservedNames', 'spareCounter2', 'priceMonthly', 'priceAnnual', 'period', 'renewNullifiers', 'addressPaidUntil',
     'releasedSlots', 'spareTree', 'spareSet', 'spareMap', 'spareCounter', 'oldPrices', 'oldPricesMonthly', 'oldPricesAnnual'];
   const expected = Object.fromEntries([...first.map((f, i) => [f, [0, i]]), ...second.map((f, i) => [f, [1, i]])]);
   assert.deepEqual(fieldPaths(), expected);
@@ -555,4 +540,5 @@ test('the reserved and spare fields exist from deployment and stay empty', async
   assert.equal(v.spareSet.size(), 0n);
   assert.equal(v.spareMap.size(), 0n);
   assert.equal(v.spareCounter, 0n);
+  assert.equal(v.spareCounter2, 0n);
 });

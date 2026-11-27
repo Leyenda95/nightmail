@@ -1115,12 +1115,9 @@ impl Session {
         let work = self
             .store
             .with(|s| {
-                let slots = [SlotStatus::Reserving, SlotStatus::Reserved, SlotStatus::Revealing]
-                    .into_iter()
-                    .map(|status| s.slots_by_status(status).map(|v| !v.is_empty()))
-                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                let slots = !s.slots_by_status(SlotStatus::Reserving)?.is_empty();
                 let bonos = s.list_bonos()?.iter().any(|b| b.status == BonoStatus::Requested);
-                Ok(slots.contains(&true) || bonos || !s.list_journal()?.is_empty())
+                Ok(slots || bonos || !s.list_journal()?.is_empty())
             })
             .await;
         // If the store cannot be read, let `resume` report it.

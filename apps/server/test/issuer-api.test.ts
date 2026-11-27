@@ -33,7 +33,6 @@ async function start(t: TestContext, over: Partial<IssuerApiDeps> = {}, outcomes
       calls.push(id);
       return outcomes[Math.min(calls.length - 1, outcomes.length - 1)]!;
     },
-    advanceRound: async () => ({ status: 'failed' }),
   };
   const issuer = new Issuer({ store: new IssuerStore(openDatabase(MEMORY)), payer, signer, log, delayMs: () => 0, sleep: quickSleep });
   const checks = { captcha: vi(CAPTCHA), card: vi(CARD) };

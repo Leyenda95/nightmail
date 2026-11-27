@@ -16,6 +16,7 @@ import {
 } from '@midnightntwrk/wallet-sdk';
 import { walletSeedSource, type ServerConfig } from '../config.ts';
 import { OperatorDustWallet } from './dustWallet.ts';
+import { nodeSubmission, type InclusionWatch } from './submission.ts';
 import { acquireLock, loadOrCreateSeed, readState, setAsideState, writeState, type SavedState } from './storage.ts';
 
 // The SDK uses the global WebSocket to talk to the indexer and the node.
@@ -30,6 +31,11 @@ export type OperatorWallet = {
   keystore: UnshieldedKeystore;
   /** Public (unshielded) address to send faucet tNIGHT to. */
   address: string;
+  /**
+   * Reports when a submitted transaction enters a block, before the wallet's own `submitTransaction` returns
+   * (that one waits for finality). Absent in test doubles: then nothing is reported early.
+   */
+  inclusion?: InclusionWatch;
   /** Saves the state now (it is also saved every minute). */
   save: () => Promise<void>;
   /** Stops the wallet: saves, stops the SDK and releases the lock. */
@@ -87,8 +93,11 @@ export async function openOperatorWallet(config: ServerConfig): Promise<Operator
       return fresh();
     };
 
+    // The SDK default submission plus inclusion reports (submission.ts); the facade still waits for finality.
+    const submission = nodeSubmission(new URL(config.relayURL));
     const facade = await WalletFacade.init({
       configuration: buildConfiguration(config),
+      submissionService: () => submission.service as never,
       shielded: async (cfg) => restoreOr('shielded',
         () => ShieldedWallet(cfg).restore(saved!.shielded),
         () => ShieldedWallet(cfg).startWithSeed(seeds.shielded)),
@@ -141,7 +150,7 @@ export async function openOperatorWallet(config: ServerConfig): Promise<Operator
         release();
       }
     };
-    return { facade, ...keys, save, close };
+    return { facade, ...keys, inclusion: { watch: submission.watch }, save, close };
   } catch (err) {
     release();
     throw err;

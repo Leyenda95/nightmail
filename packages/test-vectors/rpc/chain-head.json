@@ -1,0 +1,6 @@
+{
+  "note": "chain.head (protocol 1.6, no params): the sidecar asks the node (HTTP JSON-RPC on endpoints.node) for state_getStorage(key), the storage of pallet_timestamp::Now, a SCALE u64 in little endian (Unix ms of the node's latest block), and returns it as result.timestamp.",
+  "request": { "jsonrpc": "2.0", "id": 1, "method": "state_getStorage", "params": ["0xf0c365c3cf59d671eb72da0e7a4113c49f1f0515f462cdcf84e0f1d6045dfcbb"] },
+  "storage": "0x10f8c3eaa1010000",
+  "result": { "timestamp": 1794940074000 }
+}

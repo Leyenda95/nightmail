@@ -46,8 +46,3 @@ export const addrKey = (name: string): Uint8Array => pc.addressKey(nameBytes(nam
 /** Alias addrKey: aliasKey(encPk, authPk, slotNul). */
 export const aliasAddrKey = (encPk: Uint8Array, authPk: Uint8Array, nul: Uint8Array): Uint8Array =>
   pc.aliasKey(bytes32(encPk, 'encPk'), bytes32(authPk, 'authPk'), bytes32(nul, 'slotNul'));
-
-/** Mailbox commitment: nameCommit(addrKey, encPk, authPk, salt, slotNul). */
-export const commit = (key: Uint8Array, encPk: Uint8Array, authPk: Uint8Array, salt: Uint8Array, nul: Uint8Array): Uint8Array =>
-  pc.nameCommit(bytes32(key, 'addrKey'), bytes32(encPk, 'encPk'), bytes32(authPk, 'authPk'), bytes32(salt, 'salt'),
-    bytes32(nul, 'slotNul'));

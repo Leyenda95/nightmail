@@ -14,8 +14,6 @@ export type RelayerConfig = RelayerLimits & {
   port: number;
   /** A trusted proxy sits in front: the client IP is the last X-Forwarded-For entry. */
   trustedProxy: boolean;
-  /** The random delay before forwarding ranges from 0 to this. */
-  maxDelayMs: number;
   maxInFlight: number;
 };
 
@@ -31,7 +29,6 @@ export function loadRelayerConfig(env: Record<string, string | undefined>): Rela
     attemptsPerIpPerHour: integer('ATTEMPTS_PER_IP_PER_HOUR', d.attemptsPerIpPerHour),
     faultsPerIpPerHour: integer('FAULTS_PER_IP_PER_HOUR', d.faultsPerIpPerHour),
     rejectedPerHour: integer('REJECTED_PER_HOUR', d.rejectedPerHour),
-    maxDelayMs: integer('MAX_DELAY_MS', 20_000, 0),
     maxInFlight: integer('MAX_IN_FLIGHT', 8),
   };
 }
@@ -48,9 +45,11 @@ export type StartRelayerOptions = {
   log: Logger;
   config?: RelayerConfig;
   host?: string;
-  /** Tests only: alternative deserialization, and the service's clock, randomness and sleep. */
+  /** Told of each included forward (registry/settling.ts). */
+  onIncluded?: () => void;
+  /** Tests only: alternative deserialization, and the service's clock. */
   parse?: RelayerDeps['parse'];
-  relayerOptions?: Partial<Pick<RelayerDeps, 'random' | 'sleep' | 'now'>>;
+  relayerOptions?: Partial<Pick<RelayerDeps, 'now'>>;
   apiOptions?: Partial<Pick<RelayerApiDeps, 'limits' | 'clientKey' | 'now'>>;
 };
 
@@ -63,10 +62,11 @@ export async function startRelayer(options: StartRelayerOptions): Promise<Runnin
   if (!config.trustedProxy && isLoopback(host)) {
     log.warn("relayer: listening on loopback without NIGHTMAIL_RELAYER_TRUSTED_PROXY=1: behind a proxy, the per-IP limits see the proxy's address");
   }
-  const { port: _port, trustedProxy: _proxy, maxDelayMs, maxInFlight, ...limits } = config;
+  const { port: _port, trustedProxy: _proxy, maxInFlight, ...limits } = config;
   const relayer = new Relayer({
     payer: options.payer ?? payerClient(payerSocketPath(options.dataDir)),
-    registry, parse: options.parse ?? parseTransaction, log, limits, maxDelayMs, maxInFlight, ...options.relayerOptions,
+    registry, parse: options.parse ?? parseTransaction, log, limits, maxInFlight, ...options.relayerOptions,
+    ...(options.onIncluded && { onIncluded: options.onIncluded }),
   });
   const server = createRelayerServer({ relayer, log, clientKey: clientKey(config.trustedProxy), ...options.apiOptions });
   const port = await listenOn(server, config.port, host);

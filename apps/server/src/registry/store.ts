@@ -10,7 +10,6 @@
 // deployment's boxes must never be served to another's addresses. Opening it with another contract is an error.
 import { fromHex, InvalidInput, ResolutionIndex } from '@nightmail/midnight';
 import { type Database, inTransaction } from '../storage/db.ts';
-import type { RoundState } from './sync.ts';
 
 const SCHEMA = 'CREATE TABLE IF NOT EXISTS registry_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;';
 const HEIGHT = /^(?:0|[1-9][0-9]{0,15})$/;
@@ -26,11 +25,6 @@ export type LoadedRegistry = {
   fetched: number;
   /** Fixed reason why the saved state was discarded, if it was. */
   problem?: string;
-  /**
-   * Round saved with the index (that of block `fetched`), if any. If missing or unreadable nothing is discarded:
-   * the next block read or the head at startup provides it (RegistrySync.observeHead).
-   */
-  round?: RoundState;
 };
 
 const EMPTY = (): LoadedRegistry => ({ index: new ResolutionIndex(), cursor: -1, fetched: -1 });
@@ -38,18 +32,6 @@ const EMPTY = (): LoadedRegistry => ({ index: new ResolutionIndex(), cursor: -1,
 function parseHeight(text: string): number {
   if (!HEIGHT.test(text) || !Number.isSafeInteger(Number(text))) throw new InvalidInput('cursor: invalid');
   return Number(text);
-}
-
-const ROUND = /^(?:0|[1-9][0-9]{0,19})$/;
-
-/** The saved round (JSON `{round: "decimal", waiting: boolean}`), or undefined if missing or unreadable. */
-function parseRound(text: string | undefined): RoundState | undefined {
-  try {
-    const { round, waiting } = JSON.parse(text ?? 'null') as { round?: unknown; waiting?: unknown };
-    return typeof round === 'string' && ROUND.test(round) && typeof waiting === 'boolean' ? { round: BigInt(round), waiting } : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 export class RegistryStore {
@@ -87,26 +69,23 @@ export class RegistryStore {
     const cursor = this.read('cursor');
     if (cursor === undefined) return EMPTY();
     try {
-      const round = parseRound(this.read('round'));
-      return { ...restore(index, cursor), ...(round && { round }) };
+      return restore(index, cursor);
     } catch (error) {
       if (!(error instanceof InvalidInput || error instanceof SyntaxError)) throw error;
       // Moved aside, not deleted: it may be another version's format and still be useful for recovery.
       inTransaction(this.db, () => {
-        // The round belonged to the discarded index, so it goes too (the next block read or the head restores it).
-        this.db.prepare("DELETE FROM registry_meta WHERE key IN ('index.discarded', 'cursor.discarded', 'round')").run();
+        this.db.prepare("DELETE FROM registry_meta WHERE key IN ('index.discarded', 'cursor.discarded')").run();
         this.db.prepare("UPDATE registry_meta SET key = key || '.discarded' WHERE key IN ('index', 'cursor')").run();
       });
       return { ...EMPTY(), problem: 'saved index unreadable' };
     }
   }
 
-  /** Atomically saves the whole index, the processed height and the round of the index's last block. */
-  saveIndex(index: ResolutionIndex, cursor: number, round?: RoundState): void {
+  /** Atomically saves the whole index and the processed height. */
+  saveIndex(index: ResolutionIndex, cursor: number): void {
     inTransaction(this.db, () => {
       this.write('index', JSON.stringify(index.exportState()));
       this.write('cursor', String(cursor));
-      if (round) this.write('round', JSON.stringify({ round: round.round.toString(), waiting: round.waiting }));
     });
   }
 

@@ -1,5 +1,5 @@
-// The public relayer service: queue with random delay, forwarding to the payer and mapping its reply to a
-// ticket. Everything uses doubles (parse, payer, sleep, randomness, clock): no network, no timers.
+// The public relayer service: queue, forwarding to the payer and mapping its reply to a ticket. Everything uses
+// doubles (parse, payer, clock): no network, no timers.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_RELAYER_LIMITS, MAX_TX_BYTES, Relayer, type RelayerDeps } from '../src/relayer/relayer.ts';
@@ -43,28 +43,31 @@ const INCLUDED: Reply = { status: 200, body: { status: 'SucceedEntirely', txHash
 const REJECTED: Reply = { status: 200, body: { status: 'rejected', code: 115 } };
 const withCode = (code: string) => Object.assign(new Error(`connect ${code}`), { code });
 
-function setup(over: Partial<RelayerDeps> = {}, reply: Reply | Error | (() => Reply) = INCLUDED) {
+/** `hold`: what the fake payer waits for before taking a forward (to keep it in flight). */
+type Over = Partial<RelayerDeps> & { hold?: () => Promise<unknown> };
+
+function setup({ hold, ...over }: Over = {}, reply: Reply | Error | (() => Reply) = INCLUDED) {
   const logs: string[] = [];
   const sent: string[] = [];
-  const sleeps: number[] = [];
   const parsed: number[] = [];
   const freed: number[] = [];
   const clock = { now: T0 };
   const relayer = new Relayer({
     payer: {
       relay: async (hex) => {
+        if (hold) await hold();
         sent.push(hex);
         if (reply instanceof Error) throw reply;
         return typeof reply === 'function' ? reply() : reply;
       },
     },
-    registry: REGISTRY, parse: fakeParse(clock, parsed, freed), random: () => 0.5, sleep: async (ms) => { sleeps.push(ms); },
+    registry: REGISTRY, parse: fakeParse(clock, parsed, freed),
     now: () => clock.now, log: capturingLogger(logs), ...over,
   } as RelayerDeps);
-  return { relayer, logs, sent, sleeps, clock, parsed, freed };
+  return { relayer, logs, sent, clock, parsed, freed };
 }
 
-/** A promise resolved on demand, to hold back a forward or a sleep. */
+/** A promise resolved on demand, to hold back a forward. */
 function gate<T = void>() {
   let open!: (v: T) => void;
   const promise = new Promise<T>((r) => { open = r; });
@@ -113,7 +116,7 @@ test('relayer: if the identifiers cannot be read, or there are none → invalid-
 });
 
 test('relayer: every deserialized transaction is freed (free), accepted or not', () => {
-  const { relayer, freed } = setup({ sleep: () => new Promise(() => {}) });
+  const { relayer, freed } = setup({ hold: () => new Promise(() => {}) });
   relayer.submit(tx(1), 'k');
   relayer.submit(tx(2, 0xdd), 'k');
   relayer.submit(tx(3, 0xbb), 'k');
@@ -125,12 +128,12 @@ test('relayer: every deserialized transaction is freed (free), accepted or not',
 
 test('relayer: 16-byte hex ticket, queued while waiting and done when finished (included)', async () => {
   const hold = gate();
-  const { relayer, sent } = setup({ sleep: () => hold.promise });
+  const { relayer, sent } = setup({ hold: () => hold.promise });
   const result = relayer.submit(tx(1), 'k');
   assert.match(ticketOf(result), /^[0-9a-f]{32}$/);
   assert.deepEqual(relayer.status(ticketOf(result)), { state: 'queued' });
   await flush();
-  assert.deepEqual(sent, []); // still waiting for its delay
+  assert.deepEqual(sent, []); // the payer has not taken it yet
   hold.open();
   await flush();
   assert.deepEqual(relayer.status(ticketOf(result)), { state: 'done', outcome: 'included', txHash: 'f1' });
@@ -139,23 +142,6 @@ test('relayer: 16-byte hex ticket, queued while waiting and done when finished (
 
 test('relayer: unknown ticket → undefined', () => {
   assert.equal(setup().relayer.status('00'.repeat(16)), undefined);
-});
-
-test('relayer: the delay is uniform in 0..maxDelayMs and comes BEFORE forwarding', async () => {
-  const order: string[] = [];
-  const { relayer, sleeps } = setup({
-    random: () => 0.999, maxDelayMs: 1000,
-    sleep: async (ms) => { order.push(`sleep ${ms}`); },
-    payer: { relay: async () => { order.push('relay'); return { status: 200, body: { status: 'SucceedEntirely', txHash: 'x' } }; } },
-  });
-  relayer.submit(tx(1), 'k');
-  await flush();
-  assert.deepEqual(order, ['sleep 999', 'relay']);
-  assert.deepEqual(sleeps, []);
-  const zero = setup({ random: () => 0, maxDelayMs: 1000 });
-  zero.relayer.submit(tx(1), 'k');
-  await flush();
-  assert.deepEqual(zero.sleeps, [0]);
 });
 
 const MAPPINGS: [string, Reply | Error, Record<string, unknown>][] = [
@@ -185,7 +171,7 @@ for (const [name, reply, expected] of MAPPINGS) {
 
 test('relayer: same bytes queued or in flight → the same ticket, without spending limits or attempts', async () => {
   const hold = gate();
-  const { relayer, sent, parsed } = setup({ sleep: () => hold.promise, limits: { perIpPerHour: 1, globalPerHour: 1, attemptsPerIpPerHour: 1 } });
+  const { relayer, sent, parsed } = setup({ hold: () => hold.promise, limits: { perIpPerHour: 1, globalPerHour: 1, attemptsPerIpPerHour: 1 } });
   const first = relayer.submit(tx(1), 'k');
   assert.deepEqual(relayer.submit(tx(1), 'k'), first);
   assert.deepEqual(relayer.submit(tx(1), 'otro'), first);
@@ -198,7 +184,7 @@ test('relayer: same bytes queued or in flight → the same ticket, without spend
 // The same intent with different bytes (e.g. another proof) is the same transaction to the node.
 test('relayer: the same intent with other bytes while the first is still alive → duplicate, without a foreign ticket or quota', async () => {
   const hold = gate();
-  const { relayer, sent } = setup({ sleep: () => hold.promise, limits: { perIpPerHour: 1, globalPerHour: 1 } });
+  const { relayer, sent } = setup({ hold: () => hold.promise, limits: { perIpPerHour: 1, globalPerHour: 1 } });
   ticketOf(relayer.submit(tx(1), 'a'));
   assert.deepEqual(relayer.submit(tx(1, 0xaa, 0x99), 'b'), { error: 'duplicate' });
   hold.open();
@@ -292,7 +278,7 @@ for (const [name, reply] of [
 }
 
 test('relayer: unknown without validUntil that finishes late → held until end + 30 min + 60 s (longer than the ttl)', async () => {
-  const { relayer, clock } = setup({ sleep: async () => { clock.now += 10 * MIN; } }, withCode('ECONNRESET'));
+  const { relayer, clock } = setup({ hold: async () => { clock.now += 10 * MIN; } }, withCode('ECONNRESET'));
   const first = ticketOf(relayer.submit(tx(1), 'a')); // ttl = T0 + 30 min; finishes at T0 + 10 min
   await flush();
   clock.now = T0 + 41 * MIN - 1;
@@ -333,7 +319,7 @@ test('relayer: unknown outliving its ticket: once the ticket expires its bytes a
 });
 
 test('relayer: per-client and global limit (only accepted ones count) and it resets after an hour', () => {
-  const { relayer, clock } = setup({ sleep: () => new Promise(() => {}), limits: { perIpPerHour: 2, globalPerHour: 3 } });
+  const { relayer, clock } = setup({ hold: () => new Promise(() => {}), limits: { perIpPerHour: 2, globalPerHour: 3 } });
   assert.ok('ticket' in relayer.submit(tx(1), 'a'));
   assert.deepEqual(relayer.submit(tx(1, 0xee), 'a'), { error: 'invalid-tx' }); // rejected: does not count
   assert.ok('ticket' in relayer.submit(tx(2), 'a'));
@@ -347,7 +333,7 @@ test('relayer: per-client and global limit (only accepted ones count) and it res
 // Deserializing (WASM, synchronous) is the expensive part, so attempts are limited per client before it,
 // whether or not they count afterwards.
 test('relayer: attempts per client and hour before deserializing (invalid ones too), then rate-limited without parse', () => {
-  const { relayer, parsed, clock } = setup({ sleep: () => new Promise(() => {}), limits: { attemptsPerIpPerHour: 2 } });
+  const { relayer, parsed, clock } = setup({ hold: () => new Promise(() => {}), limits: { attemptsPerIpPerHour: 2 } });
   assert.deepEqual(relayer.submit(tx(1, 0xee), 'a'), { error: 'invalid-tx' });
   assert.ok('ticket' in relayer.submit(tx(2), 'a'));
   assert.deepEqual(relayer.submit(tx(3), 'a'), RATE_LIMITED);
@@ -397,7 +383,7 @@ test('relayer A1: 3 rejections from a client within the hour → blocked (withou
 // rejection. It is recorded provisionally on acceptance: at most 3 "in progress or rejected" submissions per hour.
 test('relayer B1: a burst from one client without waiting for replies → only 3 accepted, the rest get a short wait', async () => {
   const hold = gate();
-  const { relayer, clock } = setup({ sleep: () => hold.promise }, REJECTED);
+  const { relayer, clock } = setup({ hold: () => hold.promise }, REJECTED);
   const results = Array.from({ length: 20 }, (_, n) => relayer.submit(tx(n + 1), 'a'));
   assert.equal(results.filter((r) => 'ticket' in r).length, 3);
   assert.deepEqual(results[3], { error: 'rate-limited', retryAfterS: 60 }, 'with submissions in progress, come back soon');
@@ -427,7 +413,7 @@ test('relayer B1: while it has ONE submission in progress, the wait stays short'
 test('relayer B1: a confirmed strike counts in the current window even if accepted in the previous one', async () => {
   const hold = gate();
   let calls = 0;
-  const { relayer, clock } = setup({ limits: { faultsPerIpPerHour: 2 }, sleep: () => (calls++ === 1 ? hold.promise : Promise.resolve()) }, REJECTED);
+  const { relayer, clock } = setup({ limits: { faultsPerIpPerHour: 2 }, hold: () => (calls++ === 1 ? hold.promise : Promise.resolve()) }, REJECTED);
   relayer.submit(tx(9), 'a'); // confirmed fault: 'a' fault window from T0, with 1
   await flush();
   clock.now = T0 + 58 * MIN;
@@ -474,20 +460,32 @@ test('relayer M-2: what was not sent (busy, payer stopped) returns the global qu
   }
 });
 
+/** One forward in flight (from client 'x', held by the payer) and `tx(1)` from 'a' waiting behind it. */
+function queuedBehindOne() {
+  const hold = gate();
+  let first = true;
+  const h = setup({ maxInFlight: 1, hold: () => (first ? ((first = false), hold.promise) : Promise.resolve()), limits: { perIpPerHour: 1, globalPerHour: 2 } });
+  ticketOf(h.relayer.submit(tx(9), 'x'));
+  const ticket = ticketOf(h.relayer.submit(tx(1), 'a')); // ttl = T0 + 30 min
+  return { ...h, hold, ticket };
+}
+
 test('relayer: if it has less than 3 min of ttl left when leaving the queue → expired, without sending or spending quota', async () => {
-  const { relayer, clock, sent } = setup({ sleep: async () => { clock.now += 27 * MIN + 1; }, limits: { perIpPerHour: 1, globalPerHour: 1 } });
-  const ticket = ticketOf(relayer.submit(tx(1), 'a')); // ttl = T0 + 30 min
+  const { relayer, clock, sent, hold, ticket } = queuedBehindOne();
+  clock.now += 27 * MIN + 1;
+  hold.open();
   await flush();
   assert.deepEqual(relayer.status(ticket), { state: 'done', outcome: 'expired' });
-  assert.deepEqual(sent, []);
+  assert.deepEqual(sent, [tx(9)]);
   assert.ok('ticket' in relayer.submit(tx(2), 'a'), 'the quota was returned');
 });
 
 test('relayer: exactly 3 min before the ttl it is still sent', async () => {
-  const { relayer, clock, sent } = setup({ sleep: async () => { clock.now += 27 * MIN; } });
-  relayer.submit(tx(1), 'a');
+  const { clock, sent, hold } = queuedBehindOne();
+  clock.now += 27 * MIN;
+  hold.open();
   await flush();
-  assert.equal(sent.length, 1);
+  assert.deepEqual(sent, [tx(9), tx(1)]);
 });
 
 test('relayer A1: global hourly rejection cap → busy for everyone, without deserializing, until the hour ends', async () => {
@@ -516,7 +514,7 @@ test('relayer: expired limiter windows are swept (IPs are not kept for more than
 
 test('relayer: with more than maxInFlight*4 waiting → busy 60 s, without spending quota', async () => {
   const hold = gate();
-  const { relayer } = setup({ sleep: () => hold.promise, maxInFlight: 1, limits: { perIpPerHour: 100, globalPerHour: 100, attemptsPerIpPerHour: 100, faultsPerIpPerHour: 100 } });
+  const { relayer } = setup({ hold: () => hold.promise, maxInFlight: 1, limits: { perIpPerHour: 100, globalPerHour: 100, attemptsPerIpPerHour: 100, faultsPerIpPerHour: 100 } });
   const results = [1, 2, 3, 4, 5, 6].map((n) => relayer.submit(tx(n), 'k')); // 1 in flight + 4 waiting
   assert.ok(results.slice(0, 5).every((r) => 'ticket' in r));
   assert.deepEqual(results[5], BUSY);
@@ -614,7 +612,7 @@ test('relayer: close() rejects new work and waits for what is in flight', async 
 });
 
 test('relayer: the sha256 of the bytes is the identity (same bytes in hex, same ticket)', () => {
-  const { relayer } = setup({ sleep: () => new Promise(() => {}) });
+  const { relayer } = setup({ hold: () => new Promise(() => {}) });
   const a = relayer.submit('aabb', 'k');
   assert.deepEqual(relayer.submit('aabb', 'k'), a);
   assert.notDeepEqual(relayer.submit('aabc', 'k'), a);
@@ -654,18 +652,24 @@ test('relayer: a 200 without status or without txHash (even with the other one) 
   }
 });
 
-test('relayer: the delay can reach exactly maxDelayMs (random almost 1)', async () => {
-  const { relayer, sleeps } = setup({ random: () => 0.9999999, maxDelayMs: 1000 });
-  relayer.submit(tx(1), 'k');
-  await flush();
-  assert.deepEqual(sleeps, [1000]);
-});
-
-test('relayer: maxDelayMs 0 and maxInFlight 0 are respected (they do not fall back to the defaults)', async () => {
-  const zero = setup({ maxDelayMs: 0 });
-  zero.relayer.submit(tx(1), 'k');
-  await flush();
-  assert.deepEqual(zero.sleeps, [0]);
+test('relayer: maxInFlight 0 is respected (it does not fall back to the default)', async () => {
   const none = setup({ maxInFlight: 0 });
   assert.deepEqual(none.relayer.submit(tx(1), 'k'), BUSY);
+});
+
+test('relayer: onIncluded is told of each included forward before its ticket says so, and of nothing else', async () => {
+  const seen: unknown[] = [];
+  let included = 0;
+  const replies = [INCLUDED, REJECTED, INCLUDED];
+  const { relayer } = setup({ onIncluded: () => { included += 1; seen.push(relayer.status(ticket)); } }, () => replies.shift()!);
+  let ticket = ticketOf(relayer.submit(tx(1), 'k'));
+  await flush();
+  assert.equal(included, 1);
+  assert.deepEqual(seen, [{ state: 'queued' }], 'the window starts before the client can read included');
+  ticket = ticketOf(relayer.submit(tx(2), 'k2'));
+  await flush();
+  assert.equal(included, 1, 'a rejection is not an inclusion');
+  ticket = ticketOf(relayer.submit(tx(3), 'k3'));
+  await flush();
+  assert.equal(included, 2);
 });

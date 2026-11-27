@@ -10,11 +10,13 @@ import { aliasAddrKey, decodeState, Kind, ledger, Plan } from '@nightmail/midnig
 import { createHandlers } from '../src/handlers.ts';
 import { setFetchForTests } from '../src/net.ts';
 import { AppError, codes } from '../src/codes.ts';
-import { CALL_TTL_MS, callTtl, MAX_CLOCK_BEHIND_MS, MAX_STATE_AGE_MS, proveHandlers, rejectionOf, TTL_QUANTUM_MS } from '../src/prove.ts';
+import {
+  CALL_TTL_MS, callTtl, MAX_CLOCK_BEHIND_MS, MAX_STATE_AGE_MS, proveHandlers, rejectionOf, TTL_QUANTUM_MS,
+} from '../src/prove.ts';
 import { MAX_PROVER_RESPONSE_BYTES } from '../src/prover.ts';
 import { staleState } from '../src/contract.ts';
 import { TTL_MAX_AHEAD_MS, TTL_MIN_AHEAD_MS } from '../../server/src/relayer/validate.ts';
-import { advanceRoundState, deploy, hex } from '../../../packages/midnight/test/helpers.ts';
+import { contractStateOf, deploy, hex } from '../../../packages/midnight/test/helpers.ts';
 import {
   appError, ctx, deployedState, failure, fakeChain, type FakeChain, INDEXER, json, type Notification, PROOF_SERVER, type Provable,
   ready, replayProver,
@@ -29,15 +31,16 @@ const witnessesOf = (b: Bono, j: number) =>
   ({ s: hex(b.s), k: Number(b.k), plan: b.plan === Plan.paid ? 'paid' : 'free', validUntil: Number(b.validUntil), j });
 const aliasCall = (c: Sim, b: Bono, j: number, keys = { encPk: 'e1'.repeat(32), authPk: 'a7'.repeat(32) }) =>
   ({ contractAddress: c.address, circuit: 'createAlias', args: keys, witnesses: witnessesOf(b, j) });
-const reserveCall = (c: Sim, m: any, round: bigint) =>
-  ({ contractAddress: c.address, circuit: 'reserveMailbox', args: { commit: hex(m.commit), round: round.toString() }, witnesses: witnessesOf(m.bono, Number(m.j)) });
-const revealCall = (c: Sim, m: any, name: string, salt = hex(m.salt)) => ({
-  contractAddress: c.address, circuit: 'revealMailbox',
-  args: { name, encPk: hex(m.encPk), authPk: hex(m.authPk), salt, slotNul: hex(m.slotNul), nameCipher: hex(m.nameCipher) },
+/** The local clock in Unix seconds. */
+const nowSec = () => BigInt(Math.floor(Date.now() / 1000));
+const registerCall = (c: Sim, m: any, name: string) => ({
+  contractAddress: c.address, circuit: 'registerMailbox',
+  args: { name, encPk: hex(m.encPk), authPk: hex(m.authPk), nameCipher: hex(m.nameCipher) },
+  witnesses: witnessesOf(m.bono, Number(m.j)),
 });
 
-/** The simulator contract's state as the indexer would serve it (it advances one round when read). */
-const stateOf = async (c: Sim) => deployedState(await advanceRoundState(c));
+/** The simulator contract's state as the indexer would serve it. */
+const stateOf = async (c: Sim) => deployedState(contractStateOf(c));
 
 /** Serves that state with a proof server that replies with what was recorded for the circuit, and calls proveCall. */
 async function prove(c: Sim, call: { circuit: string } & Record<string, unknown>, chain: Partial<FakeChain> = {}, sent: Notification[] = [], signal?: AbortSignal) {
@@ -47,7 +50,10 @@ async function prove(c: Sim, call: { circuit: string } & Record<string, unknown>
   return { state, requests, result };
 }
 
-/** The transaction's only call and the ledger resulting from applying its transcript to the state. */
+/**
+ * The transaction's only call and the ledger resulting from applying its transcript to the state, at the current
+ * block time.
+ */
 function applied(c: Sim, stateHex: string, txHex: string) {
   const tx: any = Transaction.deserialize('signature', 'proof', 'pre-binding', Buffer.from(txHex, 'hex'));
   assert.deepEqual([tx.guaranteedOffer, tx.fallibleOffer], [undefined, undefined], 'no Zswap offers: nothing from any wallet');
@@ -57,7 +63,10 @@ function applied(c: Sim, stateHex: string, txHex: string) {
   assert.equal(intents[0].dustActions, undefined, 'no DUST: the relayer adds it');
   const call = intents[0].actions[0];
   assert.equal(call.fallibleTranscript, undefined, 'all effects go in the guaranteed part');
-  const context = new QueryContext(decodeState(stateHex).data, c.address).runTranscript(call.guaranteedTranscript, CostModel.initialCostModel());
+  // Applied now, as the node would.
+  const q = new QueryContext(decodeState(stateHex).data, c.address);
+  q.block = { ...q.block, secondsSinceEpoch: nowSec() };
+  const context = q.runTranscript(call.guaranteedTranscript, CostModel.initialCostModel());
   return { intent: intents[0], call, after: ledger(context.state) };
 }
 
@@ -144,34 +153,20 @@ test('the TTL always fits what the relayer accepts, with any state that passes t
   }
 });
 
-test('reserveMailbox: spends the mailbox slot and stores the reservation with the proposed round', async () => {
+test('registerMailbox: spends the mailbox slot and registers the mailbox with the normalized name in one step', async () => {
   const c = await deploy();
   const bono: Bono = await c.issue(Plan.paid);
   const m = c.mailbox('juan.perez', bono, 3n);
-  const round: bigint = c.view().round + 2n; // the state is read one round later
-  const { state, result } = await prove(c, reserveCall(c, m, round));
-  const { call, after } = applied(c, state!, (await result).tx);
-  assert.equal(call.entryPoint, 'reserveMailbox');
-  assert.equal(after.slotNullifiers.member(m.slotNul), true);
-  const pending = after.pendingNames.lookup(m.slotNul);
-  assert.deepEqual([pending.reservedRound, hex(pending.commit)], [round, hex(m.commit)]);
-});
-
-test('revealMailbox: registers the mailbox with the normalized name and deletes the reservation', async () => {
-  const c = await deploy();
-  const bono: Bono = await c.issue(Plan.free);
-  const m = c.mailbox('juan.perez', bono, 0n);
-  await c.reserve(m);
-  await c.advanceRound();
-  const { state, requests, result } = await prove(c, revealCall(c, m, 'Juan.Perez'));
+  const { state, requests, result } = await prove(c, registerCall(c, m, 'Juan.Perez'));
   const tx = (await result).tx;
   const { call, after } = applied(c, state!, tx);
-  assert.equal(call.entryPoint, 'revealMailbox');
+  assert.equal(call.entryPoint, 'registerMailbox');
+  assert.equal(after.slotNullifiers.member(m.slotNul), true, 'spends the (mailbox, 3) slot of the bono');
   const record = after.addresses.lookup(m.addrKey);
   assert.deepEqual([hex(record.encPk), hex(record.authPk), record.kind, hex(record.nameCipher), hex(record.slotNul)],
     [hex(m.encPk), hex(m.authPk), Kind.mailbox, hex(m.nameCipher), hex(m.slotNul)]);
-  assert.equal(after.pendingNames.member(m.slotNul), false);
-  assert.ok(!tx.includes(hex(m.salt)) && !tx.includes(Buffer.from('juan.perez').toString('hex')), 'neither the salt nor the plain name');
+  assert.equal(after.addresses.size(), 1n);
+  assert.ok(!tx.includes(hex(bono.s)) && !tx.includes(Buffer.from('juan.perez').toString('hex')), 'neither the bono secret nor the plain name');
   assert.equal(proverRequests(requests).length, 2);
 });
 
@@ -307,31 +302,23 @@ test('the error matches the RPC vector shared with Rust, and each contract asser
   }
   assert.deepEqual(new Set([...Object.values(v.asserts), 'other']), new Set(v.reasons));
   assert.deepEqual(rejectionOf(new Error('failed assert: Path is for another bono'))?.data, { reason: 'other' }, 'an assert without its own reason');
+  const reserved = rejectionOf(new Error('failed assert: Name reserved'));
+  assert.deepEqual([reserved?.code, reserved?.message, reserved?.data], [codes.NAME_REJECTED, 'Name rejected', { reason: 'reserved' }],
+    'an on-chain reserved name is NAME_REJECTED reserved, like the app list');
   for (const other of [new Error('index out of bounds'), new Error('assert'), 'failed assert: No slots left', null, undefined]) {
     assert.equal(rejectionOf(other), undefined, 'whatever is not a contract assert is an internal error');
   }
 });
 
-test('reserveMailbox with a round that already passed: stale-round', async () => {
-  const c = await deploy();
-  const bono: Bono = await c.issue(Plan.free);
-  await c.advanceRound();
-  await rejected(c, reserveCall(c, c.mailbox('ana', bono, 0n), 0n), 'stale-round');
-});
-
-test('revealMailbox that fails locally: no reservation, mismatching data, too early, name taken', async () => {
+test('registerMailbox with a name already registered: address-taken, and the slot stays unspent', async () => {
   const c = await deploy();
   const bono: Bono = await c.issue(Plan.paid);
-  const first = c.mailbox('ana', bono, 0n);
+  await c.register(c.mailbox('ana', bono, 0n));
   const second = c.mailbox('ana', bono, 1n);
-  await rejected(c, revealCall(c, first, 'ana'), 'not-reserved');
-  await c.reserve(first);
-  await c.reserve(second);
-  await rejected(c, revealCall(c, first, 'ana'), 'too-early'); // the state is read in the reservation's round
-  await rejected(c, revealCall(c, first, 'ana', 'ff'.repeat(32)), 'wrong-reveal');
-  await rejected(c, revealCall(c, first, 'ana.b'), 'wrong-reveal');
-  await c.reveal(first);
-  await rejected(c, revealCall(c, second, 'ana'), 'address-taken');
+  await rejected(c, registerCall(c, second, 'Ana'), 'address-taken');
+  assert.equal(c.view().slotNullifiers.member(second.slotNul), false);
+  // The same slot registers another name.
+  await (await prove(c, registerCall(c, c.mailbox('ana.b', bono, 1n), 'ana.b'))).result;
 });
 
 // --- The chain --------------------------------------------------------------------------------------
@@ -394,10 +381,10 @@ test('minLeafCount: if the tree has fewer leaves than already seen, STALE_STATE 
 test('the on-chain circuit verifier key is not the app one (or is missing): CONTRACT_MISMATCH, without proving anything', async () => {
   const c = await deploy();
   const bono: Bono = await c.issue(Plan.free);
-  const state = await advanceRoundState(c);
+  const state = contractStateOf(c);
   deployedState(state); // the real keys of every circuit
   // Another valid key (that of another circuit): as if the operator had changed createAlias.
-  state.setOperation('createAlias', state.operation('revealMailbox')!);
+  state.setOperation('createAlias', state.operation('registerMailbox')!);
   const changed = hex(state.serialize());
   const { requests, result } = await prove(c, aliasCall(c, bono, 0), { state: changed });
   assert.deepEqual(await appError(result), { code: codes.CONTRACT_MISMATCH, message: 'Contract version mismatch' });
@@ -406,11 +393,11 @@ test('the on-chain circuit verifier key is not the app one (or is missing): CONT
   const late = await prove(c, { ...aliasCall(c, bono, 0), minLeafCount: 99 }, { state: changed });
   assert.equal((await appError(late.result)).code, codes.STALE_STATE);
   // A contract without that circuit is no good either.
-  const bare = await prove(c, aliasCall(c, bono, 0), { state: hex((await advanceRoundState(c)).serialize()) });
+  const bare = await prove(c, aliasCall(c, bono, 0), { state: hex(contractStateOf(c).serialize()) });
   assert.deepEqual(await appError(bare.result), { code: codes.CONTRACT_MISMATCH, message: 'Contract version mismatch' });
   // The other circuits still pass: the check is per circuit.
   const m = c.mailbox('ana', bono, 0n);
-  await (await prove(c, reserveCall(c, m, c.view().round + 2n), { state: changed })).result;
+  await (await prove(c, registerCall(c, m, 'ana'), { state: changed })).result;
 });
 
 test('no contract at that address, or another contract: CONTRACT_NOT_FOUND', async () => {
@@ -542,8 +529,7 @@ test('malformed params ‚Üí INVALID_PARAMS (fixed message), without initialize ‚Ü
   const bono: Bono = await c.issue(Plan.paid);
   const m = c.mailbox('ana', bono, 0n);
   const alias = aliasCall(c, bono, 0);
-  const reserve = reserveCall(c, m, 1n);
-  const reveal = revealCall(c, m, 'ana');
+  const register = registerCall(c, m, 'ana');
   const w = alias.witnesses;
   const bad: unknown[] = [
     null, [], {}, 'createAlias', { ...alias, contractAddress: 'AD'.repeat(32) }, { ...alias, contractAddress: undefined },
@@ -556,15 +542,10 @@ test('malformed params ‚Üí INVALID_PARAMS (fixed message), without initialize ‚Ü
     { ...alias, witnesses: { ...w, plan: 'gold' } }, { ...alias, witnesses: { ...w, plan: 1 } },
     { ...alias, witnesses: { ...w, validUntil: 2 ** 32 } }, { ...alias, witnesses: { ...w, validUntil: undefined } },
     { ...alias, witnesses: { ...w, j: 256 } }, { ...alias, witnesses: { ...w, j: 1.5 } }, { ...alias, witnesses: { ...w, j: '1' } },
-    { ...reserve, args: { ...reserve.args, commit: 'c0' } }, { ...reserve, args: { ...reserve.args, round: 1 } },
-    { ...reserve, args: { ...reserve.args, round: '-1' } }, { ...reserve, args: { ...reserve.args, round: '01' } },
-    { ...reserve, args: { ...reserve.args, round: '1.0' } }, { ...reserve, args: { ...reserve.args, round: '' } },
-    { ...reserve, args: { ...reserve.args, round: '0x10' } }, { ...reserve, args: { ...reserve.args, round: (2n ** 64n - 1n).toString() } },
-    { ...reserve, args: { ...reserve.args, round: (2n ** 64n).toString() } }, { ...reserve, witnesses: undefined },
-    { ...reveal, args: { ...reveal.args, name: 7 } }, { ...reveal, args: { ...reveal.args, salt: 'ff' } },
-    { ...reveal, args: { ...reveal.args, slotNul: undefined } }, { ...reveal, args: { ...reveal.args, nameCipher: 'c1'.repeat(103) } },
-    { ...reveal, args: { ...reveal.args, nameCipher: 'c1'.repeat(105) } }, { ...reveal, args: { ...reveal.args, encPk: null } },
-    { ...reveal, args: { ...reveal.args, authPk: 5 } },
+    { ...register, witnesses: undefined }, { ...register, args: { ...register.args, name: 7 } },
+    { ...register, args: { ...register.args, nameCipher: 'c1'.repeat(103) } }, { ...register, args: { ...register.args, nameCipher: 'c1'.repeat(105) } },
+    { ...register, args: { ...register.args, encPk: null } }, { ...register, args: { ...register.args, authPk: 5 } },
+    { ...register, args: { ...register.args, encPk: 'e1' } }, { ...register, args: { ...register.args, nameCipher: undefined } },
   ];
   const requests = fakeChain({ state: await stateOf(c) });
   const h = await ready();
@@ -575,18 +556,11 @@ test('malformed params ‚Üí INVALID_PARAMS (fixed message), without initialize ‚Ü
   assert.equal((await appError(createHandlers({ initialized: null })['contract.proveCall'](alias, ctx()))).code, codes.NOT_INITIALIZED);
 });
 
-test('the highest round reserveMailbox accepts is 2^64 - 2 (with the maximum, the contract cannot add 1)', async () => {
-  const c = await deploy();
-  const bono: Bono = await c.issue(Plan.free);
-  const { state, result } = await prove(c, reserveCall(c, c.mailbox('ana', bono, 0n), 2n ** 64n - 2n));
-  assert.equal(applied(c, state!, (await result).tx).after.pendingNames.size(), 1n);
-});
-
-test('revealMailbox with a name that is not valid as a mailbox: NAME_REJECTED with the reason', async () => {
+test('registerMailbox with a name that is not valid as a mailbox: NAME_REJECTED with the reason', async () => {
   const c = await deploy();
   const m = c.mailbox('ana', await c.issue(Plan.free), 0n);
   for (const [name, reason] of [['jos√©', 'invalid'], ['ana.abcdefghijkl', 'alias-form'], ['Postmaster', 'reserved']]) {
-    const { result } = await prove(c, revealCall(c, m, name));
+    const { result } = await prove(c, registerCall(c, m, name));
     assert.deepEqual(await appError(result), { code: codes.NAME_REJECTED, message: 'Name rejected', data: { reason } }, name);
   }
 });

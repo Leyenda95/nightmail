@@ -4,4 +4,4 @@
  * Where a `contract.snapshot` continues: the height fixed by the first page and the offset of each collection
  * (`null` = that collection is complete).
  */
-export type SnapshotCursor = { blockHeight: number, slotNullifiers: number | null, addresses: number | null, pendingNames: number | null, };
+export type SnapshotCursor = { blockHeight: number, slotNullifiers: number | null, addresses: number | null, };

@@ -376,9 +376,7 @@ export function Main({ events, onLocked }: { events: CoreEvents; onLocked: (toAc
   const goToInbox = useCallback(() => onNav({ type: 'go', view: 'bandeja' }), [onNav]);
   const recovered = late ?? events.recovered;
   const mailDown = mailDownShown(isList(view), serverNow);
-  // "@domain" for the missing name of a mailbox in "En proceso" (the same as in "Tus direcciones").
   const domain = mailDomain(addresses ?? []);
-  const pendingSuffix = domain === null ? undefined : `@${domain}`;
   const words = t().screensMail.compose;
   return (
     <div className="nm-raiz">
@@ -494,7 +492,6 @@ export function Main({ events, onLocked }: { events: CoreEvents; onLocked: (toAc
                 <PendingSection
                   events={events}
                   reloadKey={planTick + events.syncTick}
-                  suffix={pendingSuffix}
                   onChanged={onPlanChanged}
                   onList={onPendingList}
                 />

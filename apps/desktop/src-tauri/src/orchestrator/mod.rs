@@ -49,7 +49,7 @@ pub use bonos::BonoInfo;
 pub use dust::{DustClaim, DustSetup};
 pub(crate) use bonos::NO_EXPIRY;
 #[allow(unused_imports)]
-pub use resume::{PendingSlot, PendingStage, ResumeReport, RetryHint, ServerParts, SlotFailure};
+pub use resume::{PendingSlot, ResumeReport, RetryHint, ServerParts, SlotFailure};
 #[allow(unused_imports)]
 pub use types::{AddressView, OrchError, OrchEvent, Progress, ProgressEvent, SlotId, tracked};
 pub use wallet::WalletSnapshot;
@@ -60,6 +60,7 @@ const REQUIRED_METHODS: &[&str] = &[
     "contract.snapshot",
     "contract.findBonos",
     "contract.proveCall",
+    "chain.head",
     "wallet.open",
     "wallet.close",
     "wallet.sync",
@@ -118,40 +119,28 @@ impl Default for RetryPolicy {
     }
 }
 
-/// Pacing (production values still to be decided).
+/// Pacing, the same on every network (what is tested is what runs). Address operations start at once: there is no
+/// random delay before them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pacing {
     /// Random wait between a bono's inclusion and its first use, in `[min, max]`.
     pub usable_delay: (Duration, Duration),
     /// Insertions after the leaf the tree must have before the leaf is spent.
     pub later_issuances: u32,
-    /// Random delay before each address operation.
-    pub op_delay: (Duration, Duration),
-    /// Polling interval (ticket, round, issuance, block) and maximum polls per wait.
+    /// Polling interval (ticket, block time, issuance, block) and maximum polls per wait.
     pub poll: Duration,
     pub max_polls: u32,
 }
 
-impl Pacing {
-    /// Devnet: hardly anyone else issues bonos, so N = 0 and short waits.
-    pub fn devnet() -> Self {
+impl Default for Pacing {
+    /// The values the devnet used so far. `usable_delay` and `later_issuances` (which keep a payment from being linked
+    /// to the first address it pays for) are still provisional for a public network.
+    fn default() -> Self {
         Self {
             usable_delay: (Duration::ZERO, Duration::from_secs(5)),
             later_issuances: 0,
-            op_delay: (Duration::ZERO, Duration::from_secs(5)),
             poll: Duration::from_secs(2),
             max_polls: 150,
-        }
-    }
-
-    /// Provisional values for a public network.
-    pub fn public_network() -> Self {
-        Self {
-            usable_delay: (Duration::from_secs(10 * 60), Duration::from_secs(2 * 3600)),
-            later_issuances: 3,
-            op_delay: (Duration::from_secs(30), Duration::from_secs(10 * 60)),
-            poll: Duration::from_secs(5),
-            max_polls: 360,
         }
     }
 }
@@ -217,6 +206,9 @@ pub struct Orchestrator<C, I, R> {
     /// driven again on user request ("Retry", "Resume") or at unlock. In memory only: after a restart, the unlock
     /// `resume` tries them again and repopulates it.
     pub(crate) stuck: std::sync::Mutex<Vec<(crate::store::SlotKey, OrchError)>>,
+    /// Slots whose last proof the node or the relayer definitely refused (it cannot land later): their next turn does
+    /// not wait for the indexer to catch up first. In memory only.
+    pub(crate) refused: std::sync::Mutex<Vec<crate::store::SlotKey>>,
 }
 
 /// Is this sidecar usable? Minor ≥ 4 and every required method.
@@ -249,6 +241,7 @@ impl<C: ports::Chain, I: ports::Issuer, R: ports::Relayer> Orchestrator<C, I, R>
             relay_not_before: Default::default(),
             driving: Default::default(),
             stuck: Default::default(),
+            refused: Default::default(),
         })
     }
 }
@@ -272,11 +265,6 @@ impl<C, I, R> Orchestrator<C, I, R> {
     pub(crate) fn random_between(&self, (min, max): (Duration, Duration)) -> Duration {
         let span = max.saturating_sub(min).as_millis() as u64;
         min + Duration::from_millis(self.d.env.random_below(span + 1))
-    }
-
-    /// Random delay before an operation, so operations do not come in recognisable bursts.
-    pub(crate) async fn pace(&self) {
-        self.sleep(self.random_between(self.d.config.pacing.op_delay)).await;
     }
 
     /// Runs `f` on the store on a blocking thread.

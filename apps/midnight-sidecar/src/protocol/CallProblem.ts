@@ -3,4 +3,4 @@
 /**
  * Which contract check failed when running the circuit locally (`CALL_REJECTED`).
  */
-export type CallProblem = "not-a-bono" | "no-slots-left" | "slot-already-used" | "stale-round" | "not-reserved" | "wrong-reveal" | "too-early" | "address-taken" | "wrong-token" | "wrong-amount" | "old-price-expired" | "other";
+export type CallProblem = "not-a-bono" | "no-slots-left" | "slot-already-used" | "address-taken" | "wrong-token" | "wrong-amount" | "old-price-expired" | "other";

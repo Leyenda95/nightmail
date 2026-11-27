@@ -5,7 +5,7 @@ import type { Progress } from './bindings/Progress.ts';
 import { t } from './i18n/index.ts';
 
 type Stage = Progress['stage'];
-type WithData = 'bonoReady' | 'waitingRound';
+type WithData = 'bonoReady';
 
 /** A stage for the `Progreso` piece: the headline and, if there is one, the note that explains the wait. */
 export interface ProgressParts {
@@ -36,11 +36,6 @@ const parts = (text: ProgressText): ProgressParts => ({ stage: text.stage, note:
 // - recovering: the core sends the start of each batch of candidates, not a bono that exists: the number is not
 //   shown. Recovery needs the session open, and the session only exists with the phrase already stored.
 // - bonoReady: the bono is on chain ("confirmado"); it may still need a wait before use, so it is not "ready".
-// - waitingRound: the core waits for the reservation's round to HAVE PASSED before the second step; it reserves
-//   with the round after the current one, so two round changes are needed. The server raises the round about every
-//   30 s only if reservations are waiting, and each raise is a transaction (~19 s in the payer's queue): on the
-//   devnet about 85 s was measured, on preprod there is no measurement. Hence "a few minutes", with no figure,
-//   and neither the word "ronda" nor its number is shown.
 // - unknown: a stage this version does not know (newer core): it says it continues, without inventing what it does.
 
 /** One entry for each stage without data; the type forces them all to be covered (also in the dictionary). */
@@ -51,7 +46,6 @@ function simple(): Record<Exclude<Stage, WithData>, ProgressText> {
 /** One entry for each stage with data. */
 const WITH_DATA: { [S in WithData]: (p: Extract<Progress, { stage: S }>) => ProgressParts } = {
   bonoReady: () => parts(t().status.progress.bonoReady),
-  waitingRound: () => parts(t().status.progress.waitingRound),
 };
 
 /** Headline and note of a stage. */

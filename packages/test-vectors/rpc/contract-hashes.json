@@ -17,14 +17,6 @@
         "authPk": "a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7",
         "slotNul": "5f1cf3b9e2515b8b450a241d37d988943a89fae05b1cd4d78b8a7956adee403e"
       },
-      {
-        "op": "commit",
-        "addrKey": "621068aeef170d87aab62215f32c563c6ef3d198cf39b86a0fb109c4d2046c54",
-        "encPk": "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
-        "authPk": "a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7",
-        "salt": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
-        "slotNul": "d16cd513a552583fe5c1f718aa72a50f24a50fa2341a380a42a2e080008a95ec"
-      },
       { "op": "aliasAddress", "addrKey": "8b1353356240f350c37992b8f2e30229039937485f6ef9a8c764994702ae7979" }
     ]
   },
@@ -40,7 +32,6 @@
       "juan.perez",
       "621068aeef170d87aab62215f32c563c6ef3d198cf39b86a0fb109c4d2046c54",
       "8b1353356240f350c37992b8f2e30229039937485f6ef9a8c764994702ae7979",
-      "2ca50a6c52377d4da657691710fdcd2c9f37473a0f261ce874acf78b00f4f855",
       "around.rubber.hc9n6db283sn"
     ]
   }

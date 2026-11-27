@@ -1,6 +1,7 @@
 // Public relayer: checks only a transaction's structure (the node checks proof and execution for free),
-// queues it under a ticket the client polls, and forwards it to the local payer after a random delay so
-// submissions do not leave in identifiable bursts.
+// queues it under a ticket the client polls, and forwards it to the local payer as soon as a slot is free
+// (at most `maxInFlight` at once). There is no added delay: mailbox creation waits on chain time, and every
+// second here would add to it.
 //
 // Abuse: attempts are counted before deserializing, the expensive step. Node rejections cost the sender
 // nothing, so each one refunds the global quota but counts as a client fault, with its own global cap.
@@ -38,12 +39,11 @@ export type RelayerDeps = {
   parse(bytes: Uint8Array): object;
   /** Missing ones default to DEFAULT_RELAYER_LIMITS. */
   limits?: Partial<RelayerLimits>;
-  maxDelayMs?: number;
   maxInFlight?: number;
-  random?: () => number;
-  sleep?: (ms: number) => Promise<void>;
   now?: () => number;
   log?: Logger;
+  /** Called each time a forward ends `included` (registry/settling.ts: the index may not hold its address yet). */
+  onIncluded?: () => void;
 };
 
 export type SubmitResult =
@@ -78,7 +78,7 @@ const BUSY_RETRY_S = 60;
 const UNKNOWN_GRACE_MS = 60_000;
 /** Max lifetime of a sent transaction with no clear answer (the validity the payer sets). */
 const SENT_VALIDITY_MS = 30 * 60_000;
-/** A rejection may be state-dependent (e.g. the round hasn't advanced yet): the same bytes may be valid shortly after. */
+/** A rejection may be state-dependent: the same bytes may be valid shortly after. */
 const REJECTED_HOLD_MS = 2 * 60_000;
 const CLOSE_TIMEOUT_MS = 60_000;
 /**
@@ -150,9 +150,6 @@ function mapReply({ status, body }: Reply): RelayOutcome | undefined {
 export class Relayer {
   private readonly deps: RelayerDeps;
   private readonly maxInFlight: number;
-  private readonly maxDelayMs: number;
-  private readonly random: () => number;
-  private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
   private readonly log: Logger;
   private readonly perIp: RateLimiter;
@@ -176,9 +173,6 @@ export class Relayer {
     this.deps = deps;
     const limits = { ...DEFAULT_RELAYER_LIMITS, ...deps.limits };
     this.maxInFlight = deps.maxInFlight ?? 8;
-    this.maxDelayMs = deps.maxDelayMs ?? 20_000;
-    this.random = deps.random ?? Math.random;
-    this.sleep = deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.now = deps.now ?? Date.now;
     this.log = deps.log ?? silentLogger;
     const perHour = (limit: number) => new RateLimiter({ limit, windowMs: HOUR_MS });
@@ -308,7 +302,7 @@ export class Relayer {
   }
 
   private async run(job: Job): Promise<void> {
-    await this.sleep(Math.floor(this.random() * (this.maxDelayMs + 1)));
+    // A job that waited too long for a free slot is not sent: it could no longer land.
     const late = this.now() > job.ttl - SEND_MARGIN_MS;
     this.finish(job, late ? { outcome: 'expired' } : await this.forward(job.txHex));
   }
@@ -372,6 +366,8 @@ export class Relayer {
   }
 
   private finish(job: Job, result: RelayOutcome): void {
+    // Before the client can read the ticket: from then on it may use (and share) the new address.
+    if (result.outcome === 'included') this.deps.onIncluded?.();
     const time = this.now();
     const expires = time + HOUR_MS;
     this.tickets.set(job.ticket, { state: 'done', result, expires });

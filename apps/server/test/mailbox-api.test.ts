@@ -21,8 +21,10 @@ const HOST = 'mail.nightmail.test';
 const T0 = 1_794_873_600; // seconds
 
 type Api = {
-  port: number; store: MailboxStore; logs: string[]; clock: { ms: number }; nonces: MemoryNonceStore; close(): Promise<void>;
+  port: number; store: MailboxStore; index: ResolutionIndex; logs: string[]; clock: { ms: number }; nonces: MemoryNonceStore; close(): Promise<void>;
 };
+/** A short wait for new addresses, so unknown ones still go through it without slowing the tests. */
+const TEST_NEW_ADDRESS_WAIT: Partial<ApiLimits> = { newAddressWaitMs: 30, newAddressPollMs: 5 };
 type Answer = { status: number; headers: http.IncomingHttpHeaders; body: Buffer; json(): any };
 
 const open: Api[] = [];
@@ -39,12 +41,12 @@ async function apiWith(addresses: TestAddress[], options: { limits?: Partial<Api
   const nonces = new MemoryNonceStore(options.startedAt ?? T0 - 10_000);
   const deps: ApiDeps = {
     host: HOST, directory: new AddressDirectory(index), store, nonceStore: nonces, log: capturingLogger(logs), now: () => clock.ms,
-    ...(options.limits && { limits: options.limits }),
+    limits: { ...TEST_NEW_ADDRESS_WAIT, ...options.limits },
   };
   const server = createApiServer(options.override ? options.override(deps) : deps);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const api: Api = {
-    port: (server.address() as AddressInfo).port, store, logs, clock, nonces,
+    port: (server.address() as AddressInfo).port, store, index, logs, clock, nonces,
     close: () => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }),
   };
   open.push(api);
@@ -226,6 +228,56 @@ test('every authentication rejection is the same 401, with Date', async () => {
     'debug api: unauthorized (bad-headers)', 'debug api: unauthorized (bad-signature)', 'debug api: unauthorized (stale)',
     'debug api: unauthorized (unknown-address)',
   ], 'the reason only goes to the debug log');
+});
+
+test('a just-created address: the request waits until the index learns it, then is authenticated as usual', async () => {
+  const juan = mailbox('juan.perez');
+  const nueva = mailbox('recien.creada');
+  const api = await apiWith([juan], { limits: { newAddressWaitMs: 5000, newAddressPollMs: 5 } });
+  const path = listPath(nueva);
+  const asked = call(api, path, signed(nueva, path));
+  const forged = call(api, path, signed(nueva, path, { secretKey: juan.authSecretKey }));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  api.clock.ms += 20_000; // the time the request arrived is what counts for its signature
+  api.index.addBlock(2, [nueva.entry]); // the registry sync, from the finalized chain
+  const answer = await asked;
+  assert.equal(answer.status, 200);
+  assert.deepEqual(answer.json(), { messages: [], next: 0 });
+  assertUnauthorized(await forged, 'learning the address does not let a wrong signature in');
+});
+
+test('an address the index never learns: 401 after the wait; with too many waiting, 401 at once', async () => {
+  const stranger = mailbox('no.registrado');
+  const path = listPath(stranger);
+  const waits = await apiWith([], { limits: { newAddressWaitMs: 300, newAddressPollMs: 5 } });
+  let started = performance.now();
+  assertUnauthorized(await call(waits, path, signed(stranger, path)), 'unknown');
+  assert.ok(performance.now() - started >= 290, 'it waited');
+
+  const busy = await apiWith([], { limits: { newAddressWaitMs: 2000, newAddressPollMs: 5, newAddressWaiters: 1 } });
+  const first = call(busy, path, signed(stranger, path));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  started = performance.now();
+  assertUnauthorized(await call(busy, path, signed(stranger, path)), 'no place to wait');
+  assert.ok(performance.now() - started < 1000, 'answered without waiting');
+  assertUnauthorized(await first, 'the waiting one still ends in 401');
+
+  const perIp = await apiWith([], { limits: { newAddressWaitMs: 1000, newAddressPollMs: 5, newAddressWaitersPerIp: 1 } });
+  const holding = call(perIp, path, signed(stranger, path));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  started = performance.now();
+  assertUnauthorized(await call(perIp, path, signed(stranger, path)), 'this IP already holds its place');
+  assert.ok(performance.now() - started < 800, 'answered without waiting, though places are left for other IPs');
+  assertUnauthorized(await holding, 'the holder still ends in 401');
+  started = performance.now();
+  assertUnauthorized(await call(perIp, path, signed(stranger, path)), 'its place is back once the wait ended');
+  assert.ok(performance.now() - started >= 950, 'it waited again');
+
+  const off = await apiWith([], { limits: { newAddressWaitMs: 0 } });
+  started = performance.now();
+  assertUnauthorized(await call(off, path, signed(stranger, path)), 'wait off');
+  assert.ok(performance.now() - started < 1000);
+  assertUnauthorized(await call(off, path, {}), 'no headers: never waits');
 });
 
 test('the time window is ±60 s, bounds included', async () => {

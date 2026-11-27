@@ -1,7 +1,7 @@
 //! Test doubles: a sidecar with the contract state in memory (fake but deterministic hashes, and the same checks as
-//! the contract: leaf, quota, nullifier, round, commitment), a relayer that applies transactions to that state, an
-//! Issuer that signs real receipts, and a clock that advances on sleep. Each double accepts scripted answers
-//! (`script_*`) for the error paths.
+//! the contract: leaf, quota, nullifier, free name), a relayer that applies transactions to that state (checking them
+//! again when they land, as the node does), an Issuer that signs real receipts, and a clock that
+//! advances on sleep. Each double accepts scripted answers (`script_*`) for the error paths.
 
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -14,6 +14,7 @@ use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 use tokio::sync::mpsc;
 
+use super::chain::SLOT_S;
 use super::http::receipt_message;
 use super::ports::*;
 use super::{Deps, Orchestrator, OrchestratorConfig, Pacing, Progress, RetryPolicy};
@@ -96,10 +97,6 @@ pub fn alias_key(enc: &str, auth: &str, nul: &str) -> String {
     h(&["alias", enc, auth, nul])
 }
 
-fn commit(addr: &str, enc: &str, auth: &str, salt: &str, nul: &str) -> String {
-    h(&["commit", addr, enc, auth, salt, nul])
-}
-
 pub fn alias_text(addr_key: &str) -> String {
     format!("nube.verde.{}", &addr_key[..12])
 }
@@ -122,9 +119,6 @@ fn hash_op(w: &World, op: &HashOp) -> Result<String, RpcError> {
         HashOp::NormalizeName { name } => normalize(name)?,
         HashOp::AddrKey { name } => addr_key(name)?,
         HashOp::AliasAddrKey { enc_pk, auth_pk, slot_nul } => alias_key(enc_pk, auth_pk, slot_nul),
-        HashOp::Commit { addr_key, enc_pk, auth_pk, salt, slot_nul } => {
-            commit(addr_key, enc_pk, auth_pk, salt.expose(), slot_nul)
-        }
         HashOp::AliasAddress { addr_key } => alias_text(addr_key),
     })
 }
@@ -132,10 +126,15 @@ fn hash_op(w: &World, op: &HashOp) -> Result<String, RpcError> {
 /// What a proved transaction does when it lands.
 #[derive(Debug, Clone)]
 enum Effect {
-    Reserve { nul: String, pending: PendingNameEntry },
+    Mailbox { entry: AddressEntry },
     Alias { entry: AddressEntry },
-    Reveal { entry: AddressEntry },
 }
+
+/// How far the block time moves on each state read with [`World::auto_time`].
+pub const AUTO_TIME_STEP_MS: u64 = 10_000;
+
+/// The registry collections the indexer serves: slot nullifiers and addresses.
+type Collections = (BTreeSet<String>, Vec<AddressEntry>);
 
 /// State of the contract and the doubles.
 #[derive(Default)]
@@ -143,11 +142,10 @@ pub struct World {
     pub leaves: Vec<String>,
     pub nullifiers: BTreeSet<String>,
     pub addresses: Vec<AddressEntry>,
-    pub pending: Vec<PendingNameEntry>,
-    pub round: u64,
     pub block: u32,
-    /// Every state read advances the round (the server's RoundTicker).
-    pub auto_round: bool,
+    /// Every state read (first page) advances the block time by [`AUTO_TIME_STEP_MS`], as the chain's clock would
+    /// while the app polls.
+    pub auto_time: bool,
     /// Items per page for `contract.snapshot` without a limit.
     pub page: usize,
     txs: HashMap<String, Effect>,
@@ -188,16 +186,39 @@ pub struct World {
     pub min_leaf_seen: Vec<Option<u32>>,
     /// Foreign addresses that appear after the next transaction lands (a race for a name).
     pub after_apply: Vec<AddressEntry>,
+    /// Foreign addresses that land in a block just before the next transaction does (a race for a name lost after
+    /// proving).
+    pub before_apply: Vec<AddressEntry>,
     /// Transactions that land but the relayer reports as `unknown`.
     pub report_unknown: u32,
     /// Insertion deadline signed by the fake Issuer.
     pub insert_by: u64,
-    /// Rounds proposed in each proved `reserveMailbox`.
-    pub reserve_rounds: Vec<u64>,
     /// `wallet.open` reports it set the saved state aside.
     pub state_discarded: bool,
-    /// Block time of every state read (Unix ms).
+    /// Block time of every state read (Unix ms): the indexer's. Unless [`World::live`], the node's latest block is
+    /// [`World::head_ahead_ms`] later, and transactions land at the node's block time.
     pub block_time_ms: u64,
+    /// How far the node's latest block (`chain.head`) is ahead of [`World::block_time_ms`] (the indexer lag).
+    pub head_ahead_ms: u64,
+    /// The chain runs on the fake clock: the node's latest block is the start of the current 6 s slot, the indexer
+    /// shows [`World::indexer_lag_ms`] less. (A transaction always lands in the next slot's block.)
+    pub live: bool,
+    pub indexer_lag_ms: u64,
+    /// With [`World::live`]: the state before each landed transaction, with the block time it landed at. The indexer
+    /// shows a transaction only once its own block time reaches that block (as one following finalized blocks).
+    history: Vec<(u64, Collections)>,
+    /// The fake clock (set by [`harness_on`]), for [`World::live`].
+    pub clock: Option<Arc<FakeEnv>>,
+    /// Answers of the next `chain.head` calls (a block time in Unix ms, or an error).
+    pub script_head: VecDeque<Result<u64, RpcError>>,
+    /// `chain.head` fails (the node does not answer) from that call on (0: always).
+    pub head_down_after: Option<usize>,
+    /// The node refuses (`rejected`, nothing applied) the next transactions of these kinds (`mailbox`, `alias`), in
+    /// order.
+    pub refuse_next: VecDeque<&'static str>,
+    /// Calls to `contract.proveCall`, `relay` (the relayer received a proof) and `chain.head`, in order, with the
+    /// node's block time (Unix ms) at that moment.
+    pub timeline: Vec<(&'static str, u64)>,
     /// `addrKey` of these normalised names and text of these aliases instead of the fake hashes (real vectors).
     pub name_keys: HashMap<String, String>,
     pub alias_texts: HashMap<String, String>,
@@ -210,7 +231,7 @@ pub fn world() -> Shared {
         page: 2,
         dust_coins: 1,
         insert_by: START + 3000,
-        protocol: "1.5".into(),
+        protocol: crate::protocol::PROTOCOL_VERSION.into(),
         methods: super::REQUIRED_METHODS.iter().map(|m| m.to_string()).collect(),
         ..World::default()
     }))
@@ -226,26 +247,30 @@ impl World {
             return Err(rejected("no-slots-left"));
         }
         let nul = slot_nul(s, kind, w.j);
-        if self.nullifiers.contains(&nul) {
+        if self.visible().0.contains(&nul) {
             return Err(rejected("slot-already-used"));
         }
         Ok(nul)
     }
 
+    /// What the call does, checked as the circuit would run locally against the state the indexer shows.
     fn effect(&self, call: &ProveCall) -> Result<Effect, RpcError> {
         match call {
-            ProveCall::ReserveMailbox { args, witnesses } => {
+            ProveCall::RegisterMailbox { args, witnesses } => {
                 let nul = self.witness_check(witnesses, AddressKind::Mailbox)?;
-                let r: u64 = args.round.parse().unwrap();
-                if self.round > r {
-                    return Err(rejected("stale-round"));
+                let addr = addr_key(&args.name)?;
+                if self.visible().1.iter().any(|x| x.addr_key == addr) {
+                    return Err(rejected("address-taken"));
                 }
-                let pending = PendingNameEntry {
-                    slot_nul: nul.clone(),
-                    reserved_round: args.round.clone(),
-                    commit: args.commit.clone(),
+                let entry = AddressEntry {
+                    addr_key: addr,
+                    enc_pk: args.enc_pk.clone(),
+                    auth_pk: args.auth_pk.clone(),
+                    kind: AddressKind::Mailbox,
+                    name_cipher: args.name_cipher.clone(),
+                    slot_nul: nul,
                 };
-                Ok(Effect::Reserve { nul, pending })
+                Ok(Effect::Mailbox { entry })
             }
             ProveCall::CreateAlias { args, witnesses } => {
                 let nul = self.witness_check(witnesses, AddressKind::Alias)?;
@@ -260,60 +285,33 @@ impl World {
                 };
                 Ok(Effect::Alias { entry })
             }
-            ProveCall::RevealMailbox { args } => self.reveal_effect(args),
         }
-    }
-
-    fn reveal_effect(&self, a: &RevealMailboxArgs) -> Result<Effect, RpcError> {
-        let pending = self.pending.iter().find(|p| p.slot_nul == a.slot_nul).ok_or_else(|| rejected("not-reserved"))?;
-        let addr = addr_key(&a.name)?;
-        if commit(&addr, &a.enc_pk, &a.auth_pk, a.salt.expose(), &a.slot_nul) != pending.commit {
-            return Err(rejected("wrong-reveal"));
-        }
-        if self.round <= pending.reserved_round.parse::<u64>().unwrap() {
-            return Err(rejected("too-early"));
-        }
-        if self.addresses.iter().any(|x| x.addr_key == addr) {
-            return Err(rejected("address-taken"));
-        }
-        let entry = AddressEntry {
-            addr_key: addr,
-            enc_pk: a.enc_pk.clone(),
-            auth_pk: a.auth_pk.clone(),
-            kind: AddressKind::Mailbox,
-            name_cipher: a.name_cipher.clone(),
-            slot_nul: a.slot_nul.clone(),
-        };
-        Ok(Effect::Reveal { entry })
     }
 
     /// Applies a transaction when it enters a block, re-checking it against the state at that moment.
     fn apply(&mut self, effect: Effect) -> bool {
+        let first = std::mem::take(&mut self.before_apply);
+        self.addresses.extend(first);
         let ok = match &effect {
-            Effect::Reserve { nul, .. } | Effect::Alias { entry: AddressEntry { slot_nul: nul, .. } } => {
-                !self.nullifiers.contains(nul)
-            }
-            Effect::Reveal { entry } => {
-                self.pending.iter().any(|p| p.slot_nul == entry.slot_nul)
-                    && !self.addresses.iter().any(|a| a.addr_key == entry.addr_key)
+            Effect::Alias { entry } => !self.nullifiers.contains(&entry.slot_nul),
+            Effect::Mailbox { entry } => {
+                !self.nullifiers.contains(&entry.slot_nul) && !self.addresses.iter().any(|a| a.addr_key == entry.addr_key)
             }
         };
         if ok {
             self.block += 1;
-            match effect {
-                Effect::Reserve { nul, pending } => {
-                    self.nullifiers.insert(nul);
-                    self.pending.push(pending);
-                }
-                Effect::Alias { entry } => {
-                    self.nullifiers.insert(entry.slot_nul.clone());
-                    self.addresses.push(entry);
-                }
-                Effect::Reveal { entry } => {
-                    self.pending.retain(|p| p.slot_nul != entry.slot_nul);
-                    self.addresses.push(entry);
+            if self.live {
+                let before = (self.nullifiers.clone(), self.addresses.clone());
+                let landed = self.landing_ms();
+                self.history.push((landed, before));
+                // The relayer answers once the transaction is in a block: by then the node is at that block.
+                if let Some(clock) = &self.clock {
+                    clock.now.fetch_max((landed / 1000) as i64, Ordering::SeqCst);
                 }
             }
+            let (Effect::Alias { entry } | Effect::Mailbox { entry }) = effect;
+            self.nullifiers.insert(entry.slot_nul.clone());
+            self.addresses.push(entry);
             let others = std::mem::take(&mut self.after_apply);
             self.addresses.extend(others);
         }
@@ -336,40 +334,65 @@ impl World {
         }
     }
 
+    /// The state the indexer shows (and the sidecar runs circuits against): with [`World::live`], the state before
+    /// the first transaction whose block the indexer has not reached yet.
+    fn visible(&self) -> (&BTreeSet<String>, &Vec<AddressEntry>) {
+        let indexer = self.indexer_ms();
+        match self.history.iter().find(|(landed, ..)| *landed > indexer) {
+            Some((_, (n, a))) => (n, a),
+            None => (&self.nullifiers, &self.addresses),
+        }
+    }
+
+    /// `addrKey` of the addresses the indexer shows.
+    pub fn visible_addresses(&self) -> Vec<String> {
+        self.visible().1.iter().map(|a| a.addr_key.clone()).collect()
+    }
+
+    /// The node's latest block time (Unix ms).
+    pub fn head_ms(&self) -> u64 {
+        match (&self.clock, self.live) {
+            (Some(clock), true) => clock.now() as u64 * 1000 / (SLOT_S * 1000) * (SLOT_S * 1000),
+            _ => self.block_time_ms + self.head_ahead_ms,
+        }
+    }
+
+    /// The indexer's block time (Unix ms).
+    pub fn indexer_ms(&self) -> u64 {
+        if self.live { self.head_ms() - self.indexer_lag_ms } else { self.block_time_ms }
+    }
+
+    /// Block time of the block a transaction sent now lands in: the next slot's (Unix ms).
+    fn landing_ms(&self) -> u64 {
+        (self.head_ms() / (SLOT_S * 1000) + 1) * SLOT_S * 1000
+    }
+
     fn snapshot_page(&mut self, cursor: Option<&SnapshotCursor>, limit: Option<u32>) -> ContractSnapshot {
         self.block += 1;
-        if self.auto_round && cursor.is_none() {
-            self.round += 1;
+        if self.auto_time && cursor.is_none() {
+            self.block_time_ms += AUTO_TIME_STEP_MS;
         }
         let size = limit.map_or(self.page, |l| l as usize);
         let start = |c: Option<&SnapshotCursor>, f: fn(&SnapshotCursor) -> Option<u32>| c.map_or(Some(0), f);
+        let (nullifiers, all_addresses) = self.visible();
         let (nul_list, nul_next) =
-            page(&self.nullifiers.iter().cloned().collect::<Vec<_>>(), start(cursor, |c| c.slot_nullifiers), size);
-        let (addresses, addr_next) = page(&self.addresses, start(cursor, |c| c.addresses), size);
-        let (pending, pend_next) = page(&self.pending, start(cursor, |c| c.pending_names), size);
-        let more = nul_next.is_some() || addr_next.is_some() || pend_next.is_some();
-        let next = more.then_some(SnapshotCursor {
-            block_height: self.block,
-            slot_nullifiers: nul_next,
-            addresses: addr_next,
-            pending_names: pend_next,
-        });
+            page(&nullifiers.iter().cloned().collect::<Vec<_>>(), start(cursor, |c| c.slot_nullifiers), size);
+        let (addresses, addr_next) = page(all_addresses, start(cursor, |c| c.addresses), size);
+        let more = nul_next.is_some() || addr_next.is_some();
+        let next = more.then_some(SnapshotCursor { block_height: self.block, slot_nullifiers: nul_next, addresses: addr_next });
         ContractSnapshot {
             block_height: self.block,
             block_hash: "00".repeat(32),
-            block_timestamp: self.block_time_ms,
-            round: self.round.to_string(),
+            block_timestamp: self.indexer_ms(),
             price: PRICE.into(),
             old_prices: vec![],
             bonos: BonosSummary { leaf_count: self.leaves.len() as u32, root: "0".into() },
             totals: SnapshotTotals {
-                slot_nullifiers: self.nullifiers.len() as u32,
-                addresses: self.addresses.len() as u32,
-                pending_names: self.pending.len() as u32,
+                slot_nullifiers: nullifiers.len() as u32,
+                addresses: all_addresses.len() as u32,
             },
             slot_nullifiers: nul_list,
             addresses,
-            pending_names: pending,
             next,
         }
     }
@@ -433,14 +456,27 @@ impl Chain for FakeChain {
         if let Some(e) = w.script_prove.pop_front() {
             return Err(e);
         }
-        if let ProveCall::ReserveMailbox { args, .. } = &p.call {
-            w.reserve_rounds.push(args.round.parse().unwrap());
-        }
+        let head = w.head_ms();
+        w.timeline.push(("contract.proveCall", head));
         w.behind(p.min_leaf_count)?;
         let effect = w.effect(&p.call)?;
         let tx = format!("tx{}", w.txs.len());
         w.txs.insert(tx.clone(), effect);
         Ok(ContractProveCallResult { tx, block_height: w.block })
+    }
+
+    async fn head(&self) -> Result<ChainHead, RpcError> {
+        let mut w = self.log("chain.head");
+        let head = w.head_ms();
+        let index = w.timeline.iter().filter(|(what, _)| *what == "chain.head").count();
+        w.timeline.push(("chain.head", head));
+        if let Some(scripted) = w.script_head.pop_front() {
+            scripted.map(|timestamp| ChainHead { timestamp })
+        } else if w.head_down_after.is_some_and(|n| index >= n) {
+            Err(remote(codes::UPSTREAM_UNAVAILABLE, json!({})))
+        } else {
+            Ok(ChainHead { timestamp: head })
+        }
     }
 
     async fn wallet_open(&self, _p: &WalletOpenParams) -> Result<WalletOpenResult, RpcError> {
@@ -535,6 +571,8 @@ impl Relayer for FakeRelayer {
     async fn submit(&self, tx: &str) -> Result<Submitted, RelayError> {
         let mut w = self.0.lock().unwrap();
         w.calls.push("relay".into());
+        let head = w.head_ms();
+        w.timeline.push(("relay", head));
         w.script_submit.pop_front().unwrap_or_else(|| Ok(Submitted::Ticket(tx.into())))
     }
 
@@ -544,6 +582,14 @@ impl Relayer for FakeRelayer {
             return scripted;
         }
         let effect = w.txs.remove(ticket).ok_or(RelayError::NotFound)?;
+        let kind = match &effect {
+            Effect::Mailbox { .. } => "mailbox",
+            Effect::Alias { .. } => "alias",
+        };
+        if w.refuse_next.front() == Some(&kind) {
+            w.refuse_next.pop_front();
+            return Ok(TicketState::Done(RelayOutcome::Rejected));
+        }
         let outcome = match (w.apply(effect), w.report_unknown) {
             (true, 0) => RelayOutcome::Included,
             (true, _) => {
@@ -665,7 +711,7 @@ pub fn config() -> OrchestratorConfig {
         // Absolute on every OS ("/tmp" is not on Windows and would give BadConfig).
         wallet_state_dir: std::env::temp_dir().join("wallet").to_string_lossy().into_owned(),
         retry: RetryPolicy::default(),
-        pacing: Pacing { max_polls: 20, ..Pacing::devnet() },
+        pacing: Pacing { max_polls: 20, ..Pacing::default() },
     }
 }
 
@@ -707,6 +753,7 @@ pub async fn harness_on(world: Shared, config: OrchestratorConfig) -> Harness {
     let store = Arc::new(LocalStore::open(&dir.path().join("db"), &[5; 32], &scope).unwrap());
     let env = Arc::new(FakeEnv::default());
     env.now.store(START as i64, Ordering::SeqCst);
+    world.lock().unwrap().clock = Some(env.clone());
     let (tx, events) = mpsc::unbounded_channel();
     let deps = Deps {
         chain: FakeChain(world.clone()),

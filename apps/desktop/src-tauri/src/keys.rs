@@ -111,7 +111,6 @@ enum Label {
     Bono(u32),
     AddressEnc(u32, AddressKind, u8),
     AddressAuth(u32, AddressKind, u8),
-    MailboxSalt(u32, u8),
     Names,
     Wallet,
     WalletState,
@@ -131,7 +130,6 @@ impl Label {
             Self::Bono(n) => format!("bono/{n}"),
             Self::AddressEnc(n, kind, j) => format!("addr/{n}/{}/{j}/enc", kind_text(*kind)),
             Self::AddressAuth(n, kind, j) => format!("addr/{n}/{}/{j}/auth", kind_text(*kind)),
-            Self::MailboxSalt(n, j) => format!("salt/{n}/mailbox/{j}"),
             Self::Names => "names".into(),
             Self::Wallet => "wallet".into(),
             Self::WalletState => "wallet-state".into(),
@@ -198,11 +196,6 @@ impl KeyManager {
         let enc_public = PublicKey::from(&StaticSecret::from(*enc_secret)).to_bytes();
         let auth_public = SigningKey::from_bytes(&auth_seed).verifying_key().to_bytes();
         AddressKeys { enc_secret, enc_public, auth_seed, auth_public }
-    }
-
-    /// Commitment `salt` for `reserveMailbox` of slot (n, mailbox, j).
-    pub fn mailbox_salt(&self, n: u32, j: u8) -> Zeroizing<[u8; 32]> {
-        self.derive(&Label::MailboxSalt(n, j))
     }
 
     /// XChaCha20-Poly1305 key for `nameCipher`.
@@ -969,16 +962,12 @@ mod tests {
     }
 
     #[test]
-    fn derivation_bono_salt_and_fixed_labels() {
+    fn derivation_bono_and_fixed_labels() {
         let d = &vectors("keys.json")["derivation"];
         let keys = manager_for(text(&d["phrase"]));
         assert_eq!(keys.master.to_vec(), bytes(&d["master"]));
         for v in items(&d["bono"]) {
             assert_output(&keys.bono_secret(u32_of(&v["n"])), &Label::Bono(u32_of(&v["n"])), v);
-        }
-        for v in items(&d["mailboxSalt"]) {
-            let (n, j) = (u32_of(&v["n"]), u8_of(&v["j"]));
-            assert_output(&keys.mailbox_salt(n, j), &Label::MailboxSalt(n, j), v);
         }
         let f = &d["fixed"];
         assert_output(&keys.names_key(), &Label::Names, &f["names"]);
@@ -1810,6 +1799,6 @@ mod tests {
         let a = keys.address_keys(0, AddressKind::Mailbox, 0);
         let b = keys.address_keys(0, AddressKind::Alias, 0);
         assert_ne!(a.enc_public, b.enc_public);
-        assert_ne!(*keys.bono_secret(0), *keys.mailbox_salt(0, 0));
+        assert_ne!(*keys.bono_secret(0), *keys.names_key());
     }
 }

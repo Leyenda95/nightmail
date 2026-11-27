@@ -26,7 +26,10 @@ use zeroize::Zeroizing;
 /// 1.4: `wallet.*` methods (`open`, `close`, `sync`, `balance`, `registerDust`, `faucet`, `buyBono`), codes
 /// -32013..-32015 and the `wrong-token`, `wrong-amount` and `old-price-expired` reasons in `CALL_REJECTED`.
 /// 1.5: `unregisteredNight` in `WalletBalance` (the core registers that NIGHT for DUST in the background).
-pub const PROTOCOL_VERSION: &str = "1.5";
+/// 1.6: `chain.head` (the node's latest block time) and `blockTime` in `contract.proveCall`.
+/// 2.0: one-step `registerMailbox` replaces `reserveMailbox`/`revealMailbox`; no `blockTime`, `commit` hash or
+/// `pendingNames`.
+pub const PROTOCOL_VERSION: &str = "2.0";
 
 /// Major part of a `major.minor` string.
 pub fn major(version: &str) -> &str {
@@ -293,15 +296,6 @@ pub enum HashOp {
     AddrKey { name: String },
     /// `aliasKey(encPk, authPk, slotNul)`.
     AliasAddrKey { enc_pk: String, auth_pk: String, slot_nul: String },
-    /// `nameCommit(addrKey, encPk, authPk, salt, slotNul)`.
-    Commit {
-        addr_key: String,
-        enc_pk: String,
-        auth_pk: String,
-        #[ts(type = "string")]
-        salt: SecretHex,
-        slot_nul: String,
-    },
     /// Local part of an alias address: `words.suffix`.
     AliasAddress { addr_key: String },
 }
@@ -356,7 +350,6 @@ pub struct SnapshotCursor {
     pub block_height: u32,
     pub slot_nullifiers: Option<u32>,
     pub addresses: Option<u32>,
-    pub pending_names: Option<u32>,
 }
 
 /// `contract.snapshot` params. The core must run snapshot walks one at a time: the sidecar only keeps the state of
@@ -401,7 +394,6 @@ pub struct BonosSummary {
 pub struct SnapshotTotals {
     pub slot_nullifiers: u32,
     pub addresses: u32,
-    pub pending_names: u32,
 }
 
 /// An `addresses` record (bytes in hex).
@@ -417,16 +409,6 @@ pub struct AddressEntry {
     pub slot_nul: String,
 }
 
-/// Unrevealed mailbox reservation (`pendingNames`).
-#[derive(Serialize, Deserialize, TS, Debug, Clone, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-#[ts(export)]
-pub struct PendingNameEntry {
-    pub slot_nul: String,
-    pub reserved_round: String,
-    pub commit: String,
-}
-
 /// One page of the registry's public state, all at the same height. Collections are sorted by value (hex), not in
 /// chain order; scalars are repeated on every page.
 #[derive(Serialize, Deserialize, TS, Debug, Clone, PartialEq, Eq)]
@@ -438,14 +420,12 @@ pub struct ContractSnapshot {
     pub block_hash: String,
     #[ts(type = "number")]
     pub block_timestamp: u64,
-    pub round: String,
     pub price: String,
     pub old_prices: Vec<OldPrice>,
     pub bonos: BonosSummary,
     pub totals: SnapshotTotals,
     pub slot_nullifiers: Vec<String>,
     pub addresses: Vec<AddressEntry>,
-    pub pending_names: Vec<PendingNameEntry>,
     /// `null` on the last page.
     pub next: Option<SnapshotCursor>,
 }
@@ -496,30 +476,16 @@ pub struct SlotWitnesses {
     pub j: u8,
 }
 
-/// Arguments of `reserveMailbox(commit, r)`.
+/// Arguments of `registerMailbox(name, encPk, authPk, nameCipher)`.
 #[derive(Serialize, Deserialize, TS, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
-pub struct ReserveMailboxArgs {
-    /// `nameCommit(...)` (32-byte hex; `commit` from `contract.hashes`).
-    pub commit: String,
-    /// Proposed round (`Uint<64>`, decimal): the current one + 1.
-    pub round: String,
-}
-
-/// Arguments of `revealMailbox(name, encPk, authPk, salt, slotNul, nameCipher)`.
-#[derive(Serialize, Deserialize, TS, Debug, Clone, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-#[ts(export)]
-pub struct RevealMailboxArgs {
+pub struct RegisterMailboxArgs {
     /// Mailbox name as typed by the user: the sidecar normalises it and pads it to 64 bytes (the same normalisation
     /// as `addrKey` in `contract.hashes`; `NAME_REJECTED` if invalid).
     pub name: String,
     pub enc_pk: String,
     pub auth_pk: String,
-    #[ts(type = "string")]
-    pub salt: SecretHex,
-    pub slot_nul: String,
     /// 104 bytes in hex.
     pub name_cipher: String,
 }
@@ -539,8 +505,7 @@ pub struct CreateAliasArgs {
 #[serde(tag = "circuit", rename_all = "camelCase")]
 #[ts(export)]
 pub enum ProveCall {
-    ReserveMailbox { args: ReserveMailboxArgs, witnesses: SlotWitnesses },
-    RevealMailbox { args: RevealMailboxArgs },
+    RegisterMailbox { args: RegisterMailboxArgs, witnesses: SlotWitnesses },
     CreateAlias { args: CreateAliasArgs, witnesses: SlotWitnesses },
 }
 
@@ -570,6 +535,18 @@ pub struct ContractProveCallParams {
     pub min_leaf_count: Option<u32>,
 }
 
+/// `chain.head` (1.6, no params): the time of the node's latest block, read from the node itself (`Timestamp.Now`),
+/// not from the indexer, which follows finalized blocks and lags behind. The node is not trusted: the core only uses
+/// it within bounds of the indexer's block time.
+#[derive(Serialize, Deserialize, TS, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ChainHead {
+    /// Unix ms.
+    #[ts(type = "number")]
+    pub timestamp: u64,
+}
+
 #[derive(Serialize, Deserialize, TS, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -592,15 +569,7 @@ pub enum CallProblem {
     NoSlotsLeft,
     /// The slot is already spent.
     SlotAlreadyUsed,
-    /// `reserveMailbox`: the proposed round has already passed.
-    StaleRound,
-    /// `revealMailbox`: there is no reservation for that slot.
-    NotReserved,
-    /// `revealMailbox`: the data does not match the reserved commitment.
-    WrongReveal,
-    /// `revealMailbox`: the reservation round has not passed yet.
-    TooEarly,
-    /// `revealMailbox`: the name already belongs to someone else.
+    /// `registerMailbox`: the name already belongs to someone else.
     AddressTaken,
     /// `buyBono`: the coin is not the contract's token.
     WrongToken,
@@ -894,13 +863,6 @@ mod tests {
         let ops = [
             HashOp::IdK { s: SecretHex::new(secret), k: 1 },
             HashOp::SlotNul { s: SecretHex::new(secret), kind: AddressKind::Mailbox, j: 0, generation: 0 },
-            HashOp::Commit {
-                addr_key: "aa".into(),
-                enc_pk: "bb".into(),
-                auth_pk: "cc".into(),
-                salt: SecretHex::new(secret),
-                slot_nul: "dd".into(),
-            },
         ];
         for op in ops {
             let shown = format!("{op:?}");
@@ -936,8 +898,7 @@ mod tests {
         let calls: Vec<ContractProveCallParams> = serde_json::from_value(v["calls"].clone()).expect("calls");
         assert_eq!(serde_json::to_value(&calls).unwrap(), v["calls"], "no extra or missing fields");
         assert!(matches!(calls[0].call, ProveCall::CreateAlias { .. }));
-        assert!(matches!(calls[1].call, ProveCall::ReserveMailbox { .. }));
-        assert!(matches!(calls[2].call, ProveCall::RevealMailbox { .. }));
+        assert!(matches!(calls[1].call, ProveCall::RegisterMailbox { .. }));
         let ProveCall::CreateAlias { witnesses, .. } = &calls[0].call else { unreachable!() };
         assert_eq!((witnesses.k, witnesses.plan, witnesses.valid_until, witnesses.j), (0, Plan::Free, u32::MAX, 1));
         let result: ContractProveCallResult = serde_json::from_value(v["result"].clone()).expect("result");
@@ -945,6 +906,17 @@ mod tests {
         // Witnesses and salt do not show in Debug.
         let shown = format!("{calls:?}");
         assert!(!shown.contains("5151") && !shown.contains("5a5a"), "{shown}");
+    }
+
+    #[test]
+    fn sample_chain_head() {
+        let raw = std::fs::read_to_string(vectors_dir().join("chain-head.json")).expect("chain-head.json");
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let head: ChainHead = serde_json::from_value(v["result"].clone()).expect("result");
+        assert_eq!(serde_json::to_value(head).unwrap(), v["result"]);
+        // The storage bytes are the same u64, little endian.
+        let storage = hex::decode(v["storage"].as_str().unwrap().trim_start_matches("0x")).unwrap();
+        assert_eq!(u64::from_le_bytes(storage.try_into().unwrap()), head.timestamp);
     }
 
     #[test]
@@ -962,10 +934,6 @@ mod tests {
                 CallProblem::NotABono,
                 CallProblem::NoSlotsLeft,
                 CallProblem::SlotAlreadyUsed,
-                CallProblem::StaleRound,
-                CallProblem::NotReserved,
-                CallProblem::WrongReveal,
-                CallProblem::TooEarly,
                 CallProblem::AddressTaken,
                 CallProblem::Other,
             ]
@@ -1065,6 +1033,8 @@ mod tests {
         assert!(compatible("1.4", "1.3"), "a newer sidecar is fine");
         assert!(!compatible("1.3", "1.4"), "a 1.3 one does not know wallet.*");
         assert!(!compatible("1.4", "1.5"), "a 1.4 one does not provide unregisteredNight");
+        assert!(!compatible("1.5", "1.6"), "a 1.5 one has no chain.head and would ignore blockTime");
+        assert!(!compatible("1.6", "2.0"), "a 1.x one only knows the two-step mailbox");
         assert!(!compatible("1.2", "1.3"), "an older one would ignore minLeafCount");
         assert!(!compatible("2.3", "1.3"));
         assert!(!compatible("1", "1.3"));

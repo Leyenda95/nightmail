@@ -13,7 +13,7 @@ test('the contract pure functions reproduce the shared vectors', () => {
 test('the vectors are not trivial: each hash differs from the others', () => {
   const v = computeVectors();
   const hashes = [v.ctx, v.operatorPk, v.bonoId, v.bonoLeafFree, v.bonoLeafPaid, v.slotNullifierMailbox3,
-    v.slotNullifierAlias3, v.slotNullifierMailbox3Gen1, v.addressKey, v.aliasKey, v.nameCommit];
+    v.slotNullifierAlias3, v.slotNullifierMailbox3Gen1, v.addressKey, v.aliasKey];
   assert.equal(new Set(hashes).size, hashes.length);
   assert.deepEqual(v.limits, { free: { mailbox: 1, alias: 2 }, paid: { mailbox: 5, alias: 20 } });
   assert.equal(v.noExpiry, String(2 ** 32 - 1));

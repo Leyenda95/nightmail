@@ -41,7 +41,7 @@ test('describeError: variants with data', () => {
   assert.match(describeError({ code: 'bonoNotReady', usableAt: null }), /aún no/);
   assert.match(describeError({ code: 'insufficientFunds', asset: 'token' }), /saldo/);
   assert.ok(describeError({ code: 'bonoNotReady', usableAt: 1_800_000_000 }).includes(formatDateTime(1_800_000_000)));
-  assert.match(describeError({ code: 'callRejected', reason: 'too-early' }), /pronto/);
+  assert.match(describeError({ code: 'callRejected', reason: 'address-taken' }), /otra dirección/);
   assert.match(describeError({ code: 'wallet', reason: 'not-synced' }), /sincroniz/);
 });
 
@@ -112,7 +112,7 @@ const ALL_ERRORS = ERROR_CODES.flatMap(samples);
 test('errors: the table covers exactly the codes and reasons of the core bindings', () => {
   assert.equal(new Set(ERROR_CODES).size, ERROR_CODES.length);
   assert.deepEqual([...ERROR_CODES].sort(), [...new Set(CORE_CODES)].sort());
-  assert.ok(CORE_CODES.length > 50 && REASONS.callRejected.length >= 12 && ASSETS.length >= 2, 'the bindings were read');
+  assert.ok(CORE_CODES.length > 50 && REASONS.callRejected.length >= 8 && ASSETS.length >= 2, 'the bindings were read');
   // Each known reason has its text: it does not fall into that of "motivo que esta versión no conoce".
   for (const [code, reasons] of Object.entries(REASONS)) {
     const unknown = errorParts({ code, reason: 'motivo-nuevo' }).what;
@@ -190,8 +190,7 @@ test('the "Enviando a Midnight" note says it is waiting for its confirmation', (
 
 test('errorParts: with nothing certain to reassure, that part is omitted, what is doubtful is said as doubtful', () => {
   assert.equal(errorParts({ code: 'internal' }).safe, null);
-  // It only invites a repeat of what can work on repeating (core: `may_clear_by_itself`).
-  assert.equal(errorParts({ code: 'callRejected', reason: 'too-early' }).action, 'Vuelve a intentarlo en un momento.');
+  // It only invites a repeat of what can work on repeating (core: `may_clear_by_itself`): a contract rejection repeats.
   assert.equal(errorParts({ code: 'callRejected', reason: 'no-slots-left' }).action, null);
   assert.equal(errorParts({ code: 'aliasSuffixTaken' }).action, null);
   // Without a "what to do", the reason must not suggest that waiting fixes it.
@@ -318,7 +317,6 @@ test('English errors: waits, reasons and values are said with their grammar', ()
       errorParts({ code: 'callRejected', reason: 'motivo-nuevo' }).what,
       "The operation can't be done: it didn't pass a check.",
     );
-    assert.equal(errorParts({ code: 'callRejected', reason: 'too-early' }).action, 'Try again in a moment.');
     assert.equal(errorParts({ code: 'callRejected', reason: 'no-slots-left' }).action, null);
     // Without a "what to do", the reason does not suggest that waiting fixes it.
     assert.doesNotMatch(errorParts({ code: 'callRejected', reason: 'not-a-bono' }).what, /\b(yet|still)\b/);
@@ -536,7 +534,6 @@ const STAGES: Progress[] = [
   { stage: 'relaying' },
   { stage: 'retrying' },
   { stage: 'waitingDust' },
-  { stage: 'waitingRound', round: 7 },
   { stage: 'serverUnreachable' },
   { stage: 'walletStateDiscarded' },
   { stage: 'addressReady' },
@@ -566,12 +563,6 @@ test('progress: there is text for exactly the stages of the core bindings', () =
 });
 
 test('progress: texts of the stages with data and of the slow ones', () => {
-  // The mailbox is revealed when the reservation's round HAS PASSED (core: `wait_round_above`). Neither "ronda" nor its
-  // number, but how long it usually takes, in plain words ("unos minutos": see `progress.ts`).
-  const round = progressParts({ stage: 'waitingRound', round: 7 });
-  assert.equal(round.stage, 'Falta un último paso');
-  assert.match(round.note!, /^Suele tardar unos minutos\.$/);
-  assert.doesNotMatch(`${round.stage} ${round.note}`, /ronda|7/i);
   // The bono enters the chain and stays "confirmado", not "listo": it may not be usable yet.
   assert.equal(progressParts({ stage: 'bonoReady', n: 2 }).stage, 'Bono confirmado');
   // `n` is the start of a batch of candidates, not a bono that exists: the headline does not show it.

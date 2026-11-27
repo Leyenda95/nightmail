@@ -188,7 +188,14 @@ CREATE TABLE e2e_pending (
 ) STRICT;
 ";
 
-pub(super) const MIGRATIONS: &[&str] = &[MIGRATION_V1, MIGRATION_V2, MIGRATION_V3, MIGRATION_V4];
+/// v5: mailboxes register in one transaction (`registerMailbox`), so the two-step states are gone. A database is bound
+/// to one contract, and a reservation the old contract kept can never be finished in one step: such slots become
+/// `burned` (their nullifier is spent and they hold no address). The `round` and `reveal_attempts` columns stay unused.
+const MIGRATION_V5: &str = "
+UPDATE slots SET status = 'burned', pending_name = NULL WHERE status IN ('reserved', 'revealing');
+";
+
+pub(super) const MIGRATIONS: &[&str] = &[MIGRATION_V1, MIGRATION_V2, MIGRATION_V3, MIGRATION_V4, MIGRATION_V5];
 
 pub(super) fn version(conn: &Connection) -> Result<u32> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)

@@ -40,7 +40,7 @@ test('mailboxName: what is not a valid name is "invalid"', () => {
 
 test('the reserved list: RFC 2142, those of certificate authorities and mail ones', () => {
   for (const name of ['postmaster', 'hostmaster', 'webmaster', 'admin', 'administrator', 'abuse', 'security', 'root',
-    'noreply', 'no-reply', 'mailer-daemon', 'info', 'support', 'sales', 'marketing', 'noc', 'usenet', 'news', 'www', 'uucp', 'ftp']) {
+    'noreply', 'no-reply', 'mailer-daemon', 'info', 'support', 'sales', 'marketing', 'noc', 'usenet', 'news', 'www', 'uucp', 'ftp', 'soporte', 'nightmail']) {
     assert.ok(RESERVED_NAMES.has(name), name);
   }
   for (const name of RESERVED_NAMES) assert.equal(problem(name), 'reserved', name);

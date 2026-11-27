@@ -133,7 +133,7 @@ For what is in progress and planned, see [Project status](#project-status).
 |---|---|---|
 | **`NightMailRegistry` contract** | `contracts/src/NightMailRegistry.compact` (Compact, on Midnight) | The registry of plans and addresses. It stores the issued plans, the slots already spent and the public keys of each address. Its header summarizes what is public and what stays private. |
 | **`TestToken` contract** | `contracts/src/TestToken.compact` | The test NightMail token, with a faucet. Only for test networks: it never backs a real payment. |
-| **Mail server** | `apps/server` (Node and TypeScript) | Receives mail over SMTP, stores it encrypted for each address, serves the API the app downloads mail from and the delivery API between NightMail addresses, issues plans, advances the registry rounds and forwards the app's proofs to the chain (relayer), so you pay no fees for creating addresses. It keeps its own copy of the registry, read from the chain. |
+| **Mail server** | `apps/server` (Node and TypeScript) | Receives mail over SMTP, stores it encrypted for each address, serves the API the app downloads mail from and the delivery API between NightMail addresses, issues plans and forwards the app's proofs to the chain (relayer), so you pay no fees for creating addresses. It keeps its own copy of the registry, read from the chain. |
 | **Payer** | `apps/server/src/bin/operator-wallet.ts` | A separate process, the only one holding the operator wallet and paying the network fees. The server asks it for payments over a local channel. This way the wallet seed is not in the process that faces the internet. |
 | **Desktop app** | `apps/desktop` ([Tauri](https://tauri.app): Rust core and React interface) | The core stores your keys encrypted with your password, downloads and decrypts mail, keeps it in an encrypted database, and signs and encrypts what you send. The interface only displays and has no access to the network or to files. |
 | **Midnight helper process** | `apps/midnight-sidecar` (Node and TypeScript) | Launched by the app, it talks to it over standard input and output, opening no ports. It reads the contract state, builds the zero-knowledge proofs with the local proof server and runs the wallet used to pay for the plan. It stores nothing in the clear: the app gives it the wallet seed and the key that encrypts the wallet state it saves. While the wallet is open, its keys are in the helper's memory. |
@@ -146,7 +146,7 @@ For what is in progress and planned, see [Project status](#project-status).
 │ Desktop app (Tauri)               │   HTTP      │ Mail server                      │
 │  React interface                  │◄───────────►│  Incoming SMTP                   │
 │  Rust core: keys, encryption,     │             │  Mailbox and delivery API        │
-│  encrypted database               │             │  Plan issuer, rounds             │
+│  encrypted database               │             │  Plan issuer                     │
 │        │ stdio                    │             │  Relayer ──► Payer (operator     │
 │  Midnight helper process          │             │              wallet)             │
 │  (state, proofs, wallet)          │             └───────────────┬──────────────────┘
@@ -171,7 +171,7 @@ For what is in progress and planned, see [Project status](#project-status).
 
 1. The app proves with a zero-knowledge proof, generated on your computer, that it holds a plan with free slots, without saying which one.
 2. It sends the proof to the operator's relayer, which pays the fee and sends it to the chain.
-3. A named mailbox is created in two steps (reservation and reveal of the name in different rounds) so that nobody watching the operation can get ahead and register the same name. An alias is created in one step, because its name comes from its own keys.
+3. A named mailbox is created in two steps (reservation, then reveal of the name once the chain's clock is 30 seconds past the reservation) so that nobody watching the operation can get ahead and register the same name. An alias is created in one step, because its name comes from its own keys.
 4. Each address has its own keys, derived from your 24 words, which is why restoring recovers all of them.
 
 ### Mail between NightMail addresses
@@ -188,7 +188,7 @@ For what is in progress and planned, see [Project status](#project-status).
 - **Slot:** one place in a plan's quota. Each address spends one.
 - **Nullifier:** a public value that marks a slot as spent. It comes from your secret, so nobody can tell which plan it belongs to, and the same slot cannot be spent twice.
 - **Address:** a **mailbox** (a name you choose) or an **alias** (a random name that comes from its own keys). Each one has its own keys, and its public keys are in the registry.
-- **Round:** a counter in the registry that the server advances. A mailbox name is reserved in one round and revealed in a later one.
+- **Reveal delay:** the 30 seconds of chain time a mailbox reservation waits before its name can be revealed. Whoever copies a name from a pending reveal would have to wait that long after its own reservation, so the first reveal lands first.
 - **Relayer:** the part of the server that sends the app's proofs to the chain. The operator pays the fee.
 - **Payer:** the separate process that holds the operator wallet and pays the network fees.
 - **Sidecar:** the Midnight helper process the app launches (`apps/midnight-sidecar`).
@@ -213,7 +213,7 @@ For what is in progress and planned, see [Project status](#project-status).
 | [`infra/backend`](infra/backend/docker-compose.yml) | The demo backend in Docker (mail server, payer and contract deployment), used by `npm run demo:windows`. |
 | [`tools/dev`](tools/dev) | Scripts to set up, start, build, open and stop everything. |
 | [`tools/demo-mailer`](tools/demo-mailer/README.md) | Sends sample mail over SMTP. |
-| [`tools/demo-seed`](tools/demo-seed/README.md) | Prepares the demo network (filler bonos, round advance). |
+| [`tools/demo-seed`](tools/demo-seed/README.md) | Prepares the demo network (filler bonos). |
 | [`design`](design) | Logo, fonts, icons, sounds and the color tokens of the app. |
 | [`vendor/mail-parser-0.11.9`](vendor/mail-parser-0.11.9/README-NIGHTMAIL.md) | The mail parser used by the app, patched against hostile mail. |
 
@@ -297,7 +297,7 @@ cp .env.example .env
 | Contracts | Deployed with `deploy-contracts` | Deployed as a rehearsal |
 | Desktop app | Yes | Not yet |
 
-The operator data of each network (wallet seed, keys and state) is kept in `.data/operator/<network>/`, outside git. **Back up** from that folder `seed` (the operator wallet), `maintenance-key-registry` (without it, circuits cannot be added to the contract later) and `operator-sk` (without it, plans cannot be issued nor rounds advanced).
+The operator data of each network (wallet seed, keys and state) is kept in `.data/operator/<network>/`, outside git. **Back up** from that folder `seed` (the operator wallet), `maintenance-key-registry` (without it, circuits cannot be added to the contract later) and `operator-sk` (without it, plans cannot be issued).
 
 ## Project resources
 

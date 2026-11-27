@@ -22,7 +22,6 @@ prefs.setLocale('en');
 
 const slot = (over: Partial<PendingSlot>): PendingSlot => ({
   slot: { n: 1, kind: 'mailbox', j: 1 },
-  stage: 'reserving',
   paused: false,
   inProgress: false,
   stopped: false,
@@ -66,9 +65,6 @@ test('en progress: every stage has an English heading, and the same notes as Spa
   assert.equal(progressParts({ stage: 'bonoReady', n: 2 }).stage, 'Voucher confirmed');
   assert.equal(progressParts({ stage: 'recovering', n: 64 }).stage, 'Looking for your vouchers on Midnight');
   assert.match(progressParts({ stage: 'recovering', n: 64 }).note!, /recovery phrase/);
-  const round = progressParts({ stage: 'waitingRound', round: 7 });
-  assert.equal(round.stage, 'One last step left');
-  assert.doesNotMatch(round.note!, /\d/, 'no number and no round');
   assert.deepEqual(progressParts({ stage: 'etapaNueva' } as unknown as Progress), { stage: 'Under way', note: null });
   // The same stages carry a note in both languages.
   const { es, en } = DICTIONARIES;
@@ -80,8 +76,7 @@ test('en progress: every stage has an English heading, and the same notes as Spa
 
 test('en pending rows: stage, state and stop reasons', () => {
   assert.deepEqual(pendingParts(slot({})), { who: 'mailbox ana', what: 'mailbox ana', stage: 'Reserving the name', stopped: false, state: 'in progress' });
-  assert.equal(pendingParts(slot({ stage: 'revealing' })).stage, 'Activating the name');
-  assert.equal(pendingParts(slot({ slot: { n: 1, kind: 'alias', j: 2 }, name: null, stage: 'revealing' })).stage, 'Activating');
+  assert.equal(pendingParts(slot({ slot: { n: 1, kind: 'alias', j: 2 }, name: null })).stage, 'Reserving');
   assert.equal(pendingParts(slot({ stopped: true, paused: true, stopReason: { code: 'attemptsExhausted' } })).state, 'stopped: after several unsuccessful attempts');
   assert.equal(inProcessText(), 'in progress');
   assert.equal(stoppedText(), 'stopped');

@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { startPayerApi, type PayerApi, type PayerOps } from "../../../apps/server/src/payer/api.ts";
-import type { AdvanceResult, Health, IssueResult, PayerError } from "../../../apps/server/src/payer/payer.ts";
+import type { Health, IssueResult, PayerError } from "../../../apps/server/src/payer/payer.ts";
 
 /** What the payer answers, or "cut": the connection drops without a reply. */
 export type Answer<T> = T | PayerError | "cut";
@@ -14,13 +14,11 @@ export interface StubPayer {
   dir: string;
   socket: string;
   issues: { id: string; plan: string }[];
-  advances: number;
   /** false: the wallet is still syncing (the API answers `{ ready: false }` and `503 not-ready`). */
   ready: boolean;
   health: Health;
   /** Reply to each `/issue`; by default it issues and remembers (repeating an id gives `already-issued`). */
   issue: (id: string, plan: string, n: number) => Answer<IssueResult>;
-  advance: Answer<AdvanceResult>;
   close(): Promise<void>;
 }
 
@@ -33,6 +31,8 @@ export const READY: Health = {
   dustSpentLastHour: { relay: 0n, issue: 0n },
   dustCapPerHour: { relay: 100n, issue: 50n },
   issuesInFlight: 0,
+  earlyAnswersWrong: 0,
+  earlyAnswersUnconfirmed: 0,
   contract: "0a73",
 };
 
@@ -47,7 +47,6 @@ export async function startStubPayer(): Promise<StubPayer> {
     dir,
     socket: path.join(dir, "payer.sock"),
     issues: [],
-    advances: 0,
     ready: true,
     health: READY,
     issue: (id, plan) => {
@@ -56,7 +55,6 @@ export async function startStubPayer(): Promise<StubPayer> {
       issued.add(key);
       return { status: "issued", txHash: "ab" };
     },
-    advance: { status: "advanced", round: 9, txHash: "cd" },
     close: async () => {
       await api.close();
       rmSync(dir, { recursive: true, force: true });
@@ -68,10 +66,6 @@ export async function startStubPayer(): Promise<StubPayer> {
     issue: (id, plan) => {
       stub.issues.push({ id, plan });
       return answer(stub.issue(id, plan, stub.issues.length));
-    },
-    advanceRound: () => {
-      stub.advances++;
-      return answer(stub.advance);
     },
   };
   const log = { info: () => {}, warn: () => {} };

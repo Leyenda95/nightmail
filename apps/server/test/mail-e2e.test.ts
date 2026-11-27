@@ -70,7 +70,7 @@ const options = () => ({
 });
 
 before(async () => {
-  net.addBlock([juan], 'revealMailbox');
+  net.addBlock([juan], 'registerMailbox');
   net.addBlock([nube]);
   server = await startMailServer(options());
 });
@@ -113,7 +113,6 @@ async function download(address: TestAddress, since = 0): Promise<{ raw: Buffer;
 
 test('the server starts once it knows the addresses on chain', () => {
   assert.deepEqual(server.sync.status, { cursor: 12, fetched: 12, addresses: 2, healthy: true });
-  assert.deepEqual(server.sync.roundState(), { round: 0n, waiting: false }, 'the round is already set (the head or the last block read)');
   assert.ok(logs.some((l) => /SMTP on 127\.0\.0\.1:\d+ for @nightmail\.local; mailbox API on 127\.0\.0\.1:\d+ \(signed host mail\.nightmail\.test\)/.test(l)));
 });
 
@@ -173,7 +172,7 @@ test('an address created while the server runs starts receiving as soon as its b
   const nueva = mailbox('recien.llegada');
   const before = await mail('--to', `recien.llegada@${DOMAIN}`, '--template', 'welcome');
   assert.equal(before.code, 1);
-  net.addBlock([nueva], 'revealMailbox');
+  net.addBlock([nueva], 'registerMailbox');
   for (let i = 0; i < 100 && server.sync.status.addresses < 3; i++) await new Promise((resolve) => setTimeout(resolve, 10));
   const afterwards = await mail('--to', `recien.llegada@${DOMAIN}`, '--template', 'welcome');
   assert.equal(afterwards.code, 0, afterwards.out.join('\n'));
@@ -197,10 +196,7 @@ test('after restart: keeps boxes and index, does not reread the chain from the s
     chain: {
       fetchAt: async (height) => {
         fetched.push(height);
-        const at = await net.chain.fetchAt(height);
-        // The head carries round 7 with a reservation waiting: only the head can set it (no block is read).
-        const pendingNames = [{ slotNul: '00'.repeat(32), reservedRound: 7n, commit: '00'.repeat(32) }];
-        return height === undefined && at ? { ...at, snapshot: { ...at.snapshot, round: 7n, pendingNames } } : at;
+        return net.chain.fetchAt(height);
       },
       source: (fromHeight, signal, alive) => { subscribedFrom.push(fromHeight); return net.chain.source(fromHeight, signal, alive); },
     },
@@ -208,7 +204,6 @@ test('after restart: keeps boxes and index, does not reread the chain from the s
   assert.deepEqual(fetched, [undefined], 'only the current state, to check it is up to date');
   assert.deepEqual(subscribedFrom, [13], 'resumes from the last processed block');
   assert.equal(server.sync.status.addresses, 3);
-  assert.deepEqual(server.sync.roundState(), { round: 7n, waiting: true }, 'the head round seen at startup');
 
   clock += 61_000; // outside the nonce startup window
   const forJuan = await download(juan);
@@ -282,6 +277,30 @@ test('an app delivers an envelope it sealed itself, the owner downloads and open
     const bytes = readFileSync(file).toString('latin1');
     for (const trace of ['127.0.0.1', 'remitente-oculto']) assert.equal(bytes.includes(trace), false, `${path.basename(file)}: ${trace}`);
   }
+});
+
+test('shortly after a relayed inclusion (settling), unknown recipients get temporary errors, known ones are served as usual', async () => {
+  await server.close();
+  let settling = true;
+  server = await startMailServer({ ...options(), settling: () => settling });
+  const { code, out } = await mail('--to', `recien.creada@${DOMAIN}`, '--to', `juan.perez@${DOMAIN}`, '--template', 'welcome');
+  assert.equal(code, 1);
+  assert.match(out[0]!, /: 451 4\.3\.0 Recipient not verifiable now, try again later$/, 'SMTP: try later, not 550');
+  assert.match(out[1]!, /^ACCEPTED /);
+  const post = () => fetch(`http://127.0.0.1:${server.apiPort}/v1/box/${'ab'.repeat(32)}/deliver`, {
+    method: 'POST', headers: { 'content-type': 'application/octet-stream' },
+    body: new Uint8Array(sealMailbox(Buffer.from(juan.entry.encPk, 'hex'), Buffer.from('hola'))),
+  });
+  const pending = await post();
+  assert.equal(pending.status, 503, 'delivery: unavailable (retry), not 404');
+  assert.equal(pending.headers.get('retry-after'), '30');
+
+  settling = false;
+  const settled = await mail('--to', `recien.creada@${DOMAIN}`, '--template', 'welcome');
+  assert.match(settled.out[0]!, /: 550 5\.1\.1 No such mailbox here$/, 'once settled, an unknown address does not exist');
+  assert.equal((await post()).status, 404);
+  await server.close();
+  server = await startMailServer(options());
 });
 
 test('if there is no registry at the configured address, it does not start (and leaves nothing open)', async () => {

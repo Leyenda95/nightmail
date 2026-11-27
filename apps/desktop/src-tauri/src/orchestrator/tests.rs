@@ -51,10 +51,8 @@ async fn reserving_mailbox(h: &Harness, name: &str) -> SlotKey {
         slot_nul: nul,
         status: SlotStatus::Reserving,
         addr_key: None,
-        round: None,
         pending_name: Some(name.into()),
-        reserve_attempts: 0,
-        reveal_attempts: 0,
+        attempts: 0,
         updated_at: 0,
     };
     h.store.insert_slot(&row).unwrap();
@@ -116,10 +114,10 @@ fn orchestrator_futures_are_send() {
 }
 
 #[test]
-fn public_network_pacing_is_slower_than_devnet() {
-    let (public, devnet) = (Pacing::public_network(), Pacing::devnet());
-    assert!(public.usable_delay.0 > devnet.usable_delay.1 && public.later_issuances > devnet.later_issuances);
-    assert!(public.op_delay.1 > devnet.op_delay.1);
+fn one_pacing_for_every_network() {
+    let p = Pacing::default();
+    assert_eq!((p.usable_delay, p.later_issuances), ((Duration::ZERO, Duration::from_secs(5)), 0));
+    assert_eq!((p.poll, p.max_polls), (Duration::from_secs(2), 150));
 }
 
 // --- Bonos ------------------------------------------------------------------------------------------------
@@ -682,32 +680,81 @@ async fn no_bono_means_no_free_slot() {
 }
 
 #[tokio::test]
-async fn mailbox_in_two_steps() {
+async fn mailbox_in_one_step() {
     let h = harness().await;
-    set(&h, |w| w.auto_round = true);
     free_bono(&h).await;
     let check = h.orch.check_name("Juan.Perez").await.unwrap();
     assert_eq!(check, NameCheck { normalized: "juan.perez".into(), available: true });
     let mailbox = h.orch.create_mailbox("Juan.Perez").await.unwrap();
     assert_eq!((mailbox.display.as_str(), mailbox.name.as_deref()), ("juan.perez@nightmail.local", Some("juan.perez")));
     assert_eq!(status(&h, SlotKind::Mailbox, 0), SlotStatus::Used);
-    assert!(h.world.lock().unwrap().pending.is_empty(), "the reservation is deleted on reveal");
+    assert_eq!((h.calls("contract.proveCall"), h.calls("relay")), (1, 1), "a single transaction");
     assert_eq!(h.orch.create_mailbox("juan.perez").await, Err(OrchError::NameTaken));
 }
 
-#[tokio::test]
-async fn reserve_proposes_round_plus_one_and_waits_for_the_next_round() {
-    let h = harness().await;
-    set(&h, |w| w.round = 41);
+/// The relays and proofs of a run, with the node's block time when each happened (Unix ms).
+fn timeline(w: &World, what: &str) -> Vec<u64> {
+    w.timeline.iter().filter(|(w, _)| *w == what).map(|(_, t)| *t).collect()
+}
+
+/// A live chain (blocks every 6 s on the fake clock, the indexer 18 s behind) and room for longer waits.
+async fn live_harness(f: impl FnOnce(&mut World)) -> Harness {
+    let cfg = OrchestratorConfig { pacing: Pacing { max_polls: 100, ..Pacing::default() }, ..config() };
+    let h = harness_on(world(), cfg).await;
+    set(&h, |w| {
+        w.live = true;
+        w.indexer_lag_ms = 18_000;
+        f(w);
+    });
     free_bono(&h).await;
-    assert_eq!(h.orch.create_mailbox("ana").await, Err(OrchError::StillPending), "the round never goes past 42");
-    assert_eq!(h.world.lock().unwrap().reserve_rounds, [42]);
-    assert_eq!(
-        (status(&h, SlotKind::Mailbox, 0), slot(&h, SlotKind::Mailbox, 0).unwrap().round),
-        (SlotStatus::Reserved, Some(42))
-    );
-    set(&h, |w| w.round = 43);
-    assert_eq!(h.orch.resume().await.unwrap().addresses, 1);
+    h
+}
+
+// --- The indexer behind the relayer's answer ---------------------------------------------------------------
+// In the live fake the indexer (18 s behind the node) shows a transaction only once it reaches its block, while the
+// relayer answers as soon as it is in a block: right after an answer, the state read is the old one.
+
+#[tokio::test]
+async fn a_mailbox_that_landed_but_was_reported_unknown_is_seen_not_proved_again() {
+    let h = live_harness(|w| w.report_unknown = 1).await;
+    h.orch.create_mailbox("ana").await.unwrap();
+    assert_eq!((h.calls("contract.proveCall"), h.calls("relay")), (1, 1), "the next turn waited for the indexer");
+    assert_eq!(status(&h, SlotKind::Mailbox, 0), SlotStatus::Used);
+}
+
+#[tokio::test]
+async fn an_alias_that_landed_but_was_reported_unknown_is_adopted_not_proved_again() {
+    let h = live_harness(|w| w.report_unknown = 1).await;
+    let alias = h.orch.create_alias().await.unwrap();
+    assert_eq!(alias.slot.j, 0);
+    assert_eq!((h.calls("contract.proveCall"), h.calls("relay")), (1, 1));
+}
+
+#[tokio::test]
+async fn a_name_just_created_is_not_offered_again_while_the_indexer_has_not_caught_up() {
+    let h = live_harness(|_| {}).await;
+    h.orch.create_mailbox("ana").await.unwrap();
+    let taken = h.orch.hash(HashOp::AddrKey { name: "ana".into() }).await.unwrap();
+    {
+        let w = h.world.lock().unwrap();
+        let landed = w.addresses.iter().any(|a| a.addr_key == taken);
+        assert!(landed && !w.visible_addresses().contains(&taken), "indexer behind");
+    }
+    assert!(!h.orch.check_name("Ana").await.unwrap().available, "our own address counts");
+    assert_eq!(h.orch.create_mailbox("ana").await, Err(OrchError::NameTaken), "no second slot spent on it");
+}
+
+#[tokio::test]
+async fn after_a_mailbox_the_node_refused_the_next_one_does_not_wait_for_the_indexer() {
+    let h = live_harness(|w| w.refuse_next.push_back("mailbox")).await;
+    h.orch.create_mailbox("ana").await.unwrap();
+    let w = h.world.lock().unwrap();
+    let (proofs, relays) = (timeline(&w, "contract.proveCall"), timeline(&w, "relay"));
+    assert_eq!(relays.len(), 2);
+    // A definite refusal cannot land later: no waiting for the indexer (18 s behind) to catch up.
+    assert!(proofs[1] - relays[0] < 18_000, "the second proof came {} ms after the first relay", proofs[1] - relays[0]);
+    drop(w);
+    assert_eq!(status(&h, SlotKind::Mailbox, 0), SlotStatus::Used);
 }
 
 #[tokio::test]
@@ -720,19 +767,19 @@ async fn names_are_validated() {
 }
 
 #[tokio::test]
-async fn a_name_taken_before_reserving_releases_the_slot() {
+async fn a_name_taken_before_registering_frees_the_slot() {
     let h = harness().await;
     free_bono(&h).await;
     let k = reserving_mailbox(&h, "eva").await;
     let taken = h.orch.hash(HashOp::AddrKey { name: "eva".into() }).await.unwrap();
     set(&h, |w| w.addresses.push(foreign(taken, AddressKind::Mailbox, "33".repeat(32))));
     assert_eq!(h.orch.drive(k).await, Err(OrchError::NameTaken));
-    assert!(slot(&h, SlotKind::Mailbox, 0).is_none(), "no attempts: the slot is released");
+    assert!(slot(&h, SlotKind::Mailbox, 0).is_none(), "the slot is freed");
     assert_eq!(h.calls("contract.proveCall"), 0);
 }
 
 #[tokio::test]
-async fn a_name_taken_after_an_attempt_stops_the_slot_and_says_why() {
+async fn a_name_taken_after_an_attempt_frees_the_slot_too() {
     let h = harness().await;
     free_bono(&h).await;
     let k = key(SlotKind::Mailbox, 0);
@@ -742,25 +789,50 @@ async fn a_name_taken_after_an_attempt_stops_the_slot_and_says_why() {
         slot_nul: nul,
         status: SlotStatus::Reserving,
         addr_key: None,
-        round: None,
         pending_name: Some("eva".into()),
-        reserve_attempts: 1,
-        reveal_attempts: 0,
+        attempts: 1,
         updated_at: 0,
     };
     h.store.insert_slot(&row).unwrap();
     let taken = h.orch.hash(HashOp::AddrKey { name: "eva".into() }).await.unwrap();
     set(&h, |w| w.addresses.push(foreign(taken, AddressKind::Mailbox, "33".repeat(32))));
     assert_eq!(h.orch.drive(k).await, Err(OrchError::NameTaken));
-    let pending = h.orch.pending_slots().await.unwrap();
-    assert!(pending[0].stopped, "with an attempt already made it is not released: it stays stopped");
-    assert_eq!(pending[0].stop_reason, Some(OrchError::NameTaken), "and the row says why");
+    assert!(slot(&h, SlotKind::Mailbox, 0).is_none(), "none of its proofs can land: the slot is freed");
+    assert_eq!(h.orch.pending_slots().await.unwrap(), []);
+    assert_eq!(h.orch.create_mailbox("otra").await.unwrap().slot.j, 0, "the same slot takes another name");
+}
+
+#[tokio::test]
+async fn a_taken_name_never_frees_a_slot_whose_nullifier_is_spent() {
+    let h = harness().await;
+    free_bono(&h).await;
+    let k = reserving_mailbox(&h, "eva").await;
+    let nul = h.orch.slot_nul(k).await.unwrap();
+    let taken = h.orch.hash(HashOp::AddrKey { name: "eva".into() }).await.unwrap();
+    set(&h, |w| {
+        w.nullifiers.insert(nul);
+        w.addresses.push(foreign(taken, AddressKind::Mailbox, "33".repeat(32)));
+    });
+    assert_eq!(h.orch.drive(k).await, Err(OrchError::StaleState), "the indexer contradicts the contract");
+    assert_eq!(status(&h, SlotKind::Mailbox, 0), SlotStatus::Reserving, "the slot is kept, not freed");
+    assert_eq!(h.calls("contract.proveCall"), 0);
+}
+
+#[tokio::test]
+async fn a_name_the_contract_rejects_locally_as_taken_frees_the_slot() {
+    let h = harness().await;
+    free_bono(&h).await;
+    set(&h, |w| w.script_prove.push_back(rejected("address-taken")));
+    assert_eq!(h.orch.create_mailbox("eva").await, Err(OrchError::NameTaken));
+    assert!(slot(&h, SlotKind::Mailbox, 0).is_none());
+    assert_eq!(h.calls("relay"), 0, "nothing was sent");
+    assert_eq!(h.orch.create_mailbox("otra").await.unwrap().slot.j, 0);
 }
 
 #[tokio::test]
 async fn create_mailbox_resumes_or_releases_a_previous_reserving_slot() {
     let h = harness().await;
-    set(&h, |w| w.auto_round = true);
+    set(&h, |w| w.auto_time = true);
     free_bono(&h).await;
     reserving_mailbox(&h, "ana").await;
     let bea = h.orch.create_mailbox("bea").await.unwrap();
@@ -770,7 +842,7 @@ async fn create_mailbox_resumes_or_releases_a_previous_reserving_slot() {
 #[tokio::test]
 async fn create_mailbox_resumes_the_same_name() {
     let h = harness().await;
-    set(&h, |w| w.auto_round = true);
+    set(&h, |w| w.auto_time = true);
     free_bono(&h).await;
     reserving_mailbox(&h, "ana").await;
     assert_eq!(h.orch.create_mailbox("ana").await.unwrap().slot.j, 0);
@@ -792,43 +864,33 @@ async fn a_pending_alias_slot_is_resumed_by_create_alias() {
     free_bono(&h).await;
     set(&h, |w| w.script_submit.push_back(Err(RelayError::NotRelayable)));
     h.orch.create_alias().await.unwrap_err();
-    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().reserve_attempts, 1, "received: the slot is kept");
+    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().attempts, 1, "received: the slot is kept");
     assert_eq!(h.orch.create_alias().await.unwrap().slot.j, 0, "the same slot is resumed");
     assert_eq!(h.store.list_slots(0).unwrap().len(), 1, "no new slot");
-    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().reserve_attempts, 2);
+    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().attempts, 2);
 }
 
 #[tokio::test]
-async fn name_taken_in_the_race_burns_the_slot() {
+async fn a_name_taken_between_the_proof_and_its_block_frees_the_slot_without_spending_it() {
     let h = harness().await;
-    set(&h, |w| w.auto_round = true);
     free_bono(&h).await;
     let theirs = h.orch.hash(HashOp::AddrKey { name: "eva".into() }).await.unwrap();
-    set(&h, |w| w.after_apply.push(foreign(theirs, AddressKind::Mailbox, "33".repeat(32))));
-    assert_eq!(h.orch.create_mailbox("eva").await, Err(OrchError::SlotBurned));
-    assert_eq!(status(&h, SlotKind::Mailbox, 0), SlotStatus::Burned);
+    set(&h, |w| w.before_apply.push(foreign(theirs, AddressKind::Mailbox, "33".repeat(32))));
+    assert_eq!(h.orch.create_mailbox("eva").await, Err(OrchError::NameTaken));
+    assert_eq!((h.calls("contract.proveCall"), h.calls("relay")), (1, 1), "the node rejected the whole transaction");
+    let nul = h.orch.slot_nul(key(SlotKind::Mailbox, 0)).await.unwrap();
+    assert!(!h.world.lock().unwrap().nullifiers.contains(&nul), "the slot was not spent");
+    assert!(slot(&h, SlotKind::Mailbox, 0).is_none(), "and it is free again");
+    assert_eq!(h.orch.create_mailbox("otra").await.unwrap().slot.j, 0);
 }
 
 #[tokio::test]
 async fn interrupted_mailbox_is_resumed() {
     let h = harness().await;
-    set(&h, |w| w.auto_round = true);
     free_bono(&h).await;
-    set(&h, |w| w.script_prove.push_back(rejected("stale-round")));
-    let world = h.world.clone();
-    let fail_reveal = async move {
-        loop {
-            tokio::task::yield_now().await;
-            let mut w = world.lock().unwrap();
-            if !w.pending.is_empty() {
-                w.script_prove.extend((0..4).map(|_| unavailable()));
-                break;
-            }
-        }
-    };
-    let (result, ()) = tokio::join!(h.orch.create_mailbox("luz"), fail_reveal);
-    assert_eq!(result, Err(OrchError::MidnightUnavailable));
-    assert_eq!(status(&h, SlotKind::Mailbox, 0), SlotStatus::Reserved, "vuelve a reserved");
+    set(&h, |w| w.script_submit.push_back(Err(RelayError::NotRelayable)));
+    assert_eq!(h.orch.create_mailbox("luz").await, Err(OrchError::RelayerRefused));
+    assert_eq!(status(&h, SlotKind::Mailbox, 0), SlotStatus::Reserving, "received: the slot is kept");
     let report = h.orch.resume().await.unwrap();
     assert_eq!((report.addresses, report.failed.len()), (1, 0));
     assert_eq!(h.store.list_addresses().unwrap()[0].display, "luz@nightmail.local");
@@ -845,7 +907,7 @@ async fn relayer_busy_and_network_errors_resend_the_same_bytes_without_counting(
     h.orch.create_alias().await.unwrap();
     assert_eq!((h.calls("contract.proveCall"), h.calls("relay")), (1, 3), "one proof, three submissions");
     assert!(h.env.slept.lock().unwrap().contains(&Duration::from_secs(7)));
-    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().reserve_attempts, 1, "only the accepted submission counts");
+    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().attempts, 1, "only the accepted submission counts");
 }
 
 #[tokio::test]
@@ -880,7 +942,7 @@ async fn with_the_relayer_down_nothing_is_proved_or_counted() {
     set(&h, |w| w.script_reachable.extend([false; 6]));
     assert_eq!(h.orch.create_alias().await, Err(OrchError::ServerUnreachable));
     assert_eq!((h.calls("reach"), h.calls("contract.proveCall"), h.calls("relay")), (6, 0, 0));
-    assert_eq!(slot(&h, SlotKind::Alias, 0).map_or(0, |s| s.reserve_attempts), 0, "no attempt spent");
+    assert_eq!(slot(&h, SlotKind::Alias, 0).map_or(0, |s| s.attempts), 0, "no attempt spent");
     let progress = h.progress();
     assert_eq!(progress.iter().filter(|p| **p == Progress::ServerUnreachable).count(), 5);
     assert!(!progress.contains(&Progress::Proving));
@@ -888,7 +950,7 @@ async fn with_the_relayer_down_nothing_is_proved_or_counted() {
     set(&h, |w| w.script_reachable.extend([false, false]));
     h.orch.create_alias().await.unwrap();
     assert_eq!((h.calls("reach"), h.calls("contract.proveCall")), (9, 1));
-    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().reserve_attempts, 1);
+    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().attempts, 1);
 }
 
 #[tokio::test]
@@ -902,15 +964,15 @@ async fn a_proof_the_relayer_never_received_spends_no_attempt() {
     });
     assert_eq!(h.orch.create_alias().await, Err(OrchError::ServerUnreachable));
     assert_eq!(h.calls("contract.proveCall"), 1);
-    assert_eq!(slot(&h, SlotKind::Alias, 0).map_or(0, |s| s.reserve_attempts), 0, "it never received it");
+    assert_eq!(slot(&h, SlotKind::Alias, 0).map_or(0, |s| s.attempts), 0, "it never received it");
     // Another proof the relayer does receive (and rejects twice with the same bytes): it counts once.
     set(&h, |w| w.script_submit.extend([Ok(Submitted::Busy { retry_after_s: 1 }), Err(RelayError::NotRelayable)]));
     assert_eq!(h.orch.create_alias().await, Err(OrchError::RelayerRefused));
-    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().reserve_attempts, 1);
+    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().attempts, 1);
     // Accepted after a "busy": one proof, one attempt.
     set(&h, |w| w.script_submit.push_back(Ok(Submitted::Busy { retry_after_s: 1 })));
     h.orch.create_alias().await.unwrap();
-    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().reserve_attempts, 2);
+    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().attempts, 2);
 }
 
 #[tokio::test]
@@ -924,7 +986,7 @@ async fn bad_ttl_and_expired_mean_a_new_proof_after_a_later_block() {
     let snapshots = h.calls("contract.snapshot");
     h.orch.create_alias().await.unwrap();
     assert_eq!(h.calls("contract.proveCall"), 3, "bad-ttl and expired: a new proof each time");
-    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().reserve_attempts, 3, "each distinct proof counts");
+    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().attempts, 3, "each distinct proof counts");
     assert!(h.calls("contract.snapshot") > snapshots + 3, "waited for a later block and checked the chain");
 }
 
@@ -936,7 +998,7 @@ async fn proof_cap_pauses_the_slot_until_the_user_resumes_it() {
     assert_eq!(h.orch.create_alias().await, Err(OrchError::AttemptsExhausted));
     assert_eq!(status(&h, SlotKind::Alias, 0), SlotStatus::Reserving, "paused in its state");
     assert_eq!(h.calls("contract.proveCall"), MAX_PROOFS as usize, "{MAX_PROOFS} rejections and no more proofs");
-    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().reserve_attempts, MAX_PROOFS);
+    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().attempts, MAX_PROOFS);
     let report = h.orch.resume().await.unwrap();
     assert_eq!(
         report.failed,
@@ -959,7 +1021,6 @@ async fn pending_slots_lists_half_done_slots_and_marks_the_paused_ones() {
         [
             PendingSlot {
                 slot: mailbox.into(),
-                stage: PendingStage::Reserving,
                 paused: false,
                 in_progress: false,
                 stopped: false,
@@ -969,7 +1030,6 @@ async fn pending_slots_lists_half_done_slots_and_marks_the_paused_ones() {
             },
             PendingSlot {
                 slot: key(SlotKind::Alias, 0).into(),
-                stage: PendingStage::Reserving,
                 paused: true,
                 in_progress: false,
                 stopped: true,
@@ -1132,28 +1192,6 @@ async fn resume_marks_the_slot_and_tells_the_app_before_its_wait() {
     assert_eq!(events.iter().filter(|e| **e == OrchEvent::PendingChanged).count(), 2, "the `drive` mark is not repeated");
 }
 
-#[tokio::test]
-async fn pending_slots_marks_a_nameless_mailbox_as_stopped() {
-    let h = harness().await;
-    free_bono(&h).await;
-    let k = key(SlotKind::Mailbox, 0);
-    let nul = bytes32(&h.orch.slot_nul(k).await.unwrap()).unwrap();
-    let row = Slot {
-        key: k,
-        slot_nul: nul,
-        status: SlotStatus::Reserved,
-        addr_key: None,
-        round: Some(1),
-        pending_name: None,
-        reserve_attempts: 1,
-        reveal_attempts: 0,
-        updated_at: 0,
-    };
-    h.store.insert_slot(&row).unwrap();
-    assert!(h.orch.pending_slots().await.unwrap()[0].stopped, "without a name, `resume` leaves it alone: it must be typed");
-    assert_eq!(h.orch.pending_slots().await.unwrap()[0].stop_reason, Some(OrchError::NeedsName));
-}
-
 #[test]
 fn resume_retries_alone_only_what_can_clear_up_by_itself() {
     let failed = |error| ResumeReport {
@@ -1187,9 +1225,6 @@ fn resume_retries_alone_only_what_can_clear_up_by_itself() {
         OrchError::AliasSuffixTaken,
     ] {
         assert!(!failed(error).needs_retry(), "{error:?}");
-    }
-    for reason in [CallProblem::StaleRound, CallProblem::TooEarly] {
-        assert!(failed(OrchError::CallRejected { reason }).needs_retry(), "the round passes on its own: {reason:?}");
     }
     let bonos = |error| ResumeReport { bonos_error: Some(error), ..Default::default() };
     assert!(bonos(OrchError::Busy).needs_retry(), "with a payment in flight the leaves are checked later");
@@ -1256,13 +1291,13 @@ async fn with_the_cap_reached_the_chain_is_checked_first() {
 async fn unknown_that_did_enter_is_found_without_a_new_proof() {
     let h = harness().await;
     set(&h, |w| {
-        w.auto_round = true;
+        w.auto_time = true;
         w.report_unknown = 1;
     });
     free_bono(&h).await;
     let mailbox = h.orch.create_mailbox("sol").await.unwrap();
     assert_eq!(mailbox.name.as_deref(), Some("sol"));
-    assert_eq!(h.calls("contract.proveCall"), 2, "the reservation was seen on chain: only the reveal is left");
+    assert_eq!(h.calls("contract.proveCall"), 1, "the address was seen on chain: no second proof");
 }
 
 #[tokio::test]
@@ -1271,17 +1306,17 @@ async fn relayer_errors_count_only_a_received_proof() {
     free_bono(&h).await;
     set(&h, |w| w.script_submit.push_back(Err(RelayError::NotRelayable)));
     assert_eq!(h.orch.create_alias().await, Err(OrchError::RelayerRefused));
-    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().reserve_attempts, 1, "submitted: it counts and the slot is kept");
+    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().attempts, 1, "submitted: it counts and the slot is kept");
     set(&h, |w| w.script_submit.push_back(Err(RelayError::RateLimited { retry_after_s: 3600 })));
     assert_eq!(h.orch.create_alias().await, Err(OrchError::RateLimited { retry_after_s: 3600 }));
     // No new proof is sent until what the relayer asked for has passed.
     h.env.now.fetch_add(3600, std::sync::atomic::Ordering::SeqCst);
     set(&h, |w| w.script_submit.extend((0..6).map(|_| Ok(Submitted::Busy { retry_after_s: 1 }))));
     assert_eq!(h.orch.create_alias().await, Err(OrchError::ServiceUnavailable));
-    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().reserve_attempts, 1, "429 and 'busy': it did not receive it");
+    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().attempts, 1, "429 and 'busy': it did not receive it");
     set(&h, |w| w.script_status.push_back(Ok(TicketState::Done(RelayOutcome::Refused))));
     assert_eq!(h.orch.create_alias().await, Err(OrchError::RelayerRefused));
-    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().reserve_attempts, 2, "accepted (ticket): it counts");
+    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().attempts, 2, "accepted (ticket): it counts");
     assert_eq!(h.orch.create_alias().await.unwrap().slot.j, 0);
 }
 
@@ -1293,7 +1328,7 @@ async fn a_rate_limited_relayer_gets_no_proof_until_it_allows_one() {
     free_bono(&h).await;
     set(&h, |w| w.script_status.push_back(Err(RelayError::RateLimited { retry_after_s: 3600 })));
     assert_eq!(h.orch.create_alias().await, Err(OrchError::RateLimited { retry_after_s: 3600 }));
-    let (proofs, attempts) = (h.calls("contract.proveCall"), slot(&h, SlotKind::Alias, 0).unwrap().reserve_attempts);
+    let (proofs, attempts) = (h.calls("contract.proveCall"), slot(&h, SlotKind::Alias, 0).unwrap().attempts);
     h.env.now.fetch_add(600, std::sync::atomic::Ordering::SeqCst);
     assert_eq!(h.orch.create_alias().await, Err(OrchError::RateLimited { retry_after_s: 3000 }));
     let report = h.orch.resume().await.unwrap();
@@ -1301,7 +1336,7 @@ async fn a_rate_limited_relayer_gets_no_proof_until_it_allows_one() {
     assert!(report.needs_retry());
     assert!((2990..=3000).contains(&report.retry.not_before_s), "{:?}", report.retry);
     assert_eq!(h.calls("contract.proveCall"), proofs, "not one more proof");
-    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().reserve_attempts, attempts, "not one more attempt");
+    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().attempts, attempts, "not one more attempt");
     h.env.now.fetch_add(3000, std::sync::atomic::Ordering::SeqCst);
     assert_eq!(h.orch.create_alias().await.unwrap().slot.j, 0, "after the deadline, it goes on");
 }
@@ -1403,7 +1438,7 @@ async fn a_queued_ticket_is_polled_until_the_cap() {
     free_bono(&h).await;
     set(&h, |w| w.script_status.extend((0..60).map(|_| Ok(TicketState::Queued))));
     assert_eq!(h.orch.create_alias().await, Err(OrchError::StillPending));
-    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().reserve_attempts, 1);
+    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().attempts, 1);
 }
 
 #[tokio::test]
@@ -1469,7 +1504,7 @@ async fn not_a_bono_counts_as_an_attempt() {
     free_bono(&h).await;
     set(&h, |w| w.script_prove.push_back(rejected("not-a-bono")));
     assert_eq!(h.orch.create_alias().await, Err(OrchError::CallRejected { reason: CallProblem::NotABono }));
-    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().reserve_attempts, 1);
+    assert_eq!(slot(&h, SlotKind::Alias, 0).unwrap().attempts, 1);
 }
 
 #[tokio::test]
@@ -1518,7 +1553,7 @@ async fn behind_has_a_per_operation_cap_and_a_durable_global_stop() {
 #[tokio::test]
 async fn address_operations_the_user_asks_for_sync_again_on_their_own() {
     let h = harness().await;
-    set(&h, |w| w.auto_round = true);
+    set(&h, |w| w.auto_time = true);
     free_bono(&h).await;
     let at_cap = |h: &Harness| {
         for _ in 0..h.orch.d.config.retry.behind_halt {
@@ -1563,12 +1598,12 @@ async fn a_bono_not_yet_usable_is_reported_not_awaited() {
 // --- Payment and reservation edge cases ---------------------------------------------------------------------
 
 #[tokio::test]
-async fn the_same_name_is_never_reserved_twice() {
+async fn the_same_name_is_never_registered_twice() {
     let h = harness().await;
     h.orch.pay_fiat(BonoPeriod::Monthly).await.unwrap();
-    assert_eq!(h.orch.create_mailbox("ana").await, Err(OrchError::StillPending), "the round does not advance");
-    assert_eq!(h.orch.create_mailbox("ana").await, Err(OrchError::StillPending));
-    assert_eq!(h.world.lock().unwrap().reserve_rounds.len(), 1, "a single reserveMailbox");
+    set(&h, |w| w.script_submit.push_back(Err(RelayError::NotRelayable)));
+    assert_eq!(h.orch.create_mailbox("ana").await, Err(OrchError::RelayerRefused));
+    h.orch.create_mailbox("ana").await.unwrap();
     assert!(slot(&h, SlotKind::Mailbox, 1).is_none(), "no other paid slot spent");
 }
 
@@ -1672,56 +1707,6 @@ async fn a_failed_free_plan_can_be_asked_again() {
     assert_eq!(h.calls("issuer.request"), 2, "requested again");
 }
 
-/// Puts a reservation of slot (0, mailbox, 0) with `name`'s commitment on chain.
-async fn chain_reservation(h: &Harness, name: &str, round: u64) {
-    let k = key(SlotKind::Mailbox, 0);
-    let nul = h.orch.slot_nul(k).await.unwrap();
-    let keys = h.orch.address_keys(k).unwrap();
-    let addr_key = h.orch.hash(HashOp::AddrKey { name: name.into() }).await.unwrap();
-    let commit = h
-        .orch
-        .hash(HashOp::Commit {
-            addr_key,
-            enc_pk: hex::encode(keys.enc_public),
-            auth_pk: hex::encode(keys.auth_public),
-            salt: crate::protocol::SecretHex::from_bytes(&h.orch.d.keys.mailbox_salt(0, 0)),
-            slot_nul: nul.clone(),
-        })
-        .await
-        .unwrap();
-    set(h, |w| {
-        w.nullifiers.insert(nul.clone());
-        w.pending.push(crate::protocol::PendingNameEntry { slot_nul: nul, reserved_round: round.to_string(), commit });
-    });
-}
-
-#[tokio::test]
-async fn a_stored_name_that_does_not_match_the_commitment_is_asked_again() {
-    let h = harness().await;
-    set(&h, |w| w.auto_round = true);
-    free_bono(&h).await;
-    let k = reserving_mailbox(&h, "ana").await;
-    chain_reservation(&h, "otro", 0).await;
-    assert_eq!(h.orch.drive(k).await, Err(OrchError::NeedsName));
-    let stored = slot(&h, SlotKind::Mailbox, 0).unwrap();
-    assert_eq!((stored.status, stored.pending_name), (SlotStatus::Reserved, None));
-    assert_eq!(h.orch.provide_name(k.into(), "ana").await, Err(OrchError::WrongName));
-    assert_eq!(h.orch.provide_name(k.into(), "otro").await.unwrap().name.as_deref(), Some("otro"));
-}
-
-#[tokio::test]
-async fn reveal_checks_the_commitment_before_proving() {
-    let h = harness().await;
-    set(&h, |w| w.auto_round = true);
-    free_bono(&h).await;
-    let k = reserving_mailbox(&h, "ana").await;
-    h.store.reconcile_reserved(k, 0, true, 0).unwrap();
-    chain_reservation(&h, "otro", 0).await;
-    assert_eq!(h.orch.drive(k).await, Err(OrchError::NeedsName));
-    assert_eq!(slot(&h, SlotKind::Mailbox, 0).unwrap().pending_name, None);
-    assert_eq!(h.calls("contract.proveCall"), 0);
-}
-
 #[tokio::test]
 async fn abandoning_a_reserving_slot_needs_an_expired_ttl_and_nothing_on_chain() {
     let h = harness().await;
@@ -1741,7 +1726,7 @@ async fn abandoning_a_reserving_slot_needs_an_expired_ttl_and_nothing_on_chain()
 #[tokio::test]
 async fn provide_name_on_registered_and_alias_slots() {
     let h = harness().await;
-    set(&h, |w| w.auto_round = true);
+    set(&h, |w| w.auto_time = true);
     free_bono(&h).await;
     h.orch.create_mailbox("ana").await.unwrap();
     h.orch.create_alias().await.unwrap();

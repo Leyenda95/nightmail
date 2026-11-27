@@ -1,5 +1,5 @@
-// Which client transactions the public relayer accepts: exactly one call to our registry (reserveMailbox,
-// revealMailbox or createAlias), moving no value, with no fallible transcript (so a failure is a node
+// Which client transactions the public relayer accepts: exactly one call to our registry (registerMailbox
+// or createAlias), moving no value, with no fallible transcript (so a failure is a node
 // rejection with no fee) and a ttl that leaves time to land in a block. The node checks the proof and the
 // execution. ledger-v9 shapes (their fields), as in relayable.test.ts.
 import { test } from 'node:test';
@@ -16,12 +16,12 @@ const txOf = (...actions: object[]) => ({ intents: new Map([[7, { actions, ttl: 
 const check = (tx: Parameters<typeof checkRelayable>[0]) => checkRelayable(tx, REGISTRY, NOW);
 
 test('relayer: a call to each allowed circuit of our registry, guaranteed only → accepted', () => {
-  assert.deepEqual([...RELAYABLE_CIRCUITS], ['reserveMailbox', 'revealMailbox', 'createAlias']);
+  assert.deepEqual([...RELAYABLE_CIRCUITS], ['registerMailbox', 'createAlias']);
   for (const entryPoint of RELAYABLE_CIRCUITS) assert.equal(check(txOf(call({ entryPoint }))), null, entryPoint);
 });
 
 test('relayer: the circuit name may come as bytes (ledger-v9: string | Uint8Array)', () => {
-  assert.equal(check(txOf(call({ entryPoint: new TextEncoder().encode('revealMailbox') }))), null);
+  assert.equal(check(txOf(call({ entryPoint: new TextEncoder().encode('registerMailbox') }))), null);
   assert.equal(check(txOf(call({ entryPoint: new TextEncoder().encode('issueBono') }))), 'wrong-circuit');
 });
 
@@ -33,7 +33,7 @@ test('relayer: as bytes, neither a leading BOM nor invalid UTF-8 passes as an al
 });
 
 test('relayer: another registry circuit (the operator ones or buyBono) → wrong-circuit', () => {
-  for (const entryPoint of ['issueBono', 'advanceRound', 'setPrice', 'buyBono', 'createalias', '']) {
+  for (const entryPoint of ['issueBono', 'setPrice', 'buyBono', 'createalias', '']) {
     assert.equal(check(txOf(call({ entryPoint }))), 'wrong-circuit', entryPoint);
   }
 });

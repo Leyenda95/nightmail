@@ -25,6 +25,8 @@ export const RESERVED_NAMES: ReadonlySet<string> = new Set([
   'admin', 'administrator',
   // mail system
   'root', 'noreply', 'no-reply', 'mailer-daemon',
+  // ours (also reserved on chain, with a subset of the above: see the registry constructor)
+  'soporte', 'nightmail',
 ]);
 
 /** Why a mailbox name is rejected (the UI provides the text). */
@@ -65,7 +67,7 @@ export function mailboxName(name: string): string {
   return normal;
 }
 
-/** Mailbox name zero-padded to 64 bytes: the `name` input of revealMailbox and addressKey. */
+/** Mailbox name zero-padded to 64 bytes: the `name` input of registerMailbox and addressKey. */
 export function nameBytes(name: string): Uint8Array {
   const out = new Uint8Array(NAME_BYTES);
   out.set(Buffer.from(mailboxName(name), 'ascii'));

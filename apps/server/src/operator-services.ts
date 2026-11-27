@@ -1,13 +1,12 @@
-// Payer-backed operator services (the `bono` issuer with its RoundTicker, and the public relayer), started
+// Payer-backed operator services (the `bono` issuer and the public relayer), started
 // alongside the mail server in two steps so a permanent error fails before the mail server opens:
 // `prepareOperatorServices` checks the payer serves this registry (an unreachable payer is tolerated),
 // then `startOperatorServices` runs once the mail server is in sync.
-// Limitation: the payer's contract is checked once; /issue and /advance-round should carry it.
+// Limitation: the payer's contract is checked once; /issue should carry it.
 import { adaptPayer, type RawPayer } from './issuer/payer-client.ts';
 import { type IssuerConfig, loadIssuerConfig, startIssuer } from './issuer/start.ts';
 import { errorKind, type Logger } from './log.ts';
 import { payerClient, payerSocketPath } from './payer/client.ts';
-import type { RoundState } from './registry/sync.ts';
 import type { RelayerDeps } from './relayer/relayer.ts';
 import { loadRelayerConfig, type RelayerConfig, startRelayer } from './relayer/start.ts';
 
@@ -38,24 +37,13 @@ export type StartOptions = {
   registry: string;
   log: Logger;
   setup: OperatorSetup;
-  /** Round indexed by RegistrySync (`sync.roundState()`). */
-  roundState: () => RoundState | undefined;
-  /** Whether the sync is healthy (`sync.healthy()`); if not, the round may be stale. */
-  healthy: () => boolean;
   /** Listen address of the issuer and the relayer (default 127.0.0.1): the mail server's `listenHost`. */
   host?: string;
+  /** Told of each relayed transaction included (registry/settling.ts). */
+  onRelayIncluded?: () => void;
 };
 
 export type RunningOperatorServices = { issuerPort: number; relayerPort: number; close(): Promise<void> };
-
-const NOBODY_WAITING: RoundState = { round: 0n, waiting: false };
-
-/**
- * RoundTicker's `readRoundState`. With no round read yet, or a stuck sync (the round may be stale), it reports
- * nobody waiting, so the round is never advanced blindly.
- */
-export const roundReader = (roundState: () => RoundState | undefined, healthy: () => boolean) =>
-  async (): Promise<RoundState> => (healthy() && roundState()) || NOBODY_WAITING;
 
 /** The payer's `/health`, or throws if it does not answer within `timeoutMs`. */
 async function health(payer: OperatorPayer, timeoutMs: number): Promise<Reply> {
@@ -106,16 +94,18 @@ export async function prepareOperatorServices(options: PrepareOptions): Promise<
   return { payer, issuerConfig, relayerConfig };
 }
 
-/** Step 2: starts the issuer (with the RoundTicker) and the relayer. If one cannot listen, closes the other and throws. */
+/** Step 2: starts the issuer and the relayer. If one cannot listen, closes the other and throws. */
 export async function startOperatorServices(options: StartOptions): Promise<RunningOperatorServices> {
   const { dataDir, registry, log, setup: { payer, issuerConfig, relayerConfig } } = options;
   const host = options.host === undefined ? {} : { host: options.host };
   const issuer = await startIssuer({
-    dataDir, contract: registry, payer: adaptPayer(payer, log), log, config: issuerConfig,
-    readRoundState: roundReader(options.roundState, options.healthy), ...host,
+    dataDir, contract: registry, payer: adaptPayer(payer, log), log, config: issuerConfig, ...host,
   });
   try {
-    const relayer = await startRelayer({ dataDir, payer, registry, log, config: relayerConfig, ...host });
+    const relayer = await startRelayer({
+      dataDir, payer, registry, log, config: relayerConfig, ...host,
+      ...(options.onRelayIncluded && { onIncluded: options.onRelayIncluded }),
+    });
     return {
       issuerPort: issuer.port,
       relayerPort: relayer.port,

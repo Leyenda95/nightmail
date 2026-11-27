@@ -3,26 +3,18 @@ import assert from 'node:assert/strict';
 import { type RegistryAddress, type RegistryAt, ResolutionIndex } from '@nightmail/midnight';
 import { silentLogger } from '../src/log.ts';
 import {
-  type ActionNotice, CIRCUITS_NOT_READ, RegistrySync, type RoundState, sleep, waitForHead,
+  type ActionNotice, CIRCUITS_NOT_READ, RegistrySync, sleep, waitForHead,
 } from '../src/registry/sync.ts';
 import { alias, blockHashOf as hashOf, mailbox, registryAt, sameSuffixKey } from './mail-fixtures.ts';
 
 const call = (height: number, entryPoint: string | null = 'createAlias'): ActionNotice => ({ height, hash: hashOf(height), entryPoint });
 
-/** Registry round from a given height, and the rounds of its unrevealed reservations. */
-type Rounds = Record<number, { round: bigint; reserved?: bigint[] }>;
-
-/** A fake chain: at each height, the addresses entering that block (and the round, if given). */
-function chain(blocks: Record<number, RegistryAddress[]>, rounds: Rounds = {}) {
+/** A fake chain: at each height, the addresses entering that block. */
+function chain(blocks: Record<number, RegistryAddress[]>) {
   const fetches: number[] = [];
   const failures = new Map<number, unknown[]>();
   const stateAt = (height: number): RegistryAt => {
-    const at = registryAt(height, Object.entries(blocks).filter(([h]) => Number(h) <= height).flatMap(([, entries]) => entries));
-    const last = Object.keys(rounds).map(Number).filter((h) => h <= height).sort((a, b) => b - a)[0];
-    if (last === undefined) return at;
-    const { round, reserved = [] } = rounds[last]!;
-    const pendingNames = reserved.map((reservedRound, i) => ({ slotNul: String(i).padStart(64, '0'), reservedRound, commit: '00'.repeat(32) }));
-    return { ...at, snapshot: { ...at.snapshot, round, pendingNames } };
+    return registryAt(height, Object.entries(blocks).filter(([h]) => Number(h) <= height).flatMap(([, entries]) => entries));
   };
   return {
     fetches,
@@ -44,13 +36,11 @@ function chain(blocks: Record<number, RegistryAddress[]>, rounds: Rounds = {}) {
 const ALIVE = 'alive';
 type FeedItem = ActionNotice | Error | typeof ALIVE | { tick: number };
 
-type Start = { index?: ResolutionIndex; cursor?: number; fetched?: number; round?: RoundState };
+type Start = { index?: ResolutionIndex; cursor?: number; fetched?: number };
 
-function harness(blocks: Record<number, RegistryAddress[]>, start: Start = {}, rounds: Rounds = {}) {
-  const net = chain(blocks, rounds);
+function harness(blocks: Record<number, RegistryAddress[]>, start: Start = {}) {
+  const net = chain(blocks);
   const saved: string[] = [];
-  /** The round saved with each index: `height:round:w` (w = reservations waiting). */
-  const savedRounds: string[] = [];
   const logs: string[] = [];
   const index = start.index ?? new ResolutionIndex();
   const subscriptions: number[] = [];
@@ -70,12 +60,10 @@ function harness(blocks: Record<number, RegistryAddress[]>, start: Start = {}, r
     index,
     cursor: start.cursor ?? -1,
     fetched: start.fetched ?? -1,
-    ...(start.round && { round: start.round }),
     store: {
-      saveIndex: (i, cursor, round) => {
+      saveIndex: (i, cursor) => {
         failSave('index');
         saved.push(`index@${cursor}(${i.size})`);
-        savedRounds.push(`${cursor}:${round.round}:${round.waiting ? 'w' : '-'}`);
       },
       saveCursor: (cursor) => { failSave('cursor'); saved.push(`cursor@${cursor}`); },
     },
@@ -100,7 +88,7 @@ function harness(blocks: Record<number, RegistryAddress[]>, start: Start = {}, r
     now: () => clock.now,
   });
   return {
-    sync, index, net, saved, savedRounds, logs, subscriptions, waits, saveFailures, clock, health,
+    sync, index, net, saved, logs, subscriptions, waits, saveFailures, clock, health,
     run: (...lists: FeedItem[][]) => { feeds = lists; return sync.run(controller.signal); },
   };
 }
@@ -109,7 +97,7 @@ test('adds the addresses block by block, reading the state only where one could 
   const juan = mailbox('juan.perez');
   const nube = alias();
   const h = harness({ 5: [nube.entry], 9: [juan.entry] });
-  await h.run([call(3, null), call(4, 'issueBono'), call(5, 'createAlias'), call(6, 'issueBono'), call(9, 'revealMailbox')]);
+  await h.run([call(3, null), call(4, 'issueBono'), call(5, 'createAlias'), call(6, 'issueBono'), call(9, 'registerMailbox')]);
   assert.deepEqual(h.net.fetches, [5, 9]);
   assert.deepEqual(h.index.resolve(nube.localPart), nube.entry);
   assert.deepEqual(h.index.resolve('juan.perez'), juan.entry);
@@ -121,100 +109,30 @@ test('adds the addresses block by block, reading the state only where one could 
   ]);
 });
 
-test('circuits that touch no addresses, round or reservations do not read the state, any other does', async () => {
+test('circuits that touch no addresses do not read the state, any other does', async () => {
   assert.deepEqual([...CIRCUITS_NOT_READ].sort(), ['buyBono', 'issueBono', 'setPrice']);
   const h = harness({});
   const quiet = [...CIRCUITS_NOT_READ].map((entryPoint, i) => call(10 + i, entryPoint));
-  await h.run([...quiet, call(20, null), call(30, 'createAlias'), call(31, 'revealMailbox'), call(32, 'circuitoDelFuturo'),
-    call(33, 'reserveMailbox'), call(34, 'advanceRound')]);
-  assert.deepEqual(h.net.fetches, [30, 31, 32, 33, 34]);
+  await h.run([...quiet, call(20, null), call(30, 'createAlias'), call(31, 'registerMailbox'), call(32, 'circuitoDelFuturo')]);
+  assert.deepEqual(h.net.fetches, [30, 31, 32]);
 });
 
-// RoundTicker's readRoundState, indexed here. A reservation made with round r can be revealed once
-// round > r, so "waiting" means some reservation with r >= round.
-test('round: tracks the round and whether reservations are waiting, also reading on reservations and advances, and stores it with the index', async () => {
-  const juan = mailbox('juan.perez');
-  const h = harness({ 9: [juan.entry] }, {}, {
-    3: { round: 5n, reserved: [6n] }, // reservation for round 6
-    4: { round: 6n, reserved: [6n] }, // cannot be revealed yet (needs round > 6)
-    5: { round: 7n, reserved: [6n] }, // now it can: no advance is waited for
-    9: { round: 7n }, // revealed
-  });
-  assert.equal(h.sync.roundState(), undefined, 'nothing read yet');
-  await h.run([call(3, 'reserveMailbox'), call(4, 'advanceRound'), call(5, 'advanceRound'), call(9, 'revealMailbox')]);
-  assert.deepEqual(h.net.fetches, [3, 4, 5, 9]);
-  assert.deepEqual(h.savedRounds, ['3:5:w', '4:6:w', '5:7:-', '9:7:-']);
-  assert.deepEqual(h.sync.roundState(), { round: 7n, waiting: false });
-});
-
-test('round: an abandoned reservation (from a past round) does not count as waiting, a single waiting one is enough', async () => {
-  const h = harness({}, {}, { 3: { round: 9n, reserved: [2n, 8n] }, 4: { round: 9n, reserved: [2n, 9n] } });
-  await h.sync.process(call(3, 'reserveMailbox'));
-  assert.deepEqual(h.sync.roundState(), { round: 9n, waiting: false });
-  await h.sync.process(call(4, 'reserveMailbox'));
-  assert.deepEqual(h.sync.roundState(), { round: 9n, waiting: true });
-});
-
-// The contract accepts any r >= round, but a reservation with a huge r must not keep the operator advancing
-// forever. The app reserves with r = round + 1, so only reservations 0 or 1 rounds ahead count.
-test('round: a reservation more than 1 round ahead does not count as waiting (until the round reaches it)', async () => {
-  const far = 2n ** 64n - 2n;
-  const h = harness({}, {}, {
-    3: { round: 9n, reserved: [far] }, 4: { round: 9n, reserved: [11n] }, 5: { round: 9n, reserved: [10n] },
-    6: { round: 9n, reserved: [9n] }, 7: { round: 10n, reserved: [11n] },
-  });
-  const states: boolean[] = [];
-  for (const height of [3, 4, 5, 6, 7]) {
-    await h.sync.process(call(height, 'reserveMailbox'));
-    states.push(h.sync.roundState()!.waiting);
-  }
-  assert.deepEqual(states, [false, false, true, true, true], 'r = 2^64-2 and r = round+2 do not, round+1 and round do, round+2 counts once round+1 is reached');
-});
-
-test('round: if saving a block fails, the round does not change', async () => {
-  const h = harness({}, {}, { 3: { round: 1n, reserved: [2n] }, 4: { round: 2n, reserved: [2n] } });
-  await h.sync.process(call(3, 'reserveMailbox'));
-  h.saveFailures.index = 1;
-  await assert.rejects(h.sync.process(call(4, 'advanceRound')), /disk I\/O error/);
-  assert.deepEqual(h.sync.roundState(), { round: 1n, waiting: true });
-});
-
-test('round: at start the stored one applies, an already read block does not change it', async () => {
-  const h = harness({}, { cursor: 8, fetched: 8, round: { round: 4n, waiting: true } }, { 6: { round: 3n } });
-  assert.deepEqual(h.sync.roundState(), { round: 4n, waiting: true });
-  await h.sync.process(call(6, 'advanceRound')); // stale redelivery
-  assert.deepEqual(h.sync.roundState(), { round: 4n, waiting: true });
-});
-
-test('round: the head seen at start (waitForHead) sets it if newer, an older block does not overwrite it', async () => {
-  const h = harness({}, { cursor: 2, fetched: 2 }, { 3: { round: 1n, reserved: [2n] }, 10: { round: 3n, reserved: [3n] }, 12: { round: 4n, reserved: [3n] } });
-  h.sync.observeHead(h.net.stateAt(10));
-  assert.deepEqual(h.sync.roundState(), { round: 3n, waiting: true });
-  h.sync.observeHead(h.net.stateAt(3)); // older: ignored
-  assert.deepEqual(h.sync.roundState(), { round: 3n, waiting: true });
-  await h.sync.process(call(3, 'reserveMailbox')); // read (the index needs it) but does not overwrite the newer round
-  assert.deepEqual(h.sync.roundState(), { round: 3n, waiting: true });
-  assert.deepEqual(h.savedRounds, ['3:1:w'], 'what was read in THAT block is stored, along with its index');
-  await h.sync.process(call(12, 'advanceRound'));
-  assert.deepEqual(h.sync.roundState(), { round: 4n, waiting: false });
-});
-
-test('round: a block without new addresses goes to the debug log, not to info', async () => {
-  const h = harness({}, {}, { 3: { round: 1n } });
+test('a block without new addresses goes to the debug log, not to info', async () => {
+  const h = harness({});
   const logs: string[] = [];
   const sync = new RegistrySync({
     index: new ResolutionIndex(), cursor: -1, fetched: -1, store: { saveIndex: () => {}, saveCursor: () => {} },
     source: async function* () {}, fetchAt: h.net.fetchAt,
     log: { info: (m) => logs.push(`info ${m}`), warn: () => {}, debug: (m) => logs.push(`debug ${m}`) },
   });
-  await sync.process(call(3, 'advanceRound'));
-  assert.deepEqual(logs, ['debug registry sync: block 3, round 1, reservations waiting: no (state of 1000 bytes)']);
+  await sync.process(call(3, 'registerMailbox'));
+  assert.deepEqual(logs, ['debug registry sync: block 3, no new addresses (state of 1000 bytes)']);
 });
 
 test('several actions in the same block: the state is read only once', async () => {
   const [a, b] = [alias(), alias()];
   const h = harness({ 7: [a.entry, b.entry] });
-  await h.run([call(7), call(7), call(7, 'revealMailbox'), call(8, 'issueBono')]);
+  await h.run([call(7), call(7), call(7, 'registerMailbox'), call(8, 'issueBono')]);
   assert.deepEqual(h.net.fetches, [7]);
   assert.equal(h.index.size, 2);
 });

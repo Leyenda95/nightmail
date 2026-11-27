@@ -11,10 +11,6 @@
     "not-a-bono",
     "no-slots-left",
     "slot-already-used",
-    "stale-round",
-    "not-reserved",
-    "wrong-reveal",
-    "too-early",
     "address-taken",
     "other"
   ],
@@ -22,10 +18,6 @@
     "Not a bono": "not-a-bono",
     "No slots left": "no-slots-left",
     "Slot already used": "slot-already-used",
-    "Stale round": "stale-round",
-    "Not reserved": "not-reserved",
-    "Wrong reveal": "wrong-reveal",
-    "Too early": "too-early",
     "Address taken": "address-taken"
   }
 }

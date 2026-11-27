@@ -45,7 +45,7 @@ async function setup(t: TestContext, o: { contracts?: boolean; opSk?: Uint8Array
 test('without deployed contracts there is no registry: it says so and the payer will only relay', async (t) => {
   const s = await setup(t, { contracts: false });
   assert.equal(await s.open(), null);
-  assert.match(s.messages.join('\n'), /issue and advance-round are disabled/);
+  assert.match(s.messages.join('\n'), /issue is disabled/);
   assert.deepEqual(s.calls, [], 'does not even load the contract');
 });
 
@@ -65,7 +65,7 @@ test('if operator-sk is not the contract operator key it does not start', async 
   await assert.rejects(s.open(), (e: unknown) => e instanceof PayerConfigError && /not the operator key/.test(e.message));
 });
 
-test('with everything in order: proves calls with the operator key, checks the leaves in the real state and reads the round', async (t) => {
+test('with everything in order: proves calls with the operator key, checks the leaves in the real state', async (t) => {
   const s = await setup(t);
   const registry = await s.open();
   assert.ok(registry);
@@ -82,6 +82,5 @@ test('with everything in order: proves calls with the operator key, checks the l
   assert.deepEqual(await registry.hasLeaves(leaves), [false, false]);
   await s.sim.issue(id, Plan.paid);
   assert.deepEqual(await registry.hasLeaves(leaves), [true, false], 'reads the current state, not a stored one');
-  assert.equal(await registry.round(), 0n);
   assert.deepEqual(await registry.indexedTime(), new Date(1_234_000), 'the indexer time of the connection');
 });

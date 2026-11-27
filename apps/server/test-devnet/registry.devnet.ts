@@ -3,14 +3,14 @@
 // fails there (races): it must not burn slots or charge without issuing.
 // Deploys fresh contracts on every run (keys in memory; contracts.json is untouched).
 // Needs the devnet running, the contracts compiled with keys and the payer stopped.
-// The tests share contract, tree and round, so they run serially (--test-concurrency=1); do not enable
+// The tests share contract and tree, so they run serially (--test-concurrency=1); do not enable
 // concurrency.
 import { before, after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { loadConfig } from '../src/config.ts';
 import { ensureSpendableDust, openOperatorWallet, type OperatorWallet } from '../src/wallet/operatorWallet.ts';
-import { isNodeRejection, newSigningKey, openChain, type ChainContract, type Outcome } from '../src/chain/midnight.ts';
+import { isNodeRejection, newSigningKey, openChain, type Chain, type ChainContract, type Outcome } from '../src/chain/midnight.ts';
 import { registryWitnesses, type Bono, type RegistryPrivateState as PS } from '../src/chain/registry.ts';
 
 const rand = () => new Uint8Array(randomBytes(32));
@@ -20,6 +20,7 @@ const NO_EXPIRY = 2n ** 32n - 1n;
 const timings: string[] = [];
 
 let wallet: OperatorWallet;
+let chain: Chain;
 let token: ChainContract;
 let registry: ChainContract;
 let T: string; // token address
@@ -38,7 +39,12 @@ const ps = (bono: Bono, j = 0n): PS => ({ bono, j, opSk });
 const blank = () => ps({ s: rand(), k: 0n, plan: Plan.free, validUntil: NO_EXPIRY });
 const view = () => registry.ledgerState(R);
 const slotNul = (b: Bono, kind: number, j: bigint) => pc.slotNullifier(ctx, b.s, kind, j, 0n);
-
+/** Mailbox name zero-padded to 64 bytes (the contract's input). */
+function nameOf(text: string): Uint8Array {
+  const name = new Uint8Array(64);
+  name.set(new TextEncoder().encode(text));
+  return name;
+}
 function record(label: string, o: Outcome) {
   timings.push(`${label.padEnd(30)} ${o.status.padEnd(16)} proof ${(o.proveMs / 1000).toFixed(1).padStart(5)} s  ${String(o.bytes).padStart(6)} B`);
   return o;
@@ -82,7 +88,7 @@ before(async () => {
   const config = loadConfig('undeployed');
   wallet = await openOperatorWallet(config);
   await ensureSpendableDust(wallet);
-  const chain = await openChain(config, wallet);
+  chain = await openChain(config, wallet);
   token = await chain.contract('token');
   registry = await chain.contract('registry', witnesses);
   ({ pureCircuits: pc, Plan, Kind } = registry.module);
@@ -101,7 +107,7 @@ after(async () => {
   if (wallet) await wallet.close();
 });
 
-test('full flow with real proofs: issue, buy, alias, reserve, advance and reveal', async () => {
+test('full flow with real proofs: issue, buy, alias and registerMailbox', async () => {
   const free = await issue(Plan.free);
   await mintAndWait(PRICE);
   const paid: Bono = { s: rand(), k: 0n, plan: Plan.paid, validUntil: NO_EXPIRY };
@@ -111,22 +117,16 @@ test('full flow with real proofs: issue, buy, alias, reserve, advance and reveal
   assert.ok(buy.ok, buy.error);
   assert.ok(record('createAlias (free)', await registry.call(R, 'createAlias', ps(free, 0n), [rand(), rand()])).ok);
   assert.ok(record('createAlias (paid, j=19)', await registry.call(R, 'createAlias', ps(paid, 19n), [rand(), rand()])).ok);
-  const name = new Uint8Array(64);
-  name.set(new TextEncoder().encode('juan.perez'));
-  const m = { encPk: rand(), authPk: rand(), salt: rand(), nameCipher: new Uint8Array(randomBytes(104)), nul: slotNul(free, Kind.mailbox, 0n) };
-  const commit = pc.nameCommit(pc.addressKey(name), m.encPk, m.authPk, m.salt, m.nul);
-  const round = (await view()).round;
-  assert.ok(record('reserveMailbox', await registry.call(R, 'reserveMailbox', ps(free, 0n), [commit, round + 1n])).ok);
-  for (let i = 0; i < 2; i++) assert.ok(record('advanceRound', await registry.call(R, 'advanceRound', blank(), [])).ok);
-  assert.ok(record('revealMailbox', await registry.call(R, 'revealMailbox', blank(),
-    [name, m.encPk, m.authPk, m.salt, m.nul, m.nameCipher])).ok);
+  const name = nameOf('juan.perez');
+  const m = { encPk: rand(), authPk: rand(), nameCipher: new Uint8Array(randomBytes(104)), nul: slotNul(free, Kind.mailbox, 0n) };
+  assert.ok(record('registerMailbox', await registry.call(R, 'registerMailbox', ps(free, 0n),
+    [name, m.encPk, m.authPk, m.nameCipher])).ok);
   const v = await view();
   const rec = v.addresses.lookup(pc.addressKey(name));
   assert.equal(hex(rec.encPk), hex(m.encPk));
   assert.equal(hex(rec.authPk), hex(m.authPk));
   assert.equal(rec.kind, Kind.mailbox);
   assert.equal(hex(rec.slotNul), hex(m.nul));
-  assert.equal(v.pendingNames.member(m.nul), false);
   assert.equal(v.slotNullifiers.size(), 3n);
   assert.equal(v.bonos.firstFree(), 2n);
 });
@@ -149,20 +149,6 @@ test('two transactions for the same slot (the second arrives later): one wins an
   assert.equal(v.addresses.member(pc.aliasKey(keys[1]!.encPk, keys[1]!.authPk, nul)), false);
 });
 
-test('a reservation that fails on chain (expired round) does not burn the slot', async () => {
-  const b = await issue(Plan.paid);
-  const round = (await view()).round;
-  const late = await registry.prepare(R, 'reserveMailbox', ps(b, 2n), [rand(), round]); // valid when proved
-  for (let i = 0; i < 2; i++) assert.ok((await registry.call(R, 'advanceRound', blank(), [])).ok);
-  const o = record('reserveMailbox (expired)', await registry.send(late));
-  assertRejected(o);
-  const nul = slotNul(b, Kind.mailbox, 2n);
-  const v = await view();
-  assert.equal(v.slotNullifiers.member(nul), false, 'the slot is still free');
-  assert.equal(v.pendingNames.member(nul), false, 'and no reservation remains');
-  assert.ok((await registry.call(R, 'reserveMailbox', ps(b, 2n), [rand(), v.round + 1n])).ok, 'and it can be used');
-});
-
 test('the same coin in two purchases: only one bono is issued', async () => {
   await mintAndWait(2n * PRICE);
   const coin = { nonce: rand(), color, value: PRICE };
@@ -178,27 +164,22 @@ test('the same coin in two purchases: only one bono is issued', async () => {
   assert.equal((await view()).bonos.firstFree(), leavesBefore + 1n);
 });
 
-test('two reveals of the same name (in series): one wins and the other keeps its reservation intact', async () => {
+test('two registrations of the same name (in series): one wins, the other is rejected by the node and keeps its slot', async () => {
   const b = await issue(Plan.paid);
-  const name = new Uint8Array(64);
-  name.set(new TextEncoder().encode(`ana.${Date.now()}`));
-  const users = [3n, 4n].map((j) => {
-    const u = { encPk: rand(), authPk: rand(), salt: rand(), nameCipher: new Uint8Array(randomBytes(104)), nul: slotNul(b, Kind.mailbox, j), j };
-    return { ...u, commit: pc.nameCommit(pc.addressKey(name), u.encPk, u.authPk, u.salt, u.nul) };
-  });
-  for (const u of users) assert.ok((await registry.call(R, 'reserveMailbox', ps(b, u.j), [u.commit, (await view()).round + 1n])).ok);
-  for (let i = 0; i < 2; i++) assert.ok((await registry.call(R, 'advanceRound', blank(), [])).ok);
-  const reveals = [];
-  for (const u of users) reveals.push(await registry.prepare(R, 'revealMailbox', blank(), [name, u.encPk, u.authPk, u.salt, u.nul, u.nameCipher]));
+  const name = nameOf(`ana.${Date.now()}`);
+  const users = [3n, 4n].map((j) => ({ encPk: rand(), authPk: rand(), nameCipher: new Uint8Array(randomBytes(104)), nul: slotNul(b, Kind.mailbox, j), j }));
+  const prepared = [];
+  for (const u of users) prepared.push(await registry.prepare(R, 'registerMailbox', ps(b, u.j), [name, u.encPk, u.authPk, u.nameCipher]));
   const before = (await view()).addresses.size();
-  const first = record('revealMailbox (wins)', await registry.send(reveals[0]!));
-  const second = record('revealMailbox (same name)', await registry.send(reveals[1]!));
+  const first = record('registerMailbox (wins)', await registry.send(prepared[0]!));
+  const second = record('registerMailbox (same name)', await registry.send(prepared[1]!));
   assert.ok(first.ok, first.error);
   assertRejected(second);
   const v = await view();
   assert.equal(v.addresses.size(), before + 1n);
   assert.equal(hex(v.addresses.lookup(pc.addressKey(name)).encPk), hex(users[0]!.encPk));
-  assert.equal(v.pendingNames.member(users[0]!.nul), false, 'the winning one is deleted');
-  const loser = v.pendingNames.lookup(users[1]!.nul);
-  assert.equal(hex(loser.commit), hex(users[1]!.commit), 'the losing reservation is still whole');
+  assert.equal(v.slotNullifiers.member(users[1]!.nul), false, 'the losing slot is not spent');
+  const other = nameOf(`ana2.${Date.now()}`);
+  assert.ok(record('registerMailbox (loser, another name)', await registry.call(R, 'registerMailbox', ps(b, users[1]!.j),
+    [other, users[1]!.encPk, users[1]!.authPk, users[1]!.nameCipher])).ok, 'the losing slot registers another name');
 });

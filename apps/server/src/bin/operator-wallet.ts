@@ -1,7 +1,7 @@
 // NightMail payer process: the sole holder of the operator wallet.
 // - Keeps the wallet synced and registers incoming faucet NIGHT for DUST generation.
 // - Serves the local API (Unix socket `<dataDir>/payer.sock`, 0600; payer/api.ts) through which the server
-//   asks it to pay: relay, issueBono and advanceRound. Everything that spends DUST, NIGHT registration
+//   asks it to pay: relay and issueBono. Everything that spends DUST, NIGHT registration
 //   included, goes through a single serial queue (payer/payer.ts).
 //
 // Runs as a systemd user service (tools/operator-wallet-service.sh).
@@ -149,7 +149,8 @@ try {
   });
   payer = active;
   log.info(`paying: relay cap ${limits.relayDustPerHour} and issue cap ${limits.issueDustPerHour} DUST units per hour, `
-    + `queue of ${limits.maxQueue}, ${journal.size} issue(s) in flight, registry ${active.health().contract ?? 'not deployed'}`);
+    + `queue of ${limits.maxQueue}, ${journal.size} issue(s) in flight, registry ${active.health().contract ?? 'not deployed'}, `
+    + `early relay answer ${limits.earlyRelayAnswer ? 'ON (in a block)' : 'off (when final)'}`);
 
   while (!stopping) {
     // Watchdog: if the wallet is not synced again within SYNC_TIMEOUT_MS, assume

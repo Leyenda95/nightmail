@@ -59,20 +59,12 @@ export default {
       recovering: stage('Looking for your vouchers on Midnight', 'Your recovery phrase is already saved and encrypted on this device.'),
     },
     bonoReady: stage('Voucher confirmed', null),
-    waitingRound: stage(
-      'One last step left',
-      'This usually takes a few minutes.',
-    ),
     unknown: stage('Under way', null),
   },
 
   // pending.ts
   pending: {
-    stage: {
-      reserving: { mailbox: 'reserving the name', alias: 'reserving' },
-      reserved: { mailbox: 'name reserved', alias: 'reserved' },
-      revealing: { mailbox: 'activating the name', alias: 'activating' },
-    },
+    stage: { mailbox: 'reserving the name', alias: 'reserving' },
     button: { resume: RESUME, retry: RETRY },
     inProcess: 'in progress',
     stopped: 'stopped',
@@ -94,7 +86,6 @@ export default {
     stopCall: {
       notABono: "Midnight doesn't recognize the voucher",
       noSlotsLeft: 'no slots left in the plan',
-      wrongReveal: "the data doesn't match the reservation",
     },
     mailboxNamed: (name: string): string => `mailbox ${name}`,
     actions: {

@@ -9,7 +9,6 @@ import {
   actionLabels,
   errorCode,
   inProcessText,
-  needsName,
   pendingButton,
   pendingActions,
   pendingParts,
@@ -28,7 +27,6 @@ import {
 
 const slot = (over: Partial<PendingSlot>): PendingSlot => ({
   slot: { n: 0, kind: 'mailbox', j: 0 },
-  stage: 'reserving',
   paused: false,
   inProgress: false,
   stopped: false,
@@ -41,11 +39,11 @@ const slot = (over: Partial<PendingSlot>): PendingSlot => ({
 test('pendingActions: resume if paused, otherwise retry, abandon only if the core already allows it', () => {
   assert.deepEqual(pendingActions(slot({})), { resume: false, retry: true, abandon: true });
   assert.deepEqual(pendingActions(slot({ paused: true })), { resume: true, retry: false, abandon: true });
-  assert.deepEqual(pendingActions(slot({ stage: 'reserved', paused: true, abandonable: false })), { resume: true, retry: false, abandon: false });
+  assert.deepEqual(pendingActions(slot({ paused: true, abandonable: false })), { resume: true, retry: false, abandon: false });
   // With a proof that can still land, abandoning would give "todavía no": it is not offered.
   assert.deepEqual(pendingActions(slot({ abandonable: false })), { resume: false, retry: true, abandon: false });
   // With nothing running, never a row without any button.
-  assert.deepEqual(pendingActions(slot({ stage: 'revealing', abandonable: false })), { resume: false, retry: true, abandon: false });
+  assert.deepEqual(pendingActions(slot({ inProgress: false, abandonable: false })), { resume: false, retry: true, abandon: false });
 });
 
 // While it is being created, "Reintentar" makes no sense (nothing has failed) and cancelling is not
@@ -86,10 +84,6 @@ test('pendingParts: who, stage (capitalized heading), whether it is stopped and 
     stopped: true,
     state: 'detenido: tras varios intentos sin éxito',
   });
-  // "revelar" is never said, the second step is "activar".
-  assert.equal(pendingParts(slot({ stage: 'reserved' })).stage, 'Nombre reservado');
-  assert.equal(pendingParts(slot({ stage: 'revealing' })).stage, 'Activando el nombre');
-  assert.equal(pendingParts(slot({ slot: { n: 1, kind: 'alias', j: 2 }, stage: 'revealing' })).stage, 'Activando');
 });
 
 // "en proceso" if it will continue by itself (the app drives it or will retry), "detenido" if it needs the
@@ -122,7 +116,7 @@ test('pendingParts: the stopped row says the reason the core gives', () => {
   assert.equal(state({ code: 'attemptsExhausted' }), 'detenido: tras varios intentos sin éxito');
   assert.equal(state({ code: 'needsName' }), 'detenido: falta el nombre');
   // Contract rejections: the clear ones by name, the rest "rechazado por Midnight".
-  assert.equal(state({ code: 'callRejected', reason: 'stale-round' }), 'detenido: rechazado por Midnight');
+  assert.equal(state({ code: 'callRejected', reason: 'slot-already-used' }), 'detenido: rechazado por Midnight');
   // "address-taken": the text depends on the slot kind.
   const taken: OrchError = { code: 'callRejected', reason: 'address-taken' };
   assert.equal(state(taken), 'detenido: nombre ocupado', 'mailbox');
@@ -133,7 +127,6 @@ test('pendingParts: the stopped row says the reason the core gives', () => {
   );
   assert.equal(state({ code: 'callRejected', reason: 'not-a-bono' }), 'detenido: Midnight no reconoce el bono');
   assert.equal(state({ code: 'callRejected', reason: 'no-slots-left' }), 'detenido: no quedan huecos en el plan');
-  assert.equal(state({ code: 'callRejected', reason: 'wrong-reveal' }), 'detenido: los datos no coinciden con la reserva');
   assert.equal(state({ code: 'callRejected', reason: 'other' }), 'detenido: rechazado por Midnight');
   // Unknown or no reason: the generic one.
   assert.equal(stopGenericText(), 'no se pudo completar');
@@ -160,7 +153,6 @@ test('stopReasonText: short texts, without ";", "//" or "—"', () => {
     { code: 'sidecarTooOld' },
     { code: 'callRejected', reason: 'not-a-bono' },
     { code: 'callRejected', reason: 'no-slots-left' },
-    { code: 'callRejected', reason: 'wrong-reveal' },
     { code: 'callRejected', reason: 'address-taken' },
     { code: 'callRejected', reason: 'other' },
   ];
@@ -204,22 +196,6 @@ test('stillPendingText: names the button the row really has', () => {
   assert.match(either, /si se detuvo tras varios intentos/);
   // A bono's does not name any button of the slot row.
   assert.doesNotMatch(stillPendingText('bono', true), /Reintentar|Reanudar/);
-});
-
-// A mailbox with no name is resumed by nothing until one is typed. The row says so, does not offer
-// "Reintentar" (it would do nothing) and carries the name form (`needsName`).
-test('unnamed mailbox: "detenido: falta el nombre", without "Reintentar" or "Reanudar", and asks for the name', () => {
-  const nameless = slot({ stage: 'reserved', name: null, stopped: true, stopReason: { code: 'needsName' }, abandonable: false });
-  assert.ok(needsName(nameless));
-  assert.equal(pendingParts(nameless).state, 'detenido: falta el nombre');
-  assert.equal(pendingParts(nameless).who, 'buzón en creación');
-  assert.equal(pendingParts(nameless).what, 'buzón');
-  assert.deepEqual(pendingActions(nameless), { resume: false, retry: false, abandon: false });
-  assert.deepEqual(pendingActions({ ...nameless, paused: true }), { resume: false, retry: false, abandon: false });
-  // With a name, or an alias (which has none), no.
-  assert.ok(!needsName(slot({ name: 'ana' })));
-  assert.ok(!needsName(slot({ slot: { n: 0, kind: 'alias', j: 0 } })));
-  assert.equal(pendingActions(slot({ slot: { n: 0, kind: 'alias', j: 0 } })).retry, true);
 });
 
 // Each button says which row it belongs to, starting with its visible text.

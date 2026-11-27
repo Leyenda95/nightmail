@@ -1,9 +1,9 @@
-// Operator services that use the payer (Issuer + RoundTicker and the public relayer), started alongside the
+// Operator services that use the payer (Issuer and the public relayer), started alongside the
 // receiving server. Uses a fake payer and arbitrary free ports.
 import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  closeTogether, type OperatorPayer, type OperatorSetup, prepareOperatorServices, roundReader, startOperatorServices,
+  closeTogether, type OperatorPayer, type OperatorSetup, prepareOperatorServices, startOperatorServices,
 } from '../src/operator-services.ts';
 import { capturingLogger } from './smtp-helpers.ts';
 import { tempDir } from './temp-dir.ts';
@@ -21,7 +21,7 @@ function fakePayer(health: Reply | Error | 'hang' = { status: 200, body: { ready
       if (health instanceof Error) throw health;
       return health;
     },
-    relay: answer, issue: answer, advanceRound: answer,
+    relay: answer, issue: answer,
   };
 }
 
@@ -32,7 +32,7 @@ async function prepare(logs: string[], health?: Reply | Error | 'hang') {
 
 function start(t: TestContext, setup: OperatorSetup, logs: string[] = []) {
   return startOperatorServices({
-    dataDir: tempDir(t), registry: REGISTRY, log: capturingLogger(logs), setup, roundState: () => undefined, healthy: () => true,
+    dataDir: tempDir(t), registry: REGISTRY, log: capturingLogger(logs), setup,
   });
 }
 
@@ -115,11 +115,4 @@ test('closeTogether: closes everything at once and waits for all of it, even if 
   await closing;
   assert.equal(order.at(-1), 'slow ends');
   assert.deepEqual(logs, ['warn closing failed (Error)', 'warn closing failed (TypeError)']);
-});
-
-test('roundReader: the RegistrySync round, with none read yet or with the sync stuck, "nobody waiting"', async () => {
-  const waiting = () => ({ round: 4n, waiting: true });
-  assert.deepEqual(await roundReader(waiting, () => true)(), { round: 4n, waiting: true });
-  assert.deepEqual(await roundReader(() => undefined, () => true)(), { round: 0n, waiting: false });
-  assert.deepEqual(await roundReader(waiting, () => false)(), { round: 0n, waiting: false }, 'the round may lag behind');
 });

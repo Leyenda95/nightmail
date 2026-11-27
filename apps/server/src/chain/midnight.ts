@@ -163,10 +163,11 @@ export async function openChain(config: ServerConfig, wallet: OperatorWallet) {
     indexedTime: () => indexedTime(config.indexer),
     /**
      * Pays (DUST only), signs, submits and awaits a tx proven by someone else (the relayer); see
-     * sendPrepared. `beforeSubmit` receives what is about to be submitted, right before submitting.
+     * sendPrepared. `beforeSubmit` receives what is about to be submitted, right before submitting;
+     * `onInBlock`, if given, is told when it enters a block (the returned promise still waits for the final result).
      */
-    send: (p: Prepared, beforeSubmit: (sent: SentTx) => void | Promise<void> = () => {}) =>
-      sendPrepared(ctx, p, BLOCK_WAIT_MS, (finalized: any) => beforeSubmit(sentTxOf(finalized))),
+    send: (p: Prepared, beforeSubmit: (sent: SentTx) => void | Promise<void> = () => {}, onInBlock?: OnInBlock) =>
+      sendPrepared(ctx, p, BLOCK_WAIT_MS, (finalized: any) => beforeSubmit(sentTxOf(finalized)), onInBlock),
   };
 }
 
@@ -317,6 +318,8 @@ export function refusedByNode(e: unknown): boolean {
 const BLOCK_WAIT_MS = 10 * 60_000;
 
 type BeforeSubmit = (finalized: unknown) => void | Promise<void>;
+/** The submitted tx is in a block (not final yet), `ms` after submission. */
+export type OnInBlock = (ms: number) => void;
 
 /**
  * Releases the DUST reserved by a signed tx that will not be submitted; otherwise it stays reserved
@@ -417,9 +420,12 @@ function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
  * - 'unknown': submitted but the result is unknown (connection drop, timeout): it may be in a block;
  * - the block status (SucceedEntirely, FailFallible…) when known.
  * `beforeSubmit` receives the signed tx right before submission (so it can be recorded).
+ * `onInBlock` is called once if the wallet reports the tx in a block (`wallet.inclusion`), before finality; it
+ * changes nothing here: the outcome is still the final one, after 'Finalized' and the indexer.
  */
 export async function sendPrepared(
   ctx: Pick<ChainContext, 'wallet' | 'base'>, p: Prepared, waitMs = BLOCK_WAIT_MS, beforeSubmit: BeforeSubmit = () => {},
+  onInBlock?: OnInBlock,
 ): Promise<Outcome> {
   const fail = (status: string, e: unknown): Outcome =>
     ({ ok: false, status, proveMs: p.proveMs, blockMs: 0, bytes: p.bytes.length, error: causes(e) });
@@ -435,12 +441,17 @@ export async function sendPrepared(
     return fail('record-error', await giveBack(ctx.wallet, finalized, e));
   }
   const t1 = performance.now();
+  const unwatch = onInBlock && ctx.wallet.inclusion
+    ? ctx.wallet.inclusion.watch(finalized as object, () => onInBlock(performance.now() - t1))
+    : () => {};
   let txId: string;
   try {
     // The wallet waits for 'Finalized' on a subscription that is not recreated on reconnect: without a limit it might never return.
     txId = await withTimeout(ctx.wallet.facade.submitTransaction(finalized as any), waitMs, 'submitTransaction');
   } catch (e) {
     return refusedByNode(e) ? fail('rejected', await releaseDust(ctx.wallet, finalized, e)) : fail('unknown', e);
+  } finally {
+    unwatch();
   }
   try {
     const final = await withTimeout(ctx.base.publicDataProvider.watchForTxData(txId), waitMs, 'watchForTxData') as any;

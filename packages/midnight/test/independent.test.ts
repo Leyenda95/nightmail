@@ -34,6 +34,4 @@ test('SHA-256 reproduces all the hashes of registry.json without the compiled co
   assert.equal(slot(MAILBOX, 3, 1), v.slotNullifierMailbox3Gen1);
   assert.equal(sha(pad('nightmail:addr:', 64), pad('juan.perez', 64)), v.addressKey);
   assert.equal(sha(b(i.encPk), b(i.authPk), b(v.slotNullifierAlias3)), v.aliasKey);
-  assert.equal(sha(pad('nightmail:name-commit:', 32), b(v.addressKey), b(i.encPk), b(i.authPk), b(i.salt),
-    b(v.slotNullifierMailbox3)), v.nameCommit);
 });

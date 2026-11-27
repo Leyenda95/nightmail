@@ -22,6 +22,19 @@ function intentProblem(i: IntentShape): RelayProblem | null {
   return i.dustActions === undefined ? null : 'dust-actions';
 }
 
+/**
+ * Whether every call runs entirely in the guaranteed part (no fallible transcript). The payer's early answer
+ * (payer.ts) rests on such a transaction with no offers (see relayProblem) having applied once it is in a block: the
+ * node should check the guaranteed part again when building the block, with that block's time, and there is no
+ * fallible part that could fail inside one. That is not proven yet (test-devnet/inblock.devnet.ts decides it), so the
+ * early answer stays off. An action that is not a recognizable call counts as fallible.
+ */
+export function guaranteedOnly(tx: { intents?: Map<number, { actions?: readonly unknown[] }> }): boolean {
+  const actions = [...(tx.intents?.values() ?? [])].flatMap((i) => i.actions ?? []);
+  return actions.length > 0 && actions.every((a) => typeof a === 'object' && a !== null && 'fallibleTranscript' in a
+    && (a as { fallibleTranscript?: unknown }).fallibleTranscript === undefined);
+}
+
 /** null if it can be paid for, otherwise the reason. `tx` is an unbalanced ledger-v9 `Transaction`. */
 export function relayProblem(tx: TxShape): RelayProblem | null {
   if (hasZswapOffer(tx)) return 'zswap-offer';

@@ -1,14 +1,11 @@
 // RegistrySync keeps the resolution index up to date with the contract, block by block in chain order.
-// The action subscription only says which blocks matter (full state is tens of KiB and `advanceRound`
-// fires every 30 s); the registry state at each such block is then fetched and passed to `addBlock`.
+// The action subscription only says which blocks matter (full state is tens of KiB); the registry state at
+// each such block is then fetched and passed to `addBlock`.
 //
 // Invariants (the first-registrant suffix rule in resolution.ts depends on them): never skip or merge a
 // block; if one cannot be read, retry with backoff without advancing. Index and height are saved together
 // after each block; resume starts at the saved height (indexer offsets are inclusive).
-//
-// It also tracks the round and whether reservations await an advance (for the RoundTicker). A reservation
-// at round r waits while r >= round, and counts only if r is at most MAX_ROUNDS_AHEAD ahead.
-import type { RegistryAt, RegistrySnapshot, ResolutionIndex } from '@nightmail/midnight';
+import type { RegistryAt, ResolutionIndex } from '@nightmail/midnight';
 import type { Logger } from '../log.ts';
 
 /** A contract action: the block holding its resulting state and the circuit called (null: deploy or maintenance). */
@@ -20,37 +17,20 @@ export type ActionNotice = { height: number; hash: string; entryPoint: string | 
 export type ActionSource = (fromHeight: number, signal: AbortSignal, alive: () => void) => AsyncIterable<ActionNotice>;
 export type FetchRegistryAt = (height: number) => Promise<RegistryAt | null>;
 
-/** Registry round, and whether any reservation is waiting for it to advance. */
-export type RoundState = { round: bigint; waiting: boolean };
-
 export type SyncStore = {
-  /** Atomically saves the index, the processed height and the round read at the index's last block. */
-  saveIndex(index: ResolutionIndex, cursor: number, round: RoundState): void;
+  /** Atomically saves the index and the processed height. */
+  saveIndex(index: ResolutionIndex, cursor: number): void;
   saveCursor(cursor: number): void;
 };
 
 /**
- * Circuits that touch neither addresses, nor the round, nor reservations: their blocks are not read. Any other
- * (`createAlias`, `revealMailbox`, `reserveMailbox`, `advanceRound` and any future circuit) forces a read of its
- * block's state. When in doubt, read: skipping a block with addresses would break the ordering.
+ * Circuits that do not touch addresses: their blocks are not read. Any other (`createAlias`, `registerMailbox` and
+ * any future circuit) forces a read of its block's state. When in doubt, read: skipping a block with addresses would
+ * break the ordering.
  */
 export const CIRCUITS_NOT_READ: ReadonlySet<string> = new Set(['issueBono', 'buyBono', 'setPrice']);
 
 const needsState = (notice: ActionNotice) => notice.entryPoint !== null && !CIRCUITS_NOT_READ.has(notice.entryPoint);
-
-/**
- * How many rounds ahead a waiting reservation may be. The app reserves with r = round + 1 and the contract rejects
- * r < round, so an honest reservation is 0 or 1 rounds ahead. The contract sets no upper bound: without this cap,
- * a single reservation with a huge r (up to 2^64 - 2) would keep the operator advancing forever.
- * A far-ahead reservation is ignored until the round reaches its window naturally.
- */
-export const MAX_ROUNDS_AHEAD = 1n;
-
-/** A state's round, and whether any unrevealed reservation waits for it (round <= r <= round + MAX_ROUNDS_AHEAD). */
-export const roundOf = (snapshot: RegistrySnapshot): RoundState => ({
-  round: snapshot.round,
-  waiting: snapshot.pendingNames.some((p) => p.reservedRound >= snapshot.round && p.reservedRound - snapshot.round <= MAX_ROUNDS_AHEAD),
-});
 
 const isHeight = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 0;
 
@@ -80,8 +60,6 @@ export type RegistrySyncDeps = {
   cursor: number;
   /** Height of the last block read and added to the index (-1: none). */
   fetched: number;
-  /** Round saved with the index (that of block `fetched`), if any. */
-  round?: RoundState;
   store: SyncStore;
   source: ActionSource;
   fetchAt: FetchRegistryAt;
@@ -102,8 +80,6 @@ export class RegistrySync {
   private readonly staleAfterMs: number;
   private cursor: number;
   private fetched: number;
-  /** Latest known round and the height of the state it came from (never goes backwards). */
-  private round: { state: RoundState; height: number } | undefined;
   /** Last sign of life with the sync up to date (startup counts as one, since startup checks the head). */
   private lastGood: number;
   /**
@@ -118,30 +94,11 @@ export class RegistrySync {
     this.staleAfterMs = deps.staleAfterMs ?? DEFAULT_STALE_AFTER_MS;
     this.cursor = deps.cursor;
     this.fetched = deps.fetched;
-    this.round = deps.round && { state: deps.round, height: deps.fetched };
     this.lastGood = this.now();
   }
 
   get status(): SyncStatus {
     return { cursor: this.cursor, fetched: this.fetched, addresses: this.deps.index.size, healthy: this.healthy() };
-  }
-
-  /** Latest known round and whether reservations are waiting; undefined until some state has been read. */
-  roundState(): RoundState | undefined {
-    return this.round?.state;
-  }
-
-  /** Takes the round from the state at that height if it is newer than the known one. */
-  private noteRound(height: number, state: RoundState): void {
-    if (!this.round || height >= this.round.height) this.round = { state, height };
-  }
-
-  /**
-   * Head state seen at startup (`waitForHead`): provides the round without waiting for the next block read
-   * (e.g. with a database that predates saving it). Not persisted: what is saved goes with the index.
-   */
-  observeHead(at: RegistryAt): void {
-    this.noteRound(at.blockHeight, roundOf(at.snapshot));
   }
 
   /**
@@ -225,14 +182,12 @@ export class RegistrySync {
     const before = index.size;
     index.addBlock(notice.height, at.snapshot.addresses); // already-seen entries are ignored, leaving this block's
     const cursor = Math.max(this.cursor, notice.height);
-    const round = roundOf(at.snapshot);
-    store.saveIndex(index, cursor, round);
+    store.saveIndex(index, cursor);
     this.fetched = notice.height;
     this.cursor = cursor;
-    this.noteRound(notice.height, round);
     const added = index.size - before;
     if (added > 0) log.info(`registry sync: block ${notice.height}, ${added} new address(es), ${index.size} in total (state of ${at.stateBytes} bytes)`);
-    else log.debug(`registry sync: block ${notice.height}, round ${round.round}, reservations waiting: ${round.waiting ? 'yes' : 'no'} (state of ${at.stateBytes} bytes)`);
+    else log.debug(`registry sync: block ${notice.height}, no new addresses (state of ${at.stateBytes} bytes)`);
   }
 }
 

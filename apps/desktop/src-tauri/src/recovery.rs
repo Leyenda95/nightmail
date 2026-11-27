@@ -6,8 +6,8 @@
 //! 2. Derive the nullifiers of every slot of each bono found (contract quotas: free 1 + 2, paid 5 + 20).
 //! 3. Look each nullifier up in the full state (`contract.snapshot`, all pages): its address (checking the
 //!    registered keys are `address_keys(n, kind, j)` and, for an alias, that `addrKey` derives from them; otherwise
-//!    the slot is burned), its unrevealed reservation (`reserved` with no name, the app will ask for it), or a spent
-//!    nullifier with nothing attached (`burned`, safe to conclude here because the whole state is visible).
+//!    the slot is burned), or a spent nullifier with nothing attached (`burned`, safe to conclude here because the
+//!    whole state is visible).
 //!
 //! Store operations are idempotent, so restoring twice changes nothing. A slot that contradicts local data is
 //! skipped and counted instead of aborting. Issuer receipts are local: a paid bono still queued is not visible until
@@ -16,7 +16,7 @@
 use serde::Serialize;
 use ts_rs::TS;
 
-use crate::orchestrator::chain::{ChainView, parse_round};
+use crate::orchestrator::chain::ChainView;
 use crate::orchestrator::ports::{Chain, Issuer, Relayer};
 use crate::orchestrator::{OrchError, Orchestrator, Progress, Result, SlotId, bytes32, slot_limit, to_protocol_plan};
 use crate::protocol::HashOp;
@@ -42,7 +42,7 @@ pub struct RecoveryReport {
     pub burned: u32,
     /// Leaves or slots contradicting this profile's data; skipped rather than aborting the restore.
     pub conflicts: u32,
-    /// Mailboxes without a name (unrevealed reservation or unreadable name); ask the user (`Orchestrator::provide_name`).
+    /// Mailboxes without a readable name; ask the user (`Orchestrator::provide_name`).
     pub needs_name: Vec<SlotId>,
 }
 
@@ -172,12 +172,6 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
             if !abandoned {
                 report.addresses += 1;
             }
-        } else if let Some(pending) = view.pending_by_nul(nul).filter(|_| key.kind == SlotKind::Mailbox) {
-            let patch = SlotPatch { round: Some(parse_round(&pending.reserved_round)?), ..SlotPatch::default() };
-            self.mark(slot, SlotStatus::Reserved, patch, &mut 0).await?;
-            if self.db(move |s| s.get_slot(key)).await?.is_some_and(|s| s.pending_name.is_none()) {
-                report.needs_name.push(key.into());
-            }
         } else if view.nullifiers.contains(nul) {
             self.mark(slot, SlotStatus::Burned, SlotPatch::default(), &mut report.burned).await?;
         }
@@ -193,12 +187,10 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
         Ok(existing.unwrap_or(Slot {
             key,
             slot_nul,
-            status: SlotStatus::Reserved,
+            status: SlotStatus::Burned,
             addr_key: None,
-            round: None,
             pending_name: None,
-            reserve_attempts: 0,
-            reveal_attempts: 0,
+            attempts: 0,
             updated_at: self.now(),
         }))
     }
@@ -211,7 +203,7 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
         if stored.as_ref().is_some_and(|s| s.status == to) {
             return Ok(());
         }
-        let new = Slot { status: to, round: patch.round.or(slot.round), updated_at: now, ..slot };
+        let new = Slot { status: to, updated_at: now, ..slot };
         self.db(move |s| if stored.is_some() { s.reconcile_slot(key, to, &patch, now) } else { s.insert_slot(&new) })
             .await?;
         *counter += 1;

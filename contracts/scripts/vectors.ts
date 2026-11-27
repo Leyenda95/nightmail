@@ -14,7 +14,7 @@ const hex = (b: Uint8Array) => Buffer.from(b).toString('hex');
 /** Computes the vectors with the compiled contract. Fixed inputs, hex outputs. */
 export function computeVectors() {
   const address = bytes(32, 0xad), s = bytes(32, 0x51), enc = bytes(32, 0xe1), auth = bytes(32, 0xa7);
-  const salt = bytes(32, 0x5a), opSk = bytes(32, 0x0b);
+  const opSk = bytes(32, 0x0b);
   const name = new Uint8Array(64);
   name.set(new TextEncoder().encode('juan.perez'));
   const ctx = pc.ctxOf({ bytes: address });
@@ -25,7 +25,7 @@ export function computeVectors() {
     note: 'Generated with the compiled contract: today they are a regression snapshot. They will become cross '
       + 'vectors when the Rust core, the server and the sidecar check them with their own implementation.',
     inputs: {
-      contractAddress: hex(address), s: hex(s), k: '1', encPk: hex(enc), authPk: hex(auth), salt: hex(salt),
+      contractAddress: hex(address), s: hex(s), k: '1', encPk: hex(enc), authPk: hex(auth),
       operatorSk: hex(opSk), name: 'juan.perez (UTF-8, zero-padded to 64 bytes)', mailboxSlot: '3', gen: '0',
     },
     noExpiry: pc.noExpiry().toString(),
@@ -46,7 +46,6 @@ export function computeVectors() {
     slotNullifierMailbox3Gen1: hex(pc.slotNullifier(ctx, s, Kind.mailbox, 3n, 1n)),
     addressKey: hex(addrKey),
     aliasKey: hex(pc.aliasKey(enc, auth, pc.slotNullifier(ctx, s, Kind.alias, 3n, 0n))),
-    nameCommit: hex(pc.nameCommit(addrKey, enc, auth, salt, slotNul)),
   };
 }
 

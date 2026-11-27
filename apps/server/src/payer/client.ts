@@ -1,11 +1,11 @@
-// Client for the payer's local API (payer/api.ts), used by the server's relayer, Issuer and RoundTicker.
+// Client for the payer's local API (payer/api.ts), used by the server's relayer and Issuer.
 // Returns the HTTP status and JSON body as-is. Only throws when the payer can't be reached (missing
 // socket, dropped connection, timeout).
 import http from 'node:http';
 import path from 'node:path';
 import type { ApiError } from './api.ts';
 import type { IssuePlan } from './journal.ts';
-import type { AdvanceResult, Health, IssueResult, PayerError, RelayResult } from './payer.ts';
+import type { Health, IssueResult, PayerError, RelayResult } from './payer.ts';
 
 /** A type as it travels in JSON: DUST amounts (bigint) are decimal strings. */
 export type Wire<T> = T extends bigint ? string : T extends object ? { [K in keyof T]: Wire<T[K]> } : T;
@@ -51,7 +51,6 @@ export function payerClient(socketPath: string, timeoutMs = DEFAULT_TIMEOUT_MS) 
     /** `txHex`: the serialized proved, unbalanced transaction, lowercase hex. */
     relay: (txHex: string) => call<RelayResult>('POST', '/relay', { tx: txHex }),
     issue: (idHex: string, plan: IssuePlan) => call<IssueResult>('POST', '/issue', { id: idHex, plan }),
-    advanceRound: () => call<AdvanceResult>('POST', '/advance-round', {}),
   };
 }
 

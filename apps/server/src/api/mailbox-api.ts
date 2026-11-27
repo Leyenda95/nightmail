@@ -14,7 +14,8 @@
 // signature covers the configured host (never the Host header), the method and the raw `req.url`, so the
 // path's addrKey is signed; any path not matching a form above exactly is a 404. Every rejection is an
 // identical 401 with `Date` for clock adjustment; the reason only reaches the debug log. Error bodies are fixed
-// and no route sends CORS headers.
+// and no route sends CORS headers. A signed request for an address the index does not know yet waits a little for
+// it before that 401 (`newAddressWaitMs`): it may have just been created and not be final on chain yet.
 //
 // Every response closes the connection, since one connection serving two addresses would link them.
 // Large envelopes use a few send slots (429 when full) and all responses have a deadline, so a stalled
@@ -56,6 +57,19 @@ export type ApiLimits = {
   responseTimeoutMs: number;
   /** Open connections to the API server; past it new ones are dropped at once (`server.maxConnections`). */
   maxConnections: number;
+  /**
+   * How long a signed request for an address the index does not know yet waits for it before the 401. The payer
+   * answers a mailbox creation once its transaction is in a block, while the index only learns it from the
+   * finalized chain (~15 s later): without this wait the app's first requests for a new address are refused.
+   * Unknown addresses are public anyway (the registry is on chain), so waiting reveals nothing. 0: no wait.
+   */
+  newAddressWaitMs: number;
+  /** Requests waiting for a new address at once; past it an unknown address gets its 401 at once. */
+  newAddressWaiters: number;
+  /** Of those, how many one IP may hold (IPv6 by its /64), so one client cannot take every place. */
+  newAddressWaitersPerIp: number;
+  /** How often a waiting request looks the address up again. */
+  newAddressPollMs: number;
 };
 
 export const DEFAULT_API_LIMITS: ApiLimits = {
@@ -67,6 +81,12 @@ export const DEFAULT_API_LIMITS: ApiLimits = {
   responseTimeoutMs: 120_000,
   // Well above the delivery slots (64 + 8) and downloads, still a small amount of sockets and memory.
   maxConnections: 512,
+  // Finality (~13 s on the devnet) plus the indexer and the registry sync, with room to spare.
+  newAddressWaitMs: 25_000,
+  newAddressWaiters: 32,
+  // The app syncs addresses one at a time; 2 leaves room for a retry still open. Behind Tor, see the top of the file.
+  newAddressWaitersPerIp: 2,
+  newAddressPollMs: 250,
 };
 
 export type ApiDeps = {
@@ -117,6 +137,7 @@ const GET_ONLY = methodNotAllowed('GET');
 const POST_ONLY = methodNotAllowed('POST');
 
 type BoxRoute = Extract<Route, { kind: 'list' | 'message' }>;
+type Credentials = NonNullable<ReturnType<typeof parseAuthHeaders>>;
 
 class MailboxApi {
   private readonly deps: ApiDeps;
@@ -125,6 +146,9 @@ class MailboxApi {
   private readonly perIp: RateLimiter;
   private readonly perAddress: RateLimiter;
   private readonly downloads: Slots;
+  private readonly newAddressWaiters: Slots;
+  /** Waiting requests per IP key (absent: none). */
+  private readonly waitingByIp = new Map<string, number>();
   private readonly deliveries: Deliveries;
   private readonly clientAddress: (req: IncomingMessage) => string;
 
@@ -135,6 +159,7 @@ class MailboxApi {
     this.perIp = new RateLimiter(this.limits.perIp);
     this.perAddress = new RateLimiter(this.limits.perAddress);
     this.downloads = new Slots(this.limits.largeDownloadSlots);
+    this.newAddressWaiters = new Slots(this.limits.newAddressWaiters);
     this.clientAddress = deps.clientAddress ?? clientAddress(false);
     this.deliveries = new Deliveries({
       directory: deps.directory, store: deps.store, log: deps.log, now: this.now, clientAddress: this.clientAddress,
@@ -143,22 +168,43 @@ class MailboxApi {
     });
   }
 
-  /** The route's mailbox, if the request comes from its key holder: authentic, fresh and not replayed. */
-  private authenticate(req: IncomingMessage, addrKeyHex: string, seconds: number): DirectoryEntry | undefined {
-    const { host, directory, nonceStore, log } = this.deps;
-    const credentials = parseAuthHeaders(req.headers);
-    const box = directory.box(addrKeyHex);
-    if (!credentials || !box) {
-      log.debug(`api: unauthorized (${credentials ? 'unknown-address' : 'bad-headers'})`);
-      return undefined;
-    }
+  /** Whether the request comes from the key holder of `box`: authentic, fresh and not replayed. */
+  private authenticate(req: IncomingMessage, box: DirectoryEntry, credentials: Credentials, seconds: number): boolean {
+    const { host, nonceStore, log } = this.deps;
     const request = {
       host, version: MAILBOX_API_VERSION, method: req.method!, path: req.url!, addrKey: box.addrKey,
       timestamp: credentials.timestamp, nonce: credentials.nonce,
     };
     const result = authenticateRequest(request, credentials.signature, { authPublicKey: box.authPk, now: seconds, nonceStore });
     if (!result.ok) log.debug(`api: unauthorized (${result.reason})`);
-    return result.ok ? box : undefined;
+    return result.ok;
+  }
+
+  /**
+   * The box for an address the index does not know yet, once it learns it (see `newAddressWaitMs`); undefined if it
+   * does not within the wait, or too many requests are already waiting. The address only ever comes from the index,
+   * which only holds what the finalized chain has: nothing is trusted earlier.
+   */
+  private async newAddress(addrKeyHex: string, ip: string): Promise<DirectoryEntry | undefined> {
+    const { newAddressWaitMs, newAddressPollMs, newAddressWaitersPerIp } = this.limits;
+    if (newAddressWaitMs <= 0) return undefined;
+    const waiting = this.waitingByIp.get(ip) ?? 0;
+    if (waiting >= newAddressWaitersPerIp || !this.newAddressWaiters.tryAcquire()) return undefined;
+    this.waitingByIp.set(ip, waiting + 1);
+    try {
+      const deadline = Date.now() + newAddressWaitMs;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, Math.min(newAddressPollMs, Math.max(0, deadline - Date.now()))).unref());
+        const box = this.deps.directory.box(addrKeyHex);
+        if (box) return box;
+      }
+      return undefined;
+    } finally {
+      this.newAddressWaiters.release();
+      const left = (this.waitingByIp.get(ip) ?? 1) - 1;
+      if (left > 0) this.waitingByIp.set(ip, left);
+      else this.waitingByIp.delete(ip);
+    }
   }
 
   /** A message's envelope; if large, it holds a slot released once sending finishes. */
@@ -186,10 +232,28 @@ class MailboxApi {
     return json(200, this.deps.store.list(box.addrKey, route.since, this.limits.pageSize));
   }
 
-  /** A mailbox route: authenticate, count against that address's limit, then serve. */
-  private box(req: IncomingMessage, route: BoxRoute, time: number): Reply {
-    const box = this.authenticate(req, route.addrKey, Math.floor(time / 1000));
-    if (!box) return UNAUTHORIZED;
+  /**
+   * A mailbox route: authenticate, count against that address's limit, then serve. An address the index does not
+   * know yet may be one just created: the request waits for it (`newAddress`) before its 401.
+   */
+  private box(req: IncomingMessage, route: BoxRoute, time: number): Reply | Promise<Reply> {
+    const credentials = parseAuthHeaders(req.headers);
+    if (!credentials) {
+      this.deps.log.debug('api: unauthorized (bad-headers)');
+      return UNAUTHORIZED;
+    }
+    const known = this.deps.directory.box(route.addrKey);
+    if (known) return this.authorized(req, route, time, credentials, known);
+    return this.newAddress(route.addrKey, ipKey(this.clientAddress(req))).then((box) => {
+      if (box) return this.authorized(req, route, time, credentials, box);
+      this.deps.log.debug('api: unauthorized (unknown-address)');
+      return UNAUTHORIZED;
+    });
+  }
+
+  /** Authenticates against `box` with the time the request arrived, then counts it and serves it. */
+  private authorized(req: IncomingMessage, route: BoxRoute, time: number, credentials: Credentials, box: DirectoryEntry): Reply {
+    if (!this.authenticate(req, box, credentials, Math.floor(time / 1000))) return UNAUTHORIZED;
     if (!this.perAddress.hit(route.addrKey, time)) return rateLimited(this.limits.perAddress);
     return this.serve(box, route);
   }

@@ -1,5 +1,5 @@
 //! Picking up what was left unfinished when the app closed: requested leaves already in the tree, shielded purchases
-//! in the journal, and slots in `reserving`/`reserved`/`revealing` (with a random delay between them).
+//! in the journal, and slots in `reserving`.
 
 use serde::Serialize;
 use ts_rs::TS;
@@ -9,7 +9,7 @@ use super::bonos::{BUY_JOURNAL_KIND, journal_id, receipt_key};
 use super::ports::{Chain, Issuer, Receipt, Relayer};
 use super::types::SlotId;
 use super::{OrchError, Orchestrator, Result};
-use crate::protocol::{AddressKind, CallProblem};
+use crate::protocol::AddressKind;
 use crate::store::{BonoLeaf, BonoStatus, Slot, SlotKey, SlotKind, SlotStatus};
 
 /// A purchase without a leaf is forgotten 35 min after its last call (the transaction's TTL has expired by then).
@@ -82,7 +82,7 @@ pub struct ResumeReport {
     pub bonos_error: Option<OrchError>,
     /// Addresses completed.
     pub addresses: u32,
-    /// Mailboxes without a name (restored reservation or unreadable name), deduplicated: ask for it (`provide_name`).
+    /// Mailboxes without a readable name, deduplicated: ask for it (`provide_name`).
     pub needs_name: Vec<SlotId>,
     /// Slots still unfinished, with the reason (retried on the next `resume`; `AttemptsExhausted` = paused).
     pub failed: Vec<SlotFailure>,
@@ -138,9 +138,9 @@ impl OrchError {
             | OrchError::ServerUnreachable
             | OrchError::StillPending
             | OrchError::Wallet { .. } => true,
-            // The round clears by itself. Other contract rejections would just repeat.
-            OrchError::CallRejected { reason } => matches!(reason, CallProblem::StaleRound | CallProblem::TooEarly),
-            OrchError::SidecarTooOld
+            // A contract rejection would just repeat.
+            OrchError::CallRejected { .. }
+            | OrchError::SidecarTooOld
             | OrchError::ContractMismatch
             | OrchError::Clock
             | OrchError::StaleState
@@ -168,40 +168,28 @@ impl OrchError {
     }
 }
 
-/// The step an unfinished slot stopped at.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../../desktop/src/bindings/")]
-pub enum PendingStage {
-    Reserving,
-    Reserved,
-    Revealing,
-}
-
 /// An unfinished mailbox or alias, for the UI. `Debug` omits the name.
 #[derive(Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../../desktop/src/bindings/")]
 pub struct PendingSlot {
     pub slot: SlotId,
-    pub stage: PendingStage,
     /// Used up its proof cap: waits for the user to resume it (`resume_paused_slot`).
     pub paused: bool,
     /// An operation is driving it right now (create, pick up or resume): there is nothing to retry or abandon until it
     /// finishes.
     pub in_progress: bool,
-    /// Stopped: it will not continue without the user. It used up its proof cap, is a mailbox without a name, or its
-    /// last attempt failed with something that does not clear by itself. The background retry (`resume_background`)
-    /// leaves it alone; it is driven again by "Retry", "Resume", providing the name, or at unlock. Otherwise (and if
-    /// not running) the app will retry it on its own.
+    /// Stopped: it will not continue without the user. It used up its proof cap, or its last attempt failed with
+    /// something that does not clear by itself. The background retry (`resume_background`) leaves it alone; it is
+    /// driven again by "Retry", "Resume" or at unlock. Otherwise (and if not running) the app will retry it on its own.
     pub stopped: bool,
-    /// Why it is stopped (`stopped`), to show on its row; `null` if it is not. Mailbox without a name: `NeedsName`;
-    /// proof cap used up: `AttemptsExhausted`; otherwise the error of its last `drive` (`stuck`).
+    /// Why it is stopped (`stopped`), to show on its row; `null` if it is not. Proof cap used up: `AttemptsExhausted`;
+    /// otherwise the error of its last `drive` (`stuck`).
     pub stop_reason: Option<OrchError>,
     /// The store would already allow abandoning it (`abandon_slot`): `reserving`, with no attempts or 65 min after the
     /// last. The chain may still refuse (`StillPending`) if it sees one of its proofs.
     pub abandonable: bool,
-    /// Name chosen for the mailbox (local only), or `null` (alias, or a restored reservation without a name).
+    /// Name chosen for the mailbox (local only), or `null` (alias).
     pub name: Option<String>,
 }
 
@@ -209,7 +197,6 @@ impl std::fmt::Debug for PendingSlot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PendingSlot")
             .field("slot", &self.slot)
-            .field("stage", &self.stage)
             .field("paused", &self.paused)
             .field("in_progress", &self.in_progress)
             .field("stopped", &self.stopped)
@@ -219,19 +206,9 @@ impl std::fmt::Debug for PendingSlot {
     }
 }
 
-/// Has it used up its proof cap? Same counts as `drive`'s cap: an alias and a mailbox reservation count reserves,
-/// everything else reveals.
+/// Has it used up its proof cap (the same count as `drive`'s)?
 fn exhausted(slot: &Slot, max_proofs: u32) -> bool {
-    let used = match (slot.key.kind, slot.status) {
-        (SlotKind::Alias, _) | (SlotKind::Mailbox, SlotStatus::Reserving) => slot.reserve_attempts,
-        _ => slot.reveal_attempts,
-    };
-    used >= max_proofs
-}
-
-/// A mailbox without a name: `resume` leaves it alone (`needs_name`) until the user types it.
-fn nameless(slot: &Slot) -> bool {
-    slot.key.kind == SlotKind::Mailbox && slot.pending_name.is_none()
+    slot.attempts >= max_proofs
 }
 
 impl PendingSlot {
@@ -244,19 +221,14 @@ impl PendingSlot {
         stuck: Option<OrchError>,
         not_after: i64,
     ) -> Option<Self> {
-        let stage = match slot.status {
-            SlotStatus::Reserving => PendingStage::Reserving,
-            SlotStatus::Reserved => PendingStage::Reserved,
-            SlotStatus::Revealing => PendingStage::Revealing,
-            _ => return None,
-        };
+        if slot.status != SlotStatus::Reserving {
+            return None;
+        }
         let paused = exhausted(&slot, max_proofs);
         let in_progress = driving == Some(slot.key);
         // A running row is never stopped. Otherwise, reasons that need something from the user come first.
         let stop_reason = if in_progress {
             None
-        } else if nameless(&slot) {
-            Some(OrchError::NeedsName)
         } else if paused {
             Some(OrchError::AttemptsExhausted)
         } else {
@@ -264,7 +236,6 @@ impl PendingSlot {
         };
         Some(Self {
             slot: slot.key.into(),
-            stage,
             paused,
             in_progress,
             stopped: stop_reason.is_some(),
@@ -281,7 +252,7 @@ impl<C, I, R> Orchestrator<C, I, R> {
         let max = self.d.config.retry.max_proofs;
         let not_after = self.now() - ABANDON_TTL_S;
         // A single read, so a slot changing state between queries cannot appear twice or go missing.
-        let slots = self.db(|s| s.open_slots()).await?;
+        let slots = self.db(|s| s.slots_by_status(SlotStatus::Reserving)).await?;
         // The mark is read after the store. If a `drive` finishes between the two reads, the row shows the previous
         // state without the mark, and the read triggered by its `PendingChanged` (when the mark clears) corrects it.
         let driving = *self.driving.lock().unwrap_or_else(|e| e.into_inner());
@@ -323,10 +294,8 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
             Ok(included) => report.bonos_included = included,
             Err(e) => report.bonos_error = Some(e),
         }
-        for status in [SlotStatus::Reserving, SlotStatus::Reserved, SlotStatus::Revealing] {
-            for slot in self.db(move |s| s.slots_by_status(status)).await? {
-                self.resume_slot(slot, asked, &mut report).await;
-            }
+        for slot in self.db(|s| s.slots_by_status(SlotStatus::Reserving)).await? {
+            self.resume_slot(slot, asked, &mut report).await;
         }
         let unnamed = self.unnamed_mailboxes().await?;
         report.needs_name.extend(unnamed.into_iter().map(SlotId::from));
@@ -374,17 +343,12 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
     }
 
     async fn resume_slot(&self, slot: Slot, asked: bool, report: &mut ResumeReport) {
-        if nameless(&slot) {
-            report.needs_name.push(slot.key.into());
-            return;
-        }
         if !asked && let Some(error) = self.stopped_error(&slot) {
             report.failed.push(SlotFailure { slot: slot.key.into(), error });
             return;
         }
-            // Marked before the wait, so the row shows "in progress" as soon as "Retry" is pressed.
+        // Marked right away, so the row shows "in progress" as soon as "Retry" is pressed.
         let _driving = super::addresses::Driving::mark(&self.driving, self.d.events.as_ref(), slot.key);
-        self.pace().await;
         match self.drive(slot.key).await {
             Ok(_) => report.addresses += 1,
             Err(OrchError::NeedsName) => report.needs_name.push(slot.key.into()),

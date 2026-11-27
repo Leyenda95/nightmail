@@ -16,7 +16,7 @@ const ID = 'ab'.repeat(32);
 const HEALTH: Health = {
   ready: true, dustCoins: 5, dustBalance: 1250000000000000000000000n, queueLength: 2,
   lostFees: { count: 1, dust: 388032291803696n, byCause: { 'issue:FailFallible': { count: 1, dust: 388032291803696n } } },
-  dustSpentLastHour: { relay: 7n, issue: 0n }, dustCapPerHour: { relay: 100n, issue: 50n }, issuesInFlight: 0, contract: ID,
+  dustSpentLastHour: { relay: 7n, issue: 0n }, dustCapPerHour: { relay: 100n, issue: 50n }, issuesInFlight: 0, earlyAnswersWrong: 0, earlyAnswersUnconfirmed: 0, contract: ID,
 };
 
 /** A fake payer that records calls and answers whatever it is told. */
@@ -26,7 +26,6 @@ function fakeOps(over: Partial<PayerOps> = {}) {
     health: () => HEALTH,
     relay: async (tx) => { calls.push(['relay', tx]); return { status: 'SucceedEntirely', txHash: ID }; },
     issue: async (id, plan) => { calls.push(['issue', id, plan]); return { status: 'issued', txHash: ID }; },
-    advanceRound: async () => { calls.push(['advanceRound']); return { status: 'advanced', round: 8, txHash: ID }; },
     ...over,
   };
   return { ops, calls };
@@ -144,7 +143,7 @@ test('GET /health: the payer status, with DUST amounts as decimal text', async (
   assert.deepEqual(r.body, {
     ready: true, dustCoins: 5, dustBalance: '1250000000000000000000000', queueLength: 2,
     lostFees: { count: 1, dust: '388032291803696', byCause: { 'issue:FailFallible': { count: 1, dust: '388032291803696' } } },
-    dustSpentLastHour: { relay: '7', issue: '0' }, dustCapPerHour: { relay: '100', issue: '50' }, issuesInFlight: 0, contract: ID,
+    dustSpentLastHour: { relay: '7', issue: '0' }, dustCapPerHour: { relay: '100', issue: '50' }, issuesInFlight: 0, earlyAnswersWrong: 0, earlyAnswersUnconfirmed: 0, contract: ID,
   });
   assert.deepEqual((await s.client.health()).body, r.body, 'the client gives the same');
 });
@@ -154,7 +153,7 @@ test('while the wallet syncs there is no payer: /health says it is not ready and
   const health = await s.client.health();
   assert.equal(health.status, 200);
   assert.deepEqual(health.body, { ready: false });
-  for (const r of [await s.client.relay('00'), await s.client.issue(ID, 'free'), await s.client.advanceRound()]) {
+  for (const r of [await s.client.relay('00'), await s.client.issue(ID, 'free')]) {
     assert.deepEqual([r.status, r.body], [503, { error: 'not-ready' }]);
   }
 });
@@ -166,11 +165,10 @@ test('POST /relay: passes the transaction bytes (hex) and returns the result', a
   assert.deepEqual(s.calls, [['relay', new Uint8Array([0x00, 0xff, 0x10])]]);
 });
 
-test('POST /issue and POST /advance-round: arguments and result', async (t) => {
+test('POST /issue: arguments and result', async (t) => {
   const s = await serve(t);
   assert.deepEqual((await s.client.issue(ID, 'paid')).body, { status: 'issued', txHash: ID });
-  assert.deepEqual((await s.client.advanceRound()).body, { status: 'advanced', round: 8, txHash: ID });
-  assert.deepEqual(s.calls, [['issue', ID, 'paid'], ['advanceRound']]);
+  assert.deepEqual(s.calls, [['issue', ID, 'paid']]);
 });
 
 test('each payer error has its fixed HTTP code, those asking to wait carry Retry-After', async (t) => {
@@ -230,8 +228,6 @@ test('strict JSON: a body that is not exactly the expected object → 400 bad-re
     ['/issue', { id: ID.slice(2), plan: 'free' }],
     ['/issue', { id: ID.toUpperCase(), plan: 'free' }],
     ['/issue', { id: ID, plan: 'free', validUntil: 1 }],
-    ['/advance-round', { round: 1 }],
-    ['/advance-round', '[]'],
   ];
   for (const [url, body] of bad) {
     const r = await post(s.socketPath, url, body);
@@ -275,11 +271,11 @@ test('body limit: larger → 413, declared (Content-Length) or not (chunked), ex
 
 test('routes and methods: anything that does not exist → 404, wrong method → 405 with Allow', async (t) => {
   const s = await serve(t);
-  for (const url of ['/', '/health/', '/health?x=1', '/relay/1', '/issue?id=1', '/v1/health', '/HEALTH']) {
+  for (const url of ['/', '/health/', '/health?x=1', '/relay/1', '/issue?id=1', '/v1/health', '/HEALTH', '/advance-round']) {
     const r = await raw(s.socketPath, 'GET', url);
     assert.deepEqual([r.status, r.body], [404, { error: 'not-found' }], url);
   }
-  const wrong: [string, string, string][] = [['POST', '/health', 'GET'], ['GET', '/relay', 'POST'], ['PUT', '/issue', 'POST'], ['DELETE', '/advance-round', 'POST']];
+  const wrong: [string, string, string][] = [['POST', '/health', 'GET'], ['GET', '/relay', 'POST'], ['PUT', '/issue', 'POST']];
   for (const [method, url, allow] of wrong) {
     const r = await raw(s.socketPath, method, url, undefined, { 'content-type': 'application/json' });
     assert.deepEqual([r.status, r.body, r.headers.allow], [405, { error: 'method-not-allowed' }, allow], `${method} ${url}`);
@@ -288,8 +284,8 @@ test('routes and methods: anything that does not exist → 404, wrong method →
 });
 
 test('if the payer throws, the response is 500 internal without the message (which goes to the log)', async (t) => {
-  const s = await serve(t, { advanceRound: async () => { throw new Error('seed=0000 secret'); }, health: () => { throw new TypeError('boom secret'); } });
-  for (const r of [await post(s.socketPath, '/advance-round', {}), await raw(s.socketPath, 'GET', '/health')]) {
+  const s = await serve(t, { issue: async () => { throw new Error('seed=0000 secret'); }, health: () => { throw new TypeError('boom secret'); } });
+  for (const r of [await post(s.socketPath, '/issue', { id: ID, plan: 'free' }), await raw(s.socketPath, 'GET', '/health')]) {
     assert.deepEqual([r.status, r.body], [500, { error: 'internal' }]);
     assert.doesNotMatch(r.text, /secret/);
   }
@@ -305,6 +301,7 @@ test('end to end with the real Payer (fake wallet and chain): relay over the soc
     ports: {
       status: () => ({ synced: true, dustCoins: 1, dustBalance: 10n }),
       screen: () => null,
+      guaranteedOnly: () => false,
       estimateFee: async () => 3n,
       send: async (tx, beforeSubmit) => {
         await beforeSubmit({ txHash: ID, validUntil: new Date(Date.now() + 60_000), fee: 2n });

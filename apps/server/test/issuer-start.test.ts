@@ -13,30 +13,30 @@ import { tempDir } from './temp-dir.ts';
 const ID = '1a'.repeat(32);
 const CONTRACT = 'c0'.repeat(32);
 const CONFIG: IssuerConfig = {
-  port: 0, captchaToken: 'cap', cardToken: 'card', trustedProxy: false, globalPerHour: 100, maxPending: 100, maxAdvancesPerHour: 60,
+  port: 0, captchaToken: 'cap', cardToken: 'card', trustedProxy: false, globalPerHour: 100, maxPending: 100,
 };
 
 test('loadIssuerConfig: demo defaults', () => {
   assert.deepEqual(loadIssuerConfig({}), {
     port: 8788, captchaToken: 'nightmail-demo-captcha', cardToken: 'tok_nightmail_demo',
-    trustedProxy: false, globalPerHour: 100, maxPending: 100, maxAdvancesPerHour: 60,
+    trustedProxy: false, globalPerHour: 100, maxPending: 100,
   });
 });
 
 test('loadIssuerConfig: everything can be changed through the environment', () => {
   const env = {
     NIGHTMAIL_ISSUER_PORT: '9000', NIGHTMAIL_ISSUER_CAPTCHA_TOKEN: 'a', NIGHTMAIL_ISSUER_CARD_TOKEN: 'b', NIGHTMAIL_ISSUER_TRUSTED_PROXY: '1',
-    NIGHTMAIL_ISSUER_GLOBAL_PER_HOUR: '40', NIGHTMAIL_ISSUER_MAX_PENDING: '30', NIGHTMAIL_ISSUER_MAX_ADVANCES_PER_HOUR: '12',
+    NIGHTMAIL_ISSUER_GLOBAL_PER_HOUR: '40', NIGHTMAIL_ISSUER_MAX_PENDING: '30',
   };
   assert.deepEqual(loadIssuerConfig(env), {
-    port: 9000, captchaToken: 'a', cardToken: 'b', trustedProxy: true, globalPerHour: 40, maxPending: 30, maxAdvancesPerHour: 12,
+    port: 9000, captchaToken: 'a', cardToken: 'b', trustedProxy: true, globalPerHour: 40, maxPending: 30,
   });
   assert.equal(loadIssuerConfig({ NIGHTMAIL_ISSUER_TRUSTED_PROXY: '0' }).trustedProxy, false);
 });
 
 test('loadIssuerConfig: invalid values throw with the variable name', () => {
   for (const port of ['0', '65536', 'abc', '80.5', '']) assert.throws(() => loadIssuerConfig({ NIGHTMAIL_ISSUER_PORT: port }), /NIGHTMAIL_ISSUER_PORT/, port);
-  for (const name of ['NIGHTMAIL_ISSUER_GLOBAL_PER_HOUR', 'NIGHTMAIL_ISSUER_MAX_PENDING', 'NIGHTMAIL_ISSUER_MAX_ADVANCES_PER_HOUR']) {
+  for (const name of ['NIGHTMAIL_ISSUER_GLOBAL_PER_HOUR', 'NIGHTMAIL_ISSUER_MAX_PENDING']) {
     for (const value of ['0', '-1', '1.5', 'x', '']) assert.throws(() => loadIssuerConfig({ [name]: value }), new RegExp(name), `${name}=${value}`);
   }
   for (const value of ['', 'yes', 'true', '2']) assert.throws(() => loadIssuerConfig({ NIGHTMAIL_ISSUER_TRUSTED_PROXY: value }), /NIGHTMAIL_ISSUER_TRUSTED_PROXY/, value);
@@ -47,7 +47,6 @@ function payerOf(outcomes: IssueOutcome[]) {
   const calls: string[] = [];
   const payer: PayerClient = {
     issue: async (id) => { calls.push(id); return outcomes[Math.min(calls.length - 1, outcomes.length - 1)]!; },
-    advanceRound: async () => ({ status: 'failed' }),
   };
   return { payer, calls };
 }
@@ -168,19 +167,6 @@ test('startIssuer: on restart it resumes the pending work, with the same receipt
   assert.equal(again.state, 'issued');
   assert.equal(again.receipt.publicKey, receipt.publicKey);
   assert.equal(again.receipt.signature, receipt.signature);
-});
-
-test('startIssuer: if given readRoundState it starts the RoundTicker, and close stops it', async (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
-  let asked = 0;
-  const running = await startIssuer(options(tempDir(t), [], { readRoundState: async () => { asked++; return { round: 1n, waiting: false }; } }));
-  t.mock.timers.tick(30_000);
-  await new Promise((r) => setImmediate(r));
-  assert.equal(asked, 1);
-  await running.close();
-  t.mock.timers.tick(60_000);
-  await new Promise((r) => setImmediate(r));
-  assert.equal(asked, 1);
 });
 
 test('startIssuer: warns about demo tokens if EITHER of the two is one, and not if neither is', async (t) => {

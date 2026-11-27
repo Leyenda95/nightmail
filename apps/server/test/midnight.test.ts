@@ -151,6 +151,37 @@ test('sendPrepared: a foreign transaction (relay) is balanced and finalized WITH
   assert.deepEqual([signs, finalizedFrom], [1, [signed]]);
 });
 
+test('sendPrepared: onInBlock is told when the wallet reports the submitted tx in a block; the outcome is still the final one', async () => {
+  const ctx = fakeCtx({ status: 'FailFallible' });
+  const watched: object[] = [];
+  let report = () => {};
+  let unwatched = 0;
+  ctx.wallet.inclusion = {
+    watch: (tx: object, onInBlock: () => void) => { watched.push(tx); report = onInBlock; return () => { unwatched++; }; },
+  };
+  const submit = ctx.wallet.facade.submitTransaction;
+  const submitted: unknown[] = [];
+  ctx.wallet.facade.submitTransaction = async (tx: unknown) => { submitted.push(tx); report(); return submit(); };
+  const inBlock: number[] = [];
+  const outcome = await sendPrepared(ctx, P, undefined, undefined, (ms) => inBlock.push(ms));
+  assert.equal(outcome.status, 'FailFallible', 'the final result, whatever was reported');
+  assert.equal(inBlock.length, 1);
+  assert.ok(inBlock[0]! >= 0);
+  assert.equal(watched[0], submitted[0], 'it watches the very object handed to the wallet');
+  assert.equal(unwatched, 1, 'stops watching once the wallet returns');
+
+  const failing = fakeCtx({ submit: new Error('WebSocket closed') });
+  failing.wallet.inclusion = { watch: () => () => { unwatched++; } };
+  assert.equal((await sendPrepared(failing, P, undefined, undefined, () => {})).status, 'unknown');
+  assert.equal(unwatched, 2, 'also when the submission fails');
+
+  const noWatch = fakeCtx();
+  assert.equal((await sendPrepared(noWatch, P, undefined, undefined, () => assert.fail('no inclusion watch'))).status, 'SucceedEntirely');
+  const notAsked = fakeCtx();
+  notAsked.wallet.inclusion = { watch: () => assert.fail('nobody asked to be told') };
+  assert.equal((await sendPrepared(notAsked, P)).status, 'SucceedEntirely');
+});
+
 test('dustFeeOf: the DUST fee is the sum spent by the DUST coins of its intents', () => {
   const spend = (vFee: bigint) => ({ vFee });
   const tx = {

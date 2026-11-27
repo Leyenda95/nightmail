@@ -7,7 +7,7 @@ import {
   Intent, sampleIntentHash, sampleSigningKey, sampleUserAddress, signatureVerifyingKey, Transaction, unshieldedToken,
   UnshieldedOffer,
 } from '@midnightntwrk/ledger-v9';
-import { relayProblem } from '../src/chain/relayable.ts';
+import { guaranteedOnly, relayProblem } from '../src/chain/relayable.ts';
 
 const TTL = new Date(Date.now() + 60_000);
 const NIGHT = unshieldedToken().raw;
@@ -64,4 +64,19 @@ test('relayable: without intents (nothing to pay) it is not a contract call eith
 test('relayable: anything that moves value is caught even when there are calls too', () => {
   const tx = { intents: new Map([[1, { actions: [{}], guaranteedUnshieldedOffer: {} }]]) };
   assert.equal(relayProblem(tx), 'unshielded-offer');
+});
+
+test('guaranteedOnly: answered once in a block only if every call has no fallible transcript', () => {
+  const call = (fallibleTranscript?: unknown) => ({ guaranteedTranscript: {}, fallibleTranscript });
+  /** Like the ledger-v9 ContractCall, whose fields are getters on its prototype. */
+  class Call { get fallibleTranscript() { return undefined; } }
+  assert.equal(guaranteedOnly({ intents: new Map([[1, { actions: [call()] }]]) }), true);
+  assert.equal(guaranteedOnly({ intents: new Map([[1, { actions: [new Call()] }]]) }), true);
+  assert.equal(guaranteedOnly({ intents: new Map([[1, { actions: [call(), call()] }], [2, { actions: [call()] }]]) }), true);
+  assert.equal(guaranteedOnly({ intents: new Map([[1, { actions: [call(), call({ ops: [] })] }]]) }), false, 'one fallible call');
+  assert.equal(guaranteedOnly({ intents: new Map([[1, { actions: [{}] }]]) }), false, 'not a recognizable call (a deploy, maintenance)');
+  assert.equal(guaranteedOnly({ intents: new Map([[1, { actions: [null] }]]) }), false);
+  assert.equal(guaranteedOnly({ intents: new Map([[1, { actions: [] }]]) }), false, 'no call at all');
+  assert.equal(guaranteedOnly({}), false);
+  assert.equal(guaranteedOnly(txWith()), false, 'a real transaction with no calls');
 });

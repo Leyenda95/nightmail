@@ -1,4 +1,4 @@
-// The payer with wallet and chain doubles: relay, issue (idempotent per id), advanceRound, DUST caps and
+// The payer with wallet and chain doubles: relay, issue (idempotent per id), DUST caps and
 // lost fees. The doubles honour the sendPrepared contract (chain/midnight.ts).
 import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -31,12 +31,10 @@ function world(t: TestContext, o: {
     clock: 1_000_000,
     /** How far the indexer lags behind the clock (ms): its last block time is `clock - indexerLag`. */
     indexerLag: 0,
-    failRound: undefined as Error | undefined,
     infos: [] as string[],
     /** Times the payer reported a stuck job. */
     stuck: 0,
     tree: new Set<string>(),
-    round: 7n,
     fee: 55n,
     estimate: 60n,
     script: [...(o.script ?? [])] as Step[],
@@ -49,6 +47,11 @@ function world(t: TestContext, o: {
     /** What relayable.ts would say about a client transaction (null: payable). */
     problem: null as RelayProblem | null,
     screenError: undefined as Error | undefined,
+    /** What relayable.ts `guaranteedOnly` would say (whether a relay may be answered once in a block). */
+    guaranteed: false,
+    guaranteedError: undefined as Error | undefined,
+    /** Reports the current submission in a block (like the wallet's inclusion watch); a step function calls it. */
+    inBlock: () => {},
     journalAtSend: undefined as unknown,
     journal: undefined as unknown as IssueJournal,
     payer: undefined as unknown as Payer,
@@ -60,13 +63,18 @@ function world(t: TestContext, o: {
       if (tx.length === 0) throw new InvalidTransactionError('not a transaction');
       return w.problem;
     },
+    guaranteedOnly: () => {
+      if (w.guaranteedError) throw w.guaranteedError;
+      return w.guaranteed;
+    },
     estimateFee: async (tx) => {
       if (w.failEstimate) throw w.failEstimate;
       if (tx.length === 0) throw new InvalidTransactionError('not a transaction');
       return w.estimate;
     },
     // Like sendPrepared: 'balance-error' never reaches the hook; if the hook fails, 'record-error' and nothing is sent.
-    send: async (tx, beforeSubmit) => {
+    send: async (tx, beforeSubmit, onInBlock) => {
+      w.inBlock = () => onInBlock?.(7);
       const step = w.script.shift() ?? 'SucceedEntirely';
       const outcome = (status: string): Outcome => ({
         ok: status === 'SucceedEntirely', status, proveMs: 0, blockMs: 1, bytes: tx.bytes.length,
@@ -81,11 +89,10 @@ function world(t: TestContext, o: {
         return outcome('record-error');
       }
       w.sends.push({ tx, txHash: sent.txHash });
-      const call = (tx.result ?? {}) as { id?: string; leaf?: string; advance?: boolean };
+      const call = (tx.result ?? {}) as { id?: string; leaf?: string };
       if (call.id) w.journalAtSend = w.journal.get(call.id);
       const status = typeof step === 'function' ? await step() : step;
       if (status === 'SucceedEntirely' && call.leaf) w.tree.add(call.leaf);
-      if (status === 'SucceedEntirely' && call.advance) w.round += 1n;
       return outcome(status);
     },
     registry: o.registry === false ? null : {
@@ -93,16 +100,10 @@ function world(t: TestContext, o: {
       prepare: async (circuit, args) => {
         if (w.failPrepare) throw w.failPrepare;
         w.prepared.push({ circuit, args });
-        const result = circuit === 'issueBono'
-          ? { id: toHex(args[0] as Uint8Array), leaf: toHex(leafOf(CTX, args[0] as Uint8Array, args[1] as Plan, NO_EXPIRY)) }
-          : { advance: true };
+        const result = { id: toHex(args[0] as Uint8Array), leaf: toHex(leafOf(CTX, args[0] as Uint8Array, args[1] as Plan, NO_EXPIRY)) };
         return { bytes: new Uint8Array(8), proveMs: 2, kinds: ['dust'], result };
       },
       hasLeaves: async (leaves) => leaves.map((l) => w.tree.has(toHex(l))),
-      round: async () => {
-        if (w.failRound) throw w.failRound;
-        return w.round;
-      },
       indexedTime: async () => new Date(w.clock - w.indexerLag),
     },
   };
@@ -132,12 +133,99 @@ test('relay: pays, submits and returns the block status with the hash', async (t
   assert.doesNotMatch(w.infos.join('\n'), new RegExp(id(0xf000)), 'a successful relay does not leave its hash in the log');
 });
 
-test('issue and advanceRound (operator transactions) do leave their hash in the log line', async (t) => {
+type World = ReturnType<typeof world>;
+
+/** A step that reports the transaction in a block, then gives `final` as its final status. */
+function inBlockThen(w: World, final: Promise<string> | string): Step {
+  return async () => {
+    w.inBlock();
+    return final;
+  };
+}
+
+test('relay (guaranteed only): answered SucceedEntirely once in a block; the queue waits for the final result', async (t) => {
+  let finalize!: (status: string) => void;
+  const w = world(t, { limits: { earlyRelayAnswer: true } });
+  w.guaranteed = true;
+  w.script.push(inBlockThen(w, new Promise((resolve) => { finalize = resolve; })));
+  const answer = await w.payer.relay(TX);
+  assert.deepEqual(answer, { status: 'SucceedEntirely', txHash: id(0xf000) }, 'answered before finality');
+  assert.match(w.infos.join('\n'), /relay: in a block, 7 ms from submit, answered/);
+  assert.doesNotMatch(w.infos.join('\n'), new RegExp(id(0xf000)), 'no hash in the normal line');
+  assert.equal(w.payer.health().queueLength, 1, 'the job is still running');
+  assert.equal(w.payer.health().dustSpentLastHour.relay, 0n, 'accounted with the final result, not yet');
+
+  const next = w.payer.relay(TX);
+  await tick();
+  assert.equal(w.sends.length, 1, 'the next DUST spend waits until the wallet has the final result of this one');
+  finalize('SucceedEntirely');
+  assert.deepEqual(await next, { status: 'SucceedEntirely', txHash: id(0xf001) }, 'not reported in a block: answered when final');
+  assert.equal(w.payer.health().dustSpentLastHour.relay, 110n);
+  assert.equal(w.payer.health().earlyAnswersWrong, 0);
+  assert.deepEqual(w.warnings, []);
+});
+
+test('relay (guaranteed only): a final result that contradicts the early answer is logged loudly, counted and accounted', async (t) => {
+  for (const final of ['FailFallible', 'FailEntirely', 'rejected']) {
+    let finalize!: (status: string) => void;
+    const w = world(t, { limits: { earlyRelayAnswer: true } });
+    w.guaranteed = true;
+    w.script.push(inBlockThen(w, new Promise((resolve) => { finalize = resolve; })));
+    assert.deepEqual(await w.payer.relay(TX), { status: 'SucceedEntirely', txHash: id(0xf000) }, final);
+    finalize(final);
+    await w.payer.stop(); // resolves once the running job has finished
+    assert.deepEqual([w.payer.health().earlyAnswersWrong, w.payer.health().earlyAnswersUnconfirmed], [1, 0], final);
+    assert.match(w.warnings.join('\n'), new RegExp(`relay: ANSWERED AS INCLUDED BUT THE FINAL RESULT IS ${final} \\(tx ${id(0xf000)}\\)`), final);
+    if (final !== 'rejected') assert.equal(w.payer.health().lostFees.count, 1, 'its fee counts as lost');
+  }
+});
+
+test('relay (guaranteed only): a final result that never comes (unknown) is counted apart, as unconfirmed', async (t) => {
+  const w = world(t, { limits: { earlyRelayAnswer: true } });
+  w.guaranteed = true;
+  w.script.push(inBlockThen(w, 'unknown'));
+  assert.deepEqual(await w.payer.relay(TX), { status: 'SucceedEntirely', txHash: id(0xf000) });
+  await w.payer.stop();
+  assert.deepEqual([w.payer.health().earlyAnswersWrong, w.payer.health().earlyAnswersUnconfirmed], [0, 1]);
+  assert.match(w.warnings.join('\n'), new RegExp(`relay: ANSWERED AS INCLUDED BUT THE FINAL RESULT NEVER CAME \\(tx ${id(0xf000)}\\)`));
+});
+
+test('relay: with the early answer off (the default), a guaranteed-only relay is answered only when final', async (t) => {
+  let finalize!: (status: string) => void;
+  const w = world(t);
+  w.guaranteed = true;
+  w.script.push(inBlockThen(w, new Promise((resolve) => { finalize = resolve; })));
+  let answer: unknown;
+  const relayed = w.payer.relay(TX).then((a) => { answer = a; });
+  await tick();
+  await tick();
+  assert.equal(answer, undefined, 'in a block is not an answer');
+  finalize('FailEntirely');
+  await relayed;
+  assert.deepEqual(answer, { status: 'FailEntirely', txHash: id(0xf000) });
+  assert.equal(w.payer.health().earlyAnswersWrong, 0);
+});
+
+test('relay: not answered early unless guaranteed only, nor if that inspection fails; an issue never is', async (t) => {
+  const w = world(t, { limits: { earlyRelayAnswer: true } });
+  // With a fallible part it may fail inside the block: only the final result is an answer.
+  w.script = [inBlockThen(w, 'FailFallible')];
+  assert.deepEqual(await w.payer.relay(TX), { status: 'FailFallible', txHash: id(0xf000) });
+  w.guaranteed = true;
+  w.guaranteedError = new Error('wasm exploded');
+  w.script = [inBlockThen(w, 'FailFallible')];
+  assert.deepEqual(await w.payer.relay(TX), { status: 'FailFallible', txHash: id(0xf001) });
+  assert.match(w.warnings.join('\n'), /relay: could not inspect the transaction for an early answer/);
+  w.guaranteedError = undefined;
+  w.script = [inBlockThen(w, 'FailFallible')];
+  assert.deepEqual(await w.payer.issue(id(1), 'free'), { status: 'failed', reason: 'fee-lost', txHash: id(0xf002) });
+  assert.equal(w.payer.health().earlyAnswersWrong, 0);
+});
+
+test('issue (an operator transaction) does leave its hash in the log line', async (t) => {
   const w = world(t);
   await w.payer.issue(id(1), 'free');
-  await w.payer.advanceRound();
   assert.match(w.infos.join('\n'), new RegExp(`issue: SucceedEntirely, tx ${id(0xf000)}`));
-  assert.match(w.infos.join('\n'), new RegExp(`advance: SucceedEntirely, tx ${id(0xf001)}`));
 });
 
 test('relay: FailFallible lands in a block, charges and counts as a lost fee with its cause', async (t) => {
@@ -205,12 +293,11 @@ test('relay: hard hourly DUST cap: does not pay what would exceed the cap, and p
   assert.equal(((await w.payer.relay(TX)) as { status: string }).status, 'SucceedEntirely');
 });
 
-test('relay: the relay cap does not consume the issue cap, nor the other way round, advanceRound has no cap', async (t) => {
+test('relay: the relay cap does not consume the issue cap, nor the other way round', async (t) => {
   const w = world(t, { limits: { relayDustPerHour: 0n, issueDustPerHour: 60n } });
   assert.deepEqual(await w.payer.relay(TX), { error: 'fee-over-cap' });
   assert.equal(((await w.payer.issue(id(1), 'free')) as { status: string }).status, 'issued');
   assert.deepEqual(await w.payer.issue(id(2), 'free'), { error: 'dust-cap', retryAfterS: 3600 });
-  assert.equal(((await w.payer.advanceRound()) as { status: string }).status, 'advanced');
   assert.deepEqual(w.payer.health().dustSpentLastHour, { relay: 0n, issue: 55n });
   assert.deepEqual(w.payer.health().dustCapPerHour, { relay: 0n, issue: 60n });
 });
@@ -247,14 +334,14 @@ test('single queue: operations do not overlap and the queue length shows in /hea
   const w = world(t, { script: [() => blocked] });
   const first = w.payer.relay(TX);
   const second = w.payer.issue(id(1), 'free');
-  const third = w.payer.advanceRound();
+  const third = w.payer.issue(id(2), 'paid');
   await tick();
   assert.equal(w.sends.length, 1, 'the second does not start until the first finishes');
   assert.equal(w.prepared.length, 0, 'it is not even proven');
   assert.equal(w.payer.health().queueLength, 3);
   release('SucceedEntirely');
   await Promise.all([first, second, third]);
-  assert.deepEqual(w.prepared.map((p) => p.circuit), ['issueBono', 'advanceRound']);
+  assert.deepEqual(w.prepared.map((p) => p.circuit), ['issueBono', 'issueBono']);
   assert.equal(w.payer.health().queueLength, 0);
 });
 
@@ -266,7 +353,6 @@ test('queue full → queue-full without enqueuing, an unexpected failure → int
   const second = w.payer.relay(TX);
   assert.deepEqual(await w.payer.relay(TX), { error: 'queue-full' });
   assert.deepEqual(await w.payer.issue(id(1), 'free'), { error: 'queue-full' });
-  assert.deepEqual(await w.payer.advanceRound(), { error: 'queue-full' });
   release('SucceedEntirely');
   assert.equal(((await first) as { status: string }).status, 'SucceedEntirely');
   assert.deepEqual(await second, { error: 'internal' });
@@ -413,37 +499,11 @@ test('issue: if the call cannot be built or proven → failed not-prepared, with
   assert.match(w.warnings.join('\n'), /Not the operator/);
 });
 
-test('issue and advanceRound without a deployed contract → no-contract, relay works the same', async (t) => {
+test('issue without a deployed contract → no-contract, relay works the same', async (t) => {
   const w = world(t, { registry: false });
   assert.deepEqual(await w.payer.issue(id(1), 'free'), { error: 'no-contract' });
-  assert.deepEqual(await w.payer.advanceRound(), { error: 'no-contract' });
   assert.equal(((await w.payer.relay(TX)) as { status: string }).status, 'SucceedEntirely');
   assert.equal(w.payer.health().contract, null);
-});
-
-// --- advanceRound -------------------------------------------------------------------------------------
-
-test('advanceRound: advances and returns the new round', async (t) => {
-  const w = world(t);
-  assert.deepEqual(await w.payer.advanceRound(), { status: 'advanced', round: 8, txHash: id(0xf000) });
-  assert.deepEqual(w.prepared, [{ circuit: 'advanceRound', args: [] }]);
-});
-
-test('advanceRound: anything that is not an advance is reported as is (rejection, unknown, lost fee, not prepared)', async (t) => {
-  const w = world(t, { script: ['rejected', 'unknown', 'FailFallible'] });
-  assert.deepEqual(await w.payer.advanceRound(), { status: 'failed', reason: 'rejected' });
-  assert.deepEqual(await w.payer.advanceRound(), { status: 'unknown', txHash: id(0xf001), validUntil: w.clock + TTL });
-  assert.deepEqual(await w.payer.advanceRound(), { status: 'failed', reason: 'fee-lost', txHash: id(0xf002) });
-  assert.equal(w.payer.health().lostFees.byCause['advance:FailFallible']!.count, 1);
-  w.failPrepare = new Error('proof server down');
-  assert.deepEqual(await w.payer.advanceRound(), { status: 'failed', reason: 'not-prepared' });
-});
-
-test('advanceRound: if it advanced but the new round cannot be read → advanced with round null (never an error: it was paid)', async (t) => {
-  const w = world(t);
-  w.failRound = new Error('indexer down');
-  assert.deepEqual(await w.payer.advanceRound(), { status: 'advanced', round: null, txHash: id(0xf000) });
-  assert.match(w.warnings.join('\n'), /advance: advanced \(tx .*\) but the new round could not be read/);
 });
 
 // --- stop and stuck jobs ------------------------------------------------------------------------------
@@ -456,7 +516,7 @@ test('stop: waiting and incoming work → stopping without submitting, waits for
   await tick();
   let stopped = false;
   const stopping = w.payer.stop().then(() => { stopped = true; });
-  assert.deepEqual(await w.payer.advanceRound(), { error: 'stopping' });
+  assert.deepEqual(await w.payer.issue(id(2), 'free'), { error: 'stopping' });
   assert.deepEqual(await w.payer.relay(TX), { error: 'stopping' });
   await assert.rejects(w.payer.exclusive(async () => 'register NIGHT'), /stopping/);
   await tick();
@@ -493,6 +553,8 @@ test('health: ready only with a synced wallet and spendable DUST, exposes coins,
     dustSpentLastHour: { relay: 0n, issue: 0n },
     dustCapPerHour: { relay: 1000n, issue: 1000n },
     issuesInFlight: 0,
+    earlyAnswersWrong: 0,
+    earlyAnswersUnconfirmed: 0,
     contract: R,
   });
   w.wallet = { synced: false, dustCoins: 5, dustBalance: 1n };

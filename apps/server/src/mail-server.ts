@@ -62,6 +62,12 @@ export type MailServerOptions = {
   syncBackoff?: Backoff;
   /** If the sync shows no sign of life for this long, SMTP answers 451 for unknown addresses. */
   syncStaleAfterMs?: number;
+  /**
+   * While it says so (shortly after a relayed inclusion, registry/settling.ts), an unknown address gets a temporary
+   * error (SMTP 451, delivery 503) instead of a permanent one: the index may not hold a just-created address yet.
+   * Only given while the payer's early relay answer is on (bin/mail-server.ts). Absent, nothing changes.
+   */
+  settling?: () => boolean;
   compactEveryMs?: number;
   /** Current time in milliseconds (tests). */
   now?: () => number;
@@ -140,19 +146,17 @@ export async function startMailServer(options: MailServerOptions): Promise<Runni
       ...given('backoff', options.syncBackoff), ...given('staleAfterMs', options.syncStaleAfterMs),
     });
     syncing = sync.run(stop.signal);
-    const head = async () => {
-      const at = await chain.fetchAt();
-      if (at) sync.observeHead(at); // update the round without waiting for the next block read
-      return at;
-    };
+    const head = () => chain.fetchAt();
     await waitForHead(loaded.index, head, { signal: stop.signal, log, progress: () => JSON.stringify(sync.status) });
 
+    const settling = options.settling ?? (() => false);
+    const directoryHealthy = () => sync.healthy() && !settling();
     const smtp = createSmtpServer({
-      domain: options.mailDomain, directory, store: mailboxes, log, now, directoryHealthy: () => sync.healthy(),
+      domain: options.mailDomain, directory, store: mailboxes, log, now, directoryHealthy,
       ...given('limits', options.ingressLimits),
     });
     const api = createApiServer({
-      host: signedHost, directory, store: mailboxes, log, now, directoryHealthy: () => sync.healthy(),
+      host: signedHost, directory, store: mailboxes, log, now, directoryHealthy,
       clientAddress: clientAddress(options.trustedProxy ?? false),
       // In memory: it records its start time, so the API rejects requests that could predate it (replays).
       nonceStore: new MemoryNonceStore(Math.floor(now() / 1000)),

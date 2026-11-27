@@ -8,8 +8,7 @@
 //! (`spawn_blocking` on an `Arc<LocalStore>`). A single connection behind a `Mutex`: SQLite serialises writes and
 //! there is only one user, so a pool (`r2d2`) would add nothing.
 //!
-//! Units: instants are Unix seconds UTC (`i64`); `position` < 2^20; `round` is `u64` (stored as `i64` with a
-//! checked conversion).
+//! Units: instants are Unix seconds UTC (`i64`); `position` < 2^20.
 //!
 //! Errors carry fixed messages, never library details or user data. `Debug` on types holding personal data hides
 //! those fields.

@@ -13,28 +13,20 @@ export type Sim = any;
 export const deploy: (opts?: { price?: bigint }) => Promise<Sim> = sim.deploy;
 export const hex: (b: Uint8Array) => string = sim.hex;
 
-/**
- * Advances the round and returns the resulting ContractState (the harness only exposes the ledger;
- * the full state comes from the circuit context).
- */
-export async function advanceRoundState(c: Sim): Promise<ContractState> {
-  const r = await c.runFull('advanceRound', { opSk: c.opSk });
-  const cs = new ContractState();
-  cs.data = r.context.callContext.currentQueryContext.state;
-  return cs;
-}
+/** The simulator's current state as a ContractState (what the indexer's state bytes decode to). */
+export const contractStateOf = (c: Sim): ContractState => c.contractState();
 
 /**
  * Serialized state (hex, as the indexer serves it) with something in every collection: a `bono`, two
- * aliases, a mailbox reservation, a previous price and a round.
+ * aliases, a mailbox and a previous price.
  */
 export async function registryState() {
   const c = await deploy({ price: 5n });
   const bono = await c.issue(Plan.free);
   await c.alias(bono, 0n);
   await c.alias(bono, 1n);
-  await c.reserve(c.mailbox('ana', bono, 0n));
+  await c.register(c.mailbox('ana', bono, 0n));
   await c.setPrice(8n);
-  const cs = await advanceRoundState(c);
+  const cs = contractStateOf(c);
   return { stateHex: hex(cs.serialize()), expected: readRegistry(c.view()) };
 }

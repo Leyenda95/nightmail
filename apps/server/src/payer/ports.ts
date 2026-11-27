@@ -3,7 +3,7 @@
 // (test-devnet/payer.devnet.ts).
 import { NO_EXPIRY, Plan } from '@nightmail/midnight';
 import { Transaction } from '@midnightntwrk/ledger-v9';
-import { relayProblem } from '../chain/relayable.ts';
+import { guaranteedOnly, relayProblem } from '../chain/relayable.ts';
 import { readRegistryAddress, type ServerConfig } from '../config.ts';
 import { openChain, type Chain } from '../chain/midnight.ts';
 import { hasBonoLeaf, registryWitnesses, type RegistryPrivateState } from '../chain/registry.ts';
@@ -16,9 +16,18 @@ export class PayerConfigError extends Error {}
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) => Buffer.from(a).equals(Buffer.from(b));
 
+/** A client transaction as the wallet adopts it ('Unbound', wallet-sdk-facade 5.0.1); InvalidTransactionError if it is not one. */
+function unbound(tx: Uint8Array) {
+  try {
+    return Transaction.deserialize('signature', 'proof', 'pre-binding', tx);
+  } catch {
+    throw new InvalidTransactionError('not an unbound transaction of the current protocol version');
+  }
+}
+
 /**
  * The registry deployed on this network (contracts.json), with the operator key (`operator-sk`) used to
- * prove issueBono and advanceRound. null if nothing is deployed yet: the payer then only relays.
+ * prove issueBono. null if nothing is deployed yet: the payer then only relays.
  */
 export async function openRegistry(
   config: Pick<ServerConfig, 'network' | 'dataDir'>, chain: Pick<Chain, 'contract' | 'indexedTime'>, log: PayerLog,
@@ -27,7 +36,7 @@ export async function openRegistry(
   try {
     address = readRegistryAddress(config);
   } catch (e) {
-    log.info(`issue and advance-round are disabled: ${e instanceof Error ? e.message : 'no deployed registry'}`);
+    log.info(`issue is disabled: ${e instanceof Error ? e.message : 'no deployed registry'}`);
     return null;
   }
   // Never created here: the deployment creates the operator key and commits it to the contract.
@@ -39,7 +48,7 @@ export async function openRegistry(
   if (!sameBytes(registry.module.pureCircuits.operatorKey(opSk), (await registry.ledgerState(address)).operatorPk)) {
     throw new PayerConfigError('operator-sk is not the operator key of the deployed registry');
   }
-  // issueBono and advanceRound only read operatorSecret; the other witnesses are never called.
+  // issueBono only reads operatorSecret; the other witnesses are never called.
   const privateState: RegistryPrivateState = {
     bono: { s: new Uint8Array(32), k: 0n, plan: Plan.free, validUntil: NO_EXPIRY }, j: 0n, opSk,
   };
@@ -50,7 +59,6 @@ export async function openRegistry(
       const { data } = await registry.state(address);
       return leaves.map((leaf) => hasBonoLeaf(data, leaf));
     },
-    round: async () => (await registry.ledgerState(address)).round,
     indexedTime: () => chain.indexedTime(),
   };
 }
@@ -62,16 +70,8 @@ export async function openPayerPorts(config: ServerConfig, wallet: OperatorWalle
   const following = wallet.facade.state().subscribe({ next: (state) => { last = state; }, error: () => {} });
   return {
     status: () => ({ synced: last.isSynced, dustCoins: last.dust.availableCoins.length, dustBalance: last.dust.balance(new Date()) }),
-    screen: (tx) => {
-      let parsed;
-      try {
-        // Same markers the wallet uses to adopt an 'Unbound' transaction (wallet-sdk-facade 5.0.1).
-        parsed = Transaction.deserialize('signature', 'proof', 'pre-binding', tx);
-      } catch {
-        throw new InvalidTransactionError('not an unbound transaction of the current protocol version');
-      }
-      return relayProblem(parsed);
-    },
+    screen: (tx) => relayProblem(unbound(tx)),
+    guaranteedOnly: (tx) => guaranteedOnly(unbound(tx)),
     estimateFee: async (tx) => {
       let handle;
       try {
@@ -81,7 +81,7 @@ export async function openPayerPorts(config: ServerConfig, wallet: OperatorWalle
       }
       return wallet.facade.estimateTransactionFee(handle);
     },
-    send: (tx, beforeSubmit) => chain.send(tx, beforeSubmit),
+    send: (tx, beforeSubmit, onInBlock) => chain.send(tx, beforeSubmit, onInBlock),
     registry: await openRegistry(config, chain, log),
     close: () => following.unsubscribe(),
   };

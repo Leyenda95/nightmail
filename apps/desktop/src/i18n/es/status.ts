@@ -53,21 +53,13 @@ export default {
       recovering: stage('Buscando tus bonos en Midnight', 'Tu frase semilla ya está guardada y cifrada en este dispositivo.'),
     },
     bonoReady: stage('Bono confirmado', null),
-    waitingRound: stage(
-      'Falta un último paso',
-      'Suele tardar unos minutos.',
-    ),
     unknown: stage('En marcha', null),
   },
 
   // pending.ts
   pending: {
     // Lowercase: `pendingParts` capitalises the headline.
-    stage: {
-      reserving: { mailbox: 'reservando el nombre', alias: 'reservando' },
-      reserved: { mailbox: 'nombre reservado', alias: 'reservado' },
-      revealing: { mailbox: 'activando el nombre', alias: 'activando' },
-    },
+    stage: { mailbox: 'reservando el nombre', alias: 'reservando' },
     button: { resume: RESUME, retry: RETRY },
     inProcess: 'en proceso',
     stopped: 'detenido',
@@ -89,7 +81,6 @@ export default {
     stopCall: {
       notABono: 'Midnight no reconoce el bono',
       noSlotsLeft: 'no quedan huecos en el plan',
-      wrongReveal: 'los datos no coinciden con la reserva',
     },
     mailboxNamed: (name: string): string => `buzón ${name}`,
     actions: {

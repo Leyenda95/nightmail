@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  addrKey, aliasAddrKey, commit, ctx, idK, InvalidInput, Kind, leaf, nameBytes, NAME_BYTES, NO_EXPIRY, normalizeName,
+  addrKey, aliasAddrKey, ctx, idK, InvalidInput, Kind, leaf, nameBytes, NAME_BYTES, NO_EXPIRY, normalizeName,
   Plan, slotNul, toHex,
 } from '../src/index.ts';
 
@@ -28,13 +28,11 @@ test('idK, leaf and slotNul reproduce the vectors', () => {
   assert.equal(NO_EXPIRY.toString(), v.noExpiry);
 });
 
-test('addrKey, aliasAddrKey and commit reproduce the vectors', () => {
+test('addrKey and aliasAddrKey reproduce the vectors', () => {
   const key = addrKey('juan.perez');
   assert.equal(toHex(key), v.addressKey);
   const aliasNul = slotNul(c, b(i.s), Kind.alias, 3n, 0n);
   assert.equal(toHex(aliasAddrKey(b(i.encPk), b(i.authPk), aliasNul)), v.aliasKey);
-  const mailboxNul = b(v.slotNullifierMailbox3);
-  assert.equal(toHex(commit(key, b(i.encPk), b(i.authPk), b(i.salt), mailboxNul)), v.nameCommit);
 });
 
 test('addrKey normalizes before hashing: upper and lower case are the same mailbox', () => {

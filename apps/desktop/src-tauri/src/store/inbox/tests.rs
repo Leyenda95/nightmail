@@ -277,7 +277,7 @@ fn an_encrypted_v3_database_migrates_to_v4_keeping_its_data() {
     let dir = TempDir::new().unwrap();
     let read = v3_database_with_data(&dir);
     let s = LocalStore::open(&db_path(&dir), &KEY, &scope()).unwrap();
-    assert_eq!(s.schema_version().unwrap(), 4);
+    assert_eq!(s.schema_version().unwrap(), schema::MIGRATIONS.len() as u32);
     assert_eq!(s.list_addresses().unwrap(), vec![address(1), address(2)]);
     assert_eq!(s.list_abandoned_addresses().unwrap(), vec![address(3)]);
     // Old mail is plain (not e2e, not verified) and keeps its flags; the abandoned address's stays hidden.
@@ -294,7 +294,7 @@ fn an_encrypted_v3_database_migrates_to_v4_keeping_its_data() {
     s.add_e2e_pending(&pending(2, "p1"), 0).unwrap();
     s.close().unwrap();
     let again = LocalStore::open(&db_path(&dir), &KEY, &scope()).unwrap();
-    assert_eq!(again.schema_version().unwrap(), 4);
+    assert_eq!(again.schema_version().unwrap(), schema::MIGRATIONS.len() as u32);
     assert_eq!(listed(&again).len(), 3);
     assert!(again.get_e2e_pending(&[2; 32], "p1").unwrap().is_some());
 }
@@ -316,6 +316,6 @@ fn a_failed_v4_migration_leaves_the_v3_database_untouched() {
     assert!(s.conn().prepare("SELECT e2e FROM messages").is_err(), "the half migration must not remain");
     s.close().unwrap();
     let s = LocalStore::open(&db_path(&dir), &KEY, &scope()).unwrap();
-    assert_eq!(s.schema_version().unwrap(), 4);
+    assert_eq!(s.schema_version().unwrap(), schema::MIGRATIONS.len() as u32);
     assert_eq!(listed(&s).len(), 2);
 }

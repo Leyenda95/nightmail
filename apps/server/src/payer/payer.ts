@@ -1,12 +1,19 @@
-// The payer: the only thing that spends the operator's DUST. Three operations, all through one serial queue:
+// The payer: the only thing that spends the operator's DUST. Two operations, through one serial queue:
 //   relay         pays for a transaction a client proved (balances DUST only)
 //   issue         issues a `bono` leaf (issueBono), idempotent per id
-//   advanceRound  advances the registry round
 // No network or SDK here: wallet and chain come in through `PayerPorts` (ports.ts wires the real ones,
 // tests use doubles). Results never carry SDK messages, only fixed codes; details go to the operator log.
+//
+// Early relay answer (`earlyRelayAnswer`, OFF by default): a client transaction whose calls all run in the guaranteed
+// part is answered as soon as it is in a block, without waiting ~13 s more for finality and the indexer. That rests
+// on "in a block means it applied" (the node checks the guaranteed part again when building the block), which is
+// not proven yet: test-devnet/inblock.devnet.ts decides it, and the switch stays off until it passes. The queue job
+// itself still runs to the final result, so the next DUST spend only starts once the wallet has settled this one
+// (as before), and the accounting (cap, lost fees) uses the final result. Operator transactions (issue, NIGHT
+// registration) always answer only when final.
 import { ctx as ctxOf, fromHex, leaf as leafOf, NO_EXPIRY, Plan } from '@nightmail/midnight';
 import { EXPIRY_MARGIN_MS } from '../chain/deploy.ts';
-import { nodeRejectionCode, type Outcome, type Prepared, type SentTx } from '../chain/midnight.ts';
+import { nodeRejectionCode, type OnInBlock, type Outcome, type Prepared, type SentTx } from '../chain/midnight.ts';
 import type { RelayProblem } from '../chain/relayable.ts';
 import { HourlyCap, LostFees, type LostFeesSnapshot } from './accounting.ts';
 import type { InFlightIssue, IssueJournal, IssuePlan } from './journal.ts';
@@ -19,11 +26,10 @@ export type RegistryPort = {
   /** NightMailRegistry contract address (hex). */
   address: string;
   /** Builds and proves an operator call. Throws if the circuit fails locally or cannot be proved. */
-  prepare(circuit: 'issueBono' | 'advanceRound', args: unknown[]): Promise<Prepared>;
+  prepare(circuit: 'issueBono', args: unknown[]): Promise<Prepared>;
   /** For each leaf, whether it is already in the `bonos` tree (all checked against the same state). */
   hasLeaves(leaves: Uint8Array[]): Promise<boolean[]>;
-  round(): Promise<bigint>;
-  /** Time of the last block the indexer has processed (the state `hasLeaves` and `round` read from). */
+  /** Time of the last block the indexer has processed (the state `hasLeaves` reads from). */
   indexedTime(): Promise<Date>;
 };
 
@@ -35,10 +41,18 @@ export type PayerPorts = {
    * if the bytes are not an unbalanced transaction of the current version.
    */
   screen(tx: Uint8Array): RelayProblem | null;
+  /**
+   * Whether all its calls run in the guaranteed part (relayable.ts `guaranteedOnly`), so it can be answered once in
+   * a block. Called only after `screen` accepted it.
+   */
+  guaranteedOnly(tx: Uint8Array): boolean;
   /** Estimated DUST fee to pay for the transaction. Throws InvalidTransactionError on invalid bytes. */
   estimateFee(tx: Uint8Array): Promise<bigint>;
-  /** Balances DUST only, signs, submits and waits for the block (sendPrepared). Calls back right before submitting. */
-  send(tx: Prepared, beforeSubmit: (sent: SentTx) => void | Promise<void>): Promise<Outcome>;
+  /**
+   * Balances DUST only, signs, submits and waits for the final result (sendPrepared). Calls back right before
+   * submitting and, if `onInBlock` is given, when the transaction enters a block (before the final result).
+   */
+  send(tx: Prepared, beforeSubmit: (sent: SentTx) => void | Promise<void>, onInBlock?: OnInBlock): Promise<Outcome>;
   /** null if no contracts are deployed on this network yet (only relay works). */
   registry: RegistryPort | null;
 };
@@ -49,6 +63,8 @@ export type PayerLimits = {
   issueDustPerHour: bigint;
   /** Running plus waiting operations the queue accepts. */
   maxQueue: number;
+  /** Answer guaranteed-only relays once in a block (see the top of this file). Off when absent. */
+  earlyRelayAnswer?: boolean;
 };
 
 export type PayerLog = { info(message: string): void; warn(message: string): void };
@@ -76,8 +92,6 @@ export type IssueResult =
   | { status: 'already-issued' }
   | { status: 'pending'; txHash: string; retryAfterS: number }
   | Failed;
-/** `round`: the new round, or null if it advanced but could not be read (it was paid, so not a retryable error). */
-export type AdvanceResult = { status: 'advanced'; round: number | null; txHash: string } | Unknown | Failed;
 
 export type Health = {
   ready: boolean;
@@ -88,10 +102,14 @@ export type Health = {
   dustSpentLastHour: { relay: bigint; issue: bigint };
   dustCapPerHour: { relay: bigint; issue: bigint };
   issuesInFlight: number;
+  /** Relays answered as included (in a block) whose final result says otherwise: each one is a wrong answer. */
+  earlyAnswersWrong: number;
+  /** Relays answered as included whose final result never came (timeout, connection lost): unconfirmed, not wrong. */
+  earlyAnswersUnconfirmed: number;
   contract: string | null;
 };
 
-type Kind = 'relay' | 'issue' | 'advance';
+type Kind = 'relay' | 'issue';
 /** Outcome of a transaction the wallet got as far as signing. */
 type Paid = { status: string; sent: SentTx };
 
@@ -132,6 +150,8 @@ export class Payer {
   private readonly jobDeadlineMs: number;
   private readonly onStuck: () => void;
   private lastUnknownAt = Number.NEGATIVE_INFINITY;
+  private earlyAnswersWrong = 0;
+  private earlyAnswersUnconfirmed = 0;
 
   /**
    * `onStuck`: a queue job exceeded `jobDeadlineMs` (it can't be cancelled, it may be mid-submit). The
@@ -164,6 +184,8 @@ export class Payer {
       dustSpentLastHour: { relay: this.caps.relay.spent(now), issue: this.caps.issue.spent(now) },
       dustCapPerHour: { relay: this.limits.relayDustPerHour, issue: this.limits.issueDustPerHour },
       issuesInFlight: this.journal.size,
+      earlyAnswersWrong: this.earlyAnswersWrong,
+      earlyAnswersUnconfirmed: this.earlyAnswersUnconfirmed,
       contract: this.ports.registry?.address ?? null,
     };
   }
@@ -184,14 +206,56 @@ export class Payer {
   /**
    * Pays for and submits a client-proved, unbalanced transaction. Only contract calls that move no value
    * are accepted (relayable.ts); the wallet balances it without signing the client's part.
+   * With `earlyRelayAnswer`, a guaranteed-only one is answered `SucceedEntirely` as soon as it is in a block; its
+   * queue job goes on to the final result in the background (see the top of this file). A final result that
+   * contradicts the answer is logged loudly and counted (`earlyAnswersWrong`); one that never came, too
+   * (`earlyAnswersUnconfirmed`).
    */
   relay(tx: Uint8Array): Promise<RelayResult | PayerError> {
     const refused = this.unrelayable(tx);
     if (refused) return Promise.resolve(refused);
-    return this.enqueue('relay', async () => {
-      const paid = await this.pay('relay', { bytes: tx, proveMs: 0, kinds: ['dust'], foreign: true });
-      return 'sent' in paid ? sentResult(paid) : paid;
+    let answerEarly: ((result: RelayResult) => void) | undefined;
+    const early = new Promise<RelayResult>((resolve) => { answerEarly = resolve; });
+    let answered: RelayResult | undefined;
+    const onInBlock = this.answersEarly(tx) ? (sent: SentTx, ms: number) => {
+      answered = { status: 'SucceedEntirely', txHash: sent.txHash };
+      this.log.info(`relay: in a block, ${Math.round(ms)} ms from submit, answered; waiting for finality in the background`);
+      answerEarly!(answered);
+    } : undefined;
+    const final = this.enqueue('relay', async () => {
+      const paid = await this.pay('relay', { bytes: tx, proveMs: 0, kinds: ['dust'], foreign: true }, () => {}, onInBlock);
+      const result = 'sent' in paid ? sentResult(paid) : paid;
+      if (answered && !('status' in result && result.status === 'SucceedEntirely')) this.wrongEarlyAnswer(answered, result);
+      return result;
     });
+    return Promise.race([final, early]);
+  }
+
+  /** Whether a relay may be answered once in a block: only if switched on, and if unsure (cannot inspect it), no. */
+  private answersEarly(tx: Uint8Array): boolean {
+    if (!this.limits.earlyRelayAnswer) return false;
+    try {
+      return this.ports.guaranteedOnly(tx);
+    } catch (e) {
+      this.log.warn(`relay: could not inspect the transaction for an early answer: ${describe(e)}`);
+      return false;
+    }
+  }
+
+  /**
+   * The client was told it succeeded (in a block) and the final result says otherwise (e.g. a fork dropped the
+   * block), or never came ('unknown': timeout or lost connection, counted apart since it may still be right).
+   */
+  private wrongEarlyAnswer(answered: RelayResult, final: RelayResult | PayerError): void {
+    const what = 'error' in final ? `error ${final.error}` : final.status;
+    const hash = 'txHash' in answered ? answered.txHash : '';
+    if (what === 'unknown') {
+      this.earlyAnswersUnconfirmed += 1;
+      this.log.warn(`relay: ANSWERED AS INCLUDED BUT THE FINAL RESULT NEVER CAME (tx ${hash}): check that it is on chain`);
+      return;
+    }
+    this.earlyAnswersWrong += 1;
+    this.log.warn(`relay: ANSWERED AS INCLUDED BUT THE FINAL RESULT IS ${what} (tx ${hash}): the client was told it succeeded`);
   }
 
   private unrelayable(tx: Uint8Array): PayerError | undefined {
@@ -210,29 +274,6 @@ export class Payer {
     const registry = this.ports.registry;
     if (!registry) return Promise.resolve({ error: 'no-contract' });
     return this.enqueue('issue', () => this.issueNow(registry, id, plan));
-  }
-
-  advanceRound(): Promise<AdvanceResult | PayerError> {
-    const registry = this.ports.registry;
-    if (!registry) return Promise.resolve({ error: 'no-contract' });
-    return this.enqueue('advance', async () => {
-      const paid = await this.payCall('advance', registry, 'advanceRound', []);
-      if (!('sent' in paid)) return failedOf(paid);
-      const { status, sent: { txHash } } = paid;
-      if (status === 'unknown') return unknownOf(paid.sent);
-      if (status !== 'SucceedEntirely') return { status: 'failed', reason: 'fee-lost', txHash };
-      return { status: 'advanced', round: await this.roundAfter(registry, txHash), txHash };
-    });
-  }
-
-  /** Round after advancing, or null if unreadable. It advanced and was paid, so this must not be an error (it would be retried). */
-  private async roundAfter(registry: RegistryPort, txHash: string): Promise<number | null> {
-    try {
-      return Number(await registry.round());
-    } catch (e) {
-      this.log.warn(`advance: advanced (tx ${txHash}) but the new round could not be read: ${describe(e)}`);
-      return null;
-    }
   }
 
   private async issueNow(registry: RegistryPort, id: string, plan: IssuePlan): Promise<IssueResult | PayerError> {
@@ -300,7 +341,7 @@ export class Payer {
   }
 
   private async payCall(
-    kind: Kind, registry: RegistryPort, circuit: 'issueBono' | 'advanceRound', args: unknown[],
+    kind: Kind, registry: RegistryPort, circuit: 'issueBono', args: unknown[],
     beforeSubmit: (sent: SentTx) => void = () => {},
   ): Promise<Paid | Rejected | Failed | PayerError> {
     let prepared: Prepared;
@@ -316,17 +357,19 @@ export class Payer {
   /**
    * Pays for a proved transaction: hourly cap check (estimated fee), then balance, sign, submit and wait,
    * then accounting (actual fee). Returns the block status (or 'unknown'), the node's rejection code, or
-   * why it was not sent.
+   * why it was not sent. `onInBlock`: told when it enters a block, before the final result.
    */
-  private async pay(kind: Kind, tx: Prepared, beforeSubmit: (sent: SentTx) => void = () => {}): Promise<Paid | Rejected | PayerError> {
-    const cap = kind === 'advance' ? undefined : this.caps[kind];
+  private async pay(
+    kind: Kind, tx: Prepared, beforeSubmit: (sent: SentTx) => void = () => {}, onInBlock?: (sent: SentTx, ms: number) => void,
+  ): Promise<Paid | Rejected | PayerError> {
+    const cap = this.caps[kind];
     const refused = await this.refusal(kind, cap, tx.bytes);
     if (refused) return refused;
     let sent: SentTx | undefined;
     const outcome = await this.ports.send(tx, (s) => {
       beforeSubmit(s);
       sent = s;
-    });
+    }, onInBlock && ((ms) => { if (sent) onInBlock(sent, ms); }));
     if (outcome.status === 'balance-error') return this.dustUnavailable(kind, outcome.error);
     if (!sent) {
       // 'record-error': the signed transaction could not be recorded or read, so sendPrepared did not submit it.

@@ -2,7 +2,7 @@
 
 Prepares the demo network (local devnet or preprod) through the payer's local API (its routes are in `apps/server/src/payer/api.ts`). It has no npm runtime dependencies: it uses the payer client from `apps/server`.
 
-A *bono* is the voucher for a plan (free or paid) that the operator records in the `NightMailRegistry` contract. The app spends its slots to create addresses. This tool works with bonos and with the registry round.
+A *bono* is the voucher for a plan (free or paid) that the operator records in the `NightMailRegistry` contract. The app spends its slots to create addresses. This tool works with bonos.
 
 **What you need running first:** the payer for the same network (`npm run operator-wallet -w apps/server`), with the registry already deployed on that network.
 
@@ -10,7 +10,6 @@ A *bono* is the voucher for a plan (free or paid) that the operator records in t
 NIGHTMAIL_NETWORK=undeployed node tools/demo-seed/src/cli.ts bonos                      # 600 free + 600 paid
 NIGHTMAIL_NETWORK=undeployed node tools/demo-seed/src/cli.ts bonos --hasta 1500         # top up to 1,500 in total
 NIGHTMAIL_NETWORK=undeployed node tools/demo-seed/src/cli.ts bonos --free 100 --paid 0
-NIGHTMAIL_NETWORK=undeployed node tools/demo-seed/src/cli.ts avanzar-ronda
 ```
 
 `NIGHTMAIL_NETWORK` is `undeployed` (local devnet) or `preprod`. The default is `preprod`, as on the server. Run `node tools/demo-seed/src/cli.ts --help` for the full usage.
@@ -45,19 +44,15 @@ Exit code: 0 if every bono exists. 1 if some are pending or failed (run the comm
 
 ### Current limitations
 
-- **It only grows the bono tree.** `issueBono` only adds to `bonos`. The other collections (`slotNullifiers`, `addresses` and `pendingNames`) stay nearly empty, and filling `bonos` does not change them. Those are the collections where the node's random rejections come from, so filling `bonos` does not prevent them.
+- **It only grows the bono tree.** `issueBono` only adds to `bonos`. The other collections (`slotNullifiers` and `addresses`) stay nearly empty, and filling `bonos` does not change them. Those are the collections where the node's random rejections come from, so filling `bonos` does not prevent them.
 - **It does not fill the other collections** with filler entries.
 - **It does not reset the devnet.**
-
-## `avanzar-ronda`: advance the round
-
-Sends one `POST /advance-round`, which advances the registry round once (the demo's "button"). It prints the new round. If it cannot connect (no socket, or nothing listening), it says so: the round has **not** advanced. If the outcome is unknown (connection lost halfway, an HTTP 5xx error, or a transaction sent with no known outcome), the round may have advanced anyway: check it before you repeat the command. It does not accept the `bonos` options.
 
 ## Common options
 
 - `--socket`: the payer socket (default `<operator data>/payer.sock`). The operator data folder depends on `NIGHTMAIL_NETWORK`, as on the server.
 - `--help`: shows the usage.
-- An unknown option, or one that does not apply to the command (for example `avanzar-ronda --free 3`), is a usage error.
+- An unknown option is a usage error.
 
 ## Tests
 

@@ -19,11 +19,11 @@ import {
   x25519PublicKey,
 } from '@nightmail/core-ts';
 import {
-  addrKey, aliasAddrKey, aliasAddress, commit, ctx as ctxOf, idK, Kind, leaf, nameBytes, NO_EXPIRY, Plan, slotNul, toHex,
+  addrKey, aliasAddrKey, aliasAddress, ctx as ctxOf, idK, Kind, leaf, nameBytes, NO_EXPIRY, Plan, slotNul, toHex,
 } from '@nightmail/midnight';
 import { run } from '../../../tools/demo-mailer/src/run.ts';
 import { loadConfig, readRegistryAddress } from '../src/config.ts';
-import { openChain, type ChainContract, type Outcome } from '../src/chain/midnight.ts';
+import { openChain, type Chain, type ChainContract, type Outcome } from '../src/chain/midnight.ts';
 import { registryWitnesses, type Bono, type RegistryPrivateState as PS } from '../src/chain/registry.ts';
 import { indexerChain, type RunningMailServer, startMailServer } from '../src/mail-server.ts';
 import { ensureSpendableDust, openOperatorWallet, type OperatorWallet } from '../src/wallet/operatorWallet.ts';
@@ -45,6 +45,7 @@ const logs: string[] = [];
 const timings: string[] = [];
 
 let wallet: OperatorWallet;
+let chain: Chain;
 let registry: ChainContract;
 let server: RunningMailServer;
 const bono: Bono = { s: rand(), k: 0n, plan: Plan.paid, validUntil: NO_EXPIRY };
@@ -55,6 +56,7 @@ const created: Address[] = [];
 
 const ps = (j: bigint): PS => ({ bono, j, opSk });
 const view = () => registry.ledgerState(R);
+/** Block time (Unix seconds) of the latest block the indexer has processed. */
 
 function record(label: string, o: Outcome): Outcome {
   timings.push(`${label.padEnd(28)} ${o.status.padEnd(16)} proof ${(o.proveMs / 1000).toFixed(1).padStart(5)} s`);
@@ -168,7 +170,7 @@ async function download(address: Address): Promise<{ raw: Buffer; size: number }
 before(async () => {
   wallet = await openWalletWhenFree();
   await ensureSpendableDust(wallet);
-  const chain = await openChain(config, wallet);
+  chain = await openChain(config, wallet);
   registry = await chain.contract('registry', registryWitnesses((leafHex) => positions.get(leafHex)));
   server = await startServer();
   // The `bono` is issued by the operator (as after a simulated card payment). 5 mailboxes + 20 aliases.
@@ -215,16 +217,11 @@ test('an alias created while the server runs receives mail from the demo-mailer 
   assert.equal((await signedGet({ ...nube, authSecretKey: generateSecretKey() }, target)).status, 401);
 });
 
-test('a mailbox registered in two steps (reservation, round advance and reveal) receives mail by its name', async () => {
+test('a mailbox registered in one transaction (registerMailbox) receives mail by its name', async () => {
   const name = `e2e-${Date.now().toString(36)}`;
   const keys = newKeys();
-  const salt = rand();
-  const nul = slotNul(ctx, bono.s, Kind.mailbox, 0n, 0n);
   const key = addrKey(name);
-  const round: bigint = (await view()).round;
-  await call('reserveMailbox', 'reserveMailbox', ps(0n), [commit(key, keys.encPk, keys.authPk, salt, nul), round + 1n]);
-  for (let i = 0; i < 2; i++) await call('advanceRound', 'advanceRound', ps(0n), []);
-  await call('revealMailbox', 'revealMailbox', ps(0n), [nameBytes(name), keys.encPk, keys.authPk, salt, nul, new Uint8Array(randomBytes(104))]);
+  await call('registerMailbox', 'registerMailbox', ps(0n), [nameBytes(name), keys.encPk, keys.authPk, new Uint8Array(randomBytes(104))]);
   const box: Address = { localPart: name, addrKey: key, encSecretKey: keys.encSecretKey, authSecretKey: keys.authSecretKey };
   created.push(box);
   await waitUntilKnown(box);

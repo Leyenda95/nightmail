@@ -30,7 +30,6 @@ function harness(answers: Record<string, IssueOutcome[]> | ((id: string, call: n
       const list = answers[id] ?? [];
       return list[Math.min(n - 1, list.length - 1)] ?? { status: 'issued' };
     },
-    advanceRound: async () => ({ status: 'failed' }),
   };
   const sleep = async (ms: number, signal: AbortSignal) => {
     sleeps.push(ms);
@@ -291,7 +290,7 @@ test('the default random delay comes from randomInt(0, 30 s): from 0 (no delay) 
   t.after(() => syncBuiltinESMExports());
   const sleeps: number[] = [];
   const issuer = new Issuer({
-    store: new IssuerStore(openDatabase(MEMORY)), payer: { issue: async () => ({ status: 'issued' }), advanceRound: async () => ({ status: 'failed' }) },
+    store: new IssuerStore(openDatabase(MEMORY)), payer: { issue: async () => ({ status: 'issued' }) },
     signer: createReceiptSigner(Buffer.alloc(32, 3), CONTRACT), log: capturingLogger([]), now: () => NOW, sleep: async (ms) => { sleeps.push(ms); },
   });
   issuer.submit(A, 'free', null);

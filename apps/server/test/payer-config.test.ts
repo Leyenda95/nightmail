@@ -5,7 +5,9 @@ import { DEFAULT_PAYER_LIMITS, DUST_UNIT, loadPayerLimits } from '../src/payer/c
 
 test('without variables: default caps of 100 DUST/h for relay and 50 DUST/h for issue, and a queue of 32', () => {
   assert.deepEqual(loadPayerLimits({}), DEFAULT_PAYER_LIMITS);
-  assert.deepEqual(DEFAULT_PAYER_LIMITS, { relayDustPerHour: 100n * 10n ** 15n, issueDustPerHour: 50n * 10n ** 15n, maxQueue: 32 });
+  assert.deepEqual(DEFAULT_PAYER_LIMITS, {
+    relayDustPerHour: 100n * 10n ** 15n, issueDustPerHour: 50n * 10n ** 15n, maxQueue: 32, earlyRelayAnswer: false,
+  });
   assert.equal(DUST_UNIT, 10n ** 15n);
 });
 
@@ -13,7 +15,7 @@ test('the variables give the caps in whole DUST and the queue size', () => {
   const limits = loadPayerLimits({
     NIGHTMAIL_PAYER_RELAY_DUST_PER_HOUR: '7', NIGHTMAIL_PAYER_ISSUE_DUST_PER_HOUR: '0', NIGHTMAIL_PAYER_MAX_QUEUE: '5',
   });
-  assert.deepEqual(limits, { relayDustPerHour: 7n * DUST_UNIT, issueDustPerHour: 0n, maxQueue: 5 });
+  assert.deepEqual(limits, { relayDustPerHour: 7n * DUST_UNIT, issueDustPerHour: 0n, maxQueue: 5, earlyRelayAnswer: false });
   assert.equal(loadPayerLimits({ NIGHTMAIL_PAYER_RELAY_DUST_PER_HOUR: '1000000000' }).relayDustPerHour, 10n ** 9n * DUST_UNIT);
   // The queue size accepts 1 to 10000, inclusive.
   assert.equal(loadPayerLimits({ NIGHTMAIL_PAYER_MAX_QUEUE: '1' }).maxQueue, 1);
@@ -28,4 +30,13 @@ test('a value that is not an unsigned integer (or a queue of 0) is a configurati
   }
   assert.throws(() => loadPayerLimits({ NIGHTMAIL_PAYER_MAX_QUEUE: '0' }), /NIGHTMAIL_PAYER_MAX_QUEUE/);
   assert.throws(() => loadPayerLimits({ NIGHTMAIL_PAYER_MAX_QUEUE: '10001' }), /NIGHTMAIL_PAYER_MAX_QUEUE/);
+});
+
+test('the early relay answer is off unless NIGHTMAIL_PAYER_EARLY_RELAY_ANSWER is exactly 1', () => {
+  assert.equal(loadPayerLimits({}).earlyRelayAnswer, false);
+  assert.equal(loadPayerLimits({ NIGHTMAIL_PAYER_EARLY_RELAY_ANSWER: '0' }).earlyRelayAnswer, false);
+  assert.equal(loadPayerLimits({ NIGHTMAIL_PAYER_EARLY_RELAY_ANSWER: '1' }).earlyRelayAnswer, true);
+  for (const bad of ['', 'true', 'yes', '01', ' 1']) {
+    assert.throws(() => loadPayerLimits({ NIGHTMAIL_PAYER_EARLY_RELAY_ANSWER: bad }), /NIGHTMAIL_PAYER_EARLY_RELAY_ANSWER/, bad);
+  }
 });

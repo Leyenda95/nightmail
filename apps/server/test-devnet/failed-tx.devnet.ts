@@ -122,7 +122,7 @@ async function noticesFrom(height: number, ms = 8000): Promise<ActionNotice[]> {
 }
 
 const summary = (r: RegistryAt | null) =>
-  r ? `block ${r.blockHeight}, ${r.snapshot.addresses.length} addresses, round ${r.snapshot.round}, ${r.stateBytes} B` : 'null';
+  r ? `block ${r.blockHeight}, ${r.snapshot.addresses.length} addresses, ${r.stateBytes} B` : 'null';
 
 before(async () => {
   wallet = await openWalletWhenFree();

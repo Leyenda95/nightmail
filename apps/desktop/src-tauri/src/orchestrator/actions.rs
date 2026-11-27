@@ -73,9 +73,9 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
         if current.status != SlotStatus::Reserving {
             return Err(OrchError::StillPending);
         }
-        if current.reserve_attempts > 0 {
+        if current.attempts > 0 {
             let facts = self.facts(&current, None).await?;
-            let quiet = facts.address.is_none() && facts.pending.is_none() && !facts.spent;
+            let quiet = facts.address.is_none() && !facts.spent;
             if !quiet {
                 return Err(OrchError::StillPending);
             }

@@ -18,7 +18,7 @@ bonosError: OrchError | null,
  */
 addresses: number, 
 /**
- * Mailboxes without a name (restored reservation or unreadable name), deduplicated: ask for it (`provide_name`).
+ * Mailboxes without a readable name, deduplicated: ask for it (`provide_name`).
  */
 needsName: Array<SlotId>, 
 /**

@@ -39,42 +39,16 @@ test('stores the whole index and the height, and gets them back as is on reopen'
   assert.deepEqual(reopened.index.exportState(), index.exportState());
 });
 
-// RoundTicker's readRoundState, indexed by RegistrySync.
-test('the round and whether reservations are waiting are stored with the index and restored', () => {
-  const db = openDatabase(MEMORY);
-  const store = new RegistryStore(db, CONTRACT);
-  const index = new ResolutionIndex();
-  index.addBlock(5, [alias().entry]);
-  store.saveIndex(index, 6, { round: 2n ** 64n - 1n, waiting: true });
-  assert.deepEqual(new RegistryStore(db, CONTRACT).load().round, { round: 2n ** 64n - 1n, waiting: true });
-  store.saveIndex(index, 7, { round: 0n, waiting: false });
-  assert.deepEqual(new RegistryStore(db, CONTRACT).load().round, { round: 0n, waiting: false });
-});
-
-test('with no stored round (database from before it was stored) or an unreadable one: no round, and the index is still valid', () => {
+test('a round left by an earlier version (the round-based reveal) is ignored: the index is still valid', () => {
   const db = openDatabase(MEMORY);
   const store = new RegistryStore(db, CONTRACT);
   const index = new ResolutionIndex();
   index.addBlock(5, [alias().entry]);
   store.saveIndex(index, 6);
-  assert.equal(store.load().round, undefined);
-  for (const bad of ['no json', '{"round":"x","waiting":true}', '{"round":"-1","waiting":true}', '{"round":"5","waiting":1}', '{"round":5,"waiting":true}', 'null']) {
-    db.prepare("INSERT INTO registry_meta (key, value) VALUES ('round', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(bad);
-    const loaded = store.load();
-    assert.equal(loaded.round, undefined, bad);
-    assert.equal(loaded.index.size, 1, bad);
-    assert.equal(loaded.problem, undefined, bad);
-  }
-});
-
-test('discarding an unreadable index also deletes its round', () => {
-  const db = openDatabase(MEMORY);
-  const store = new RegistryStore(db, CONTRACT);
-  store.saveIndex(new ResolutionIndex(), 6, { round: 3n, waiting: true });
-  db.prepare("UPDATE registry_meta SET value = 'roto' WHERE key = 'index'").run();
-  assert.equal(store.load().problem, 'saved index unreadable');
-  store.saveCursor(9); // no blocks with state yet
-  assert.equal(store.load().round, undefined);
+  db.prepare("INSERT INTO registry_meta (key, value) VALUES ('round', ?)").run('{"round":"5","waiting":true}');
+  const loaded = store.load();
+  assert.deepEqual([loaded.index.size, loaded.cursor, loaded.problem], [1, 6, undefined]);
+  assert.ok(!('round' in loaded));
 });
 
 test('saveCursor only moves the height, the stored index does not change', () => {

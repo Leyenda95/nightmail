@@ -1,4 +1,4 @@
-// The payer's serial queue: everything that spends DUST (relay, issueBono, advanceRound and NIGHT
+// The payer's serial queue: everything that spends DUST (relay, issueBono and NIGHT
 // registration) runs here one at a time, in arrival order. That way two transactions never pick the same
 // coins and contract inserts never race each other.
 import { Slots } from '../limits.ts';

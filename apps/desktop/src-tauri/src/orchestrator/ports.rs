@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::{
-    ContractFindBonosParams, ContractFindBonosResult, ContractHashesParams, ContractHashesResult,
+    ChainHead, ContractFindBonosParams, ContractFindBonosResult, ContractHashesParams, ContractHashesResult,
     ContractProveCallParams, ContractProveCallResult, ContractSnapshot, ContractSnapshotParams, InitializeResult, Plan,
     WalletBalance, WalletBuyBonoParams, WalletBuyBonoResult, WalletFaucetParams, WalletFaucetResult, WalletOpenParams,
     WalletOpenResult, WalletRegisterDustResult,
@@ -58,6 +58,8 @@ pub trait Chain: Send + Sync {
         &self,
         p: &ContractProveCallParams,
     ) -> impl Future<Output = Result<ContractProveCallResult, RpcError>> + Send;
+    /// `chain.head`: the time of the node's latest block (no lag, unlike the indexer). Untrusted: see `ChainHead`.
+    fn head(&self) -> impl Future<Output = Result<ChainHead, RpcError>> + Send;
     fn wallet_open(&self, p: &WalletOpenParams) -> impl Future<Output = Result<WalletOpenResult, RpcError>> + Send;
     fn wallet_close(&self) -> impl Future<Output = Result<(), RpcError>> + Send;
     fn wallet_sync(&self) -> impl Future<Output = Result<WalletBalance, RpcError>> + Send;

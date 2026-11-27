@@ -3,4 +3,4 @@
 /**
  * Progress of an operation, for the UI.
  */
-export type Progress = { "stage": "queued" } | { "stage": "requestingBono" } | { "stage": "waitingIssuer" } | { "stage": "waitingInclusion" } | { "stage": "bonoReady", n: number, } | { "stage": "walletSyncing" } | { "stage": "registeringDust" } | { "stage": "paying" } | { "stage": "proving" } | { "stage": "relaying" } | { "stage": "retrying" } | { "stage": "serverUnreachable" } | { "stage": "waitingDust" } | { "stage": "waitingRound", round: number, } | { "stage": "walletStateDiscarded" } | { "stage": "addressReady" } | { "stage": "recovering", n: number, };
+export type Progress = { "stage": "queued" } | { "stage": "requestingBono" } | { "stage": "waitingIssuer" } | { "stage": "waitingInclusion" } | { "stage": "bonoReady", n: number, } | { "stage": "walletSyncing" } | { "stage": "registeringDust" } | { "stage": "paying" } | { "stage": "proving" } | { "stage": "relaying" } | { "stage": "retrying" } | { "stage": "serverUnreachable" } | { "stage": "waitingDust" } | { "stage": "walletStateDiscarded" } | { "stage": "addressReady" } | { "stage": "recovering", n: number, };

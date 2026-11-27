@@ -9,7 +9,7 @@ use serde_json::json;
 
 use super::ports::Chain;
 use crate::protocol::{
-    ContractFindBonosParams, ContractFindBonosResult, ContractHashesParams, ContractHashesResult,
+    ChainHead, ContractFindBonosParams, ContractFindBonosResult, ContractHashesParams, ContractHashesResult,
     ContractProveCallParams, ContractProveCallResult, ContractSnapshot, ContractSnapshotParams, InitializeResult,
     WalletBalance, WalletBuyBonoParams, WalletBuyBonoResult, WalletFaucetParams, WalletFaucetResult, WalletOpenParams,
     WalletOpenResult, WalletRegisterDustResult,
@@ -20,6 +20,9 @@ use crate::supervisor::{SidecarError, SidecarSupervisor};
 /// Per-method deadlines. `wallet.buyBono` can take 30 min or more (waiting for inclusion) and
 /// `wallet.registerDust` waits for DUST to be generated (~15 min on the devnet).
 const SHORT: Duration = Duration::from_secs(60);
+/// `chain.head` is polled every second while a proof waits to be sent: a slow answer is not waited for long (the core
+/// falls back to the indexer).
+const HEAD: Duration = Duration::from_secs(10);
 const FIND: Duration = Duration::from_secs(180);
 const PROVE: Duration = Duration::from_secs(600);
 const WALLET_LONG: Duration = Duration::from_secs(45 * 60);
@@ -93,6 +96,10 @@ impl Chain for SidecarChain {
         self.call("contract.proveCall", p, PROVE).await
     }
 
+    async fn head(&self) -> Result<ChainHead, RpcError> {
+        self.call("chain.head", &json!({}), HEAD).await
+    }
+
     async fn wallet_open(&self, p: &WalletOpenParams) -> Result<WalletOpenResult, RpcError> {
         self.call("wallet.open", p, SHORT).await
     }
@@ -132,6 +139,7 @@ mod tests {
             "contract.hashes" => json!({ "ctx": "c", "results": ["aa"] }),
             "contract.findBonos" => json!({ "blockHeight": 1, "leafCount": 2, "positions": [1] }),
             "contract.proveCall" => json!({ "tx": "ff", "blockHeight": 3 }),
+            "chain.head" => json!({ "timestamp": 1_800_000_006_000_u64 }),
             "wallet.sync" => json!({ "synced": true, "night": "0", "unregisteredNight": "0", "dust": "0", "dustCoins": 1, "tokens": [] }),
             "wallet.registerDust" => json!({ "registered": true }),
             "wallet.faucet" => json!({ "txId": "00" }),
@@ -164,14 +172,14 @@ mod tests {
             }
         });
         let client = Arc::new(RpcClient::new(client_in, client_out, RpcOptions::default()));
-        let init = InitializeResult { protocol_version: "1.4".into(), sidecar_version: "t".into(), methods: vec![] };
+        let init = InitializeResult { protocol_version: "1.6".into(), sidecar_version: "t".into(), methods: vec![] };
         (SidecarChain::with_client(client, init), seen)
     }
 
     #[tokio::test]
     async fn every_port_method_goes_to_its_rpc_method() {
         let (chain, seen) = chain();
-        assert_eq!(chain.handshake().await.unwrap().protocol_version, "1.4");
+        assert_eq!(chain.handshake().await.unwrap().protocol_version, "1.6");
         let hashes = ContractHashesParams {
             contract_address: "c".into(),
             ops: vec![HashOp::NormalizeName { name: "a".into() }],
@@ -192,6 +200,7 @@ mod tests {
             min_leaf_count: None,
         };
         assert_eq!(chain.prove_call(&prove).await.unwrap().tx, "ff");
+        assert_eq!(chain.head().await.unwrap().timestamp, 1_800_000_006_000);
         let snapshot = ContractSnapshotParams { contract_address: "c".into(), cursor: None, limit: Some(1) };
         let expired = chain.snapshot(&snapshot).await.unwrap_err();
         assert!(matches!(expired, RpcError::Remote { code: codes::SNAPSHOT_EXPIRED, .. }));
@@ -210,6 +219,7 @@ mod tests {
             "contract.hashes",
             "contract.findBonos",
             "contract.proveCall",
+            "chain.head",
             "contract.snapshot",
             "wallet.open",
             "wallet.sync",

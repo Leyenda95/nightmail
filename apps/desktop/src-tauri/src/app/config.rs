@@ -106,7 +106,7 @@ impl AppConfig {
             issuer_key,
             captcha_token: env("NIGHTMAIL_ISSUER_CAPTCHA_TOKEN").unwrap_or_else(|| "nightmail-demo-captcha".into()),
             card_token: env("NIGHTMAIL_ISSUER_CARD_TOKEN").unwrap_or_else(|| "tok_nightmail_demo".into()),
-            pacing: Pacing::devnet(),
+            pacing: Pacing::default(),
             // Short pauses between addresses on the devnet so demos do not wait.
             sync: SyncConfig { pause_min: Duration::ZERO, pause_max: Duration::from_secs(1), ..SyncConfig::default() },
             sync_interval: Duration::from_secs(10),

@@ -1,14 +1,14 @@
 // @nightmail/midnight: what the server and the sidecar share about NightMailRegistry.
 export { Contract, Kind, ledger, Plan, REGISTRY_DIR, type Ledger, type Witnesses } from './contract.ts';
 export { fromHex, InvalidInput, toHex, uint } from './input.ts';
-export { addrKey, aliasAddrKey, commit, ctx, idK, leaf, NO_EXPIRY, slotNul } from './hashes.ts';
+export { addrKey, aliasAddrKey, ctx, idK, leaf, NO_EXPIRY, slotNul } from './hashes.ts';
 export {
   mailboxName, NAME_BYTES, nameBytes, type NameProblem, NameRejected, normalizeName, RESERVED_NAMES,
 } from './names.ts';
 export { aliasAddress, aliasSuffix, aliasWords, isAliasShaped, SUFFIX_CHARS, suffixOf } from './alias.ts';
 export {
   bonoPositions, decodeActionState, decodeRegistry, decodeState, newAddressesBetween, NotRegistryState, type OldPrice, page,
-  type PendingEntry, readRegistry, type RegistryAddress, type RegistrySnapshot,
+  readRegistry, type RegistryAddress, type RegistrySnapshot,
 } from './snapshot.ts';
 export {
   acquireLock, currentProcessId, ensurePrivateDir, FILE_NAME_RE, fileMode, fsyncDir, hasUnixModes, InsecurePermissionsError,

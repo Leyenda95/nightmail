@@ -35,18 +35,18 @@ test('initialize with the example params', async () => {
   const state: SidecarState = { initialized: null };
   const h = createHandlers(state);
   const res = (await h.initialize(initParams(), ctx())) as { protocolVersion: string; methods: string[] };
-  assert.equal(res.protocolVersion, '1.5');
+  assert.equal(res.protocolVersion, '2.0');
   assert.deepEqual(res.methods.sort(),
-    ['contract.findBonos', 'contract.hashes', 'contract.proveCall', 'contract.snapshot', 'initialize', 'ping',
+    ['chain.head', 'contract.findBonos', 'contract.hashes', 'contract.proveCall', 'contract.snapshot', 'initialize', 'ping',
       'wallet.balance', 'wallet.buyBono', 'wallet.close', 'wallet.faucet', 'wallet.open', 'wallet.registerDust', 'wallet.sync']);
   assert.ok(state.initialized);
 });
 
 test('initialize rejects another major version and accepts another minor one', async () => {
   const h = createHandlers({ initialized: null });
-  assert.equal(await code(h.initialize({ ...initParams(), protocolVersion: '2.0' }, ctx())), codes.PROTOCOL_MISMATCH);
-  assert.equal(await code(h.initialize({ ...initParams(), protocolVersion: '2.1' }, ctx())), codes.PROTOCOL_MISMATCH);
-  for (const minor of ['1.0', '1.9']) await createHandlers({ initialized: null }).initialize({ ...initParams(), protocolVersion: minor }, ctx());
+  assert.equal(await code(h.initialize({ ...initParams(), protocolVersion: '1.6' }, ctx())), codes.PROTOCOL_MISMATCH);
+  assert.equal(await code(h.initialize({ ...initParams(), protocolVersion: '3.0' }, ctx())), codes.PROTOCOL_MISMATCH);
+  for (const minor of ['2.0', '2.9']) await createHandlers({ initialized: null }).initialize({ ...initParams(), protocolVersion: minor }, ctx());
 });
 
 test('initialize rejects malformed params', async () => {

@@ -17,7 +17,6 @@ Commands:
     --hasta <N>    Instead of --free and --paid: N in total (half of each plan). Those already
                    issued with this key are counted without spending anything: use it to top up to N.
     --key-file <f> Key for the ids (default <operator data>/demo-seed.key; created if missing)
-  avanzar-ronda    Advances the registry round once (the demo's "button").
 
   --socket <f>     Payer socket (default <operator data>/payer.sock)
   --help           Show this help
@@ -32,7 +31,7 @@ export interface Io {
 }
 
 type Counts = Record<IssuePlan, number>;
-type Command = { name: "bonos"; counts: Counts; socket?: string; keyFile?: string } | { name: "avanzar-ronda"; socket?: string };
+type Command = { name: "bonos"; counts: Counts; socket?: string; keyFile?: string };
 
 /** Consecutive waits on one bono before giving up; consecutive failures (each may cost DUST) before stopping. */
 export const MAX_WAITS = 10;
@@ -75,11 +74,6 @@ export function parseCommand(argv: string[]): Command | "help" {
   if (values.help) return "help";
   const [name, ...rest] = positionals;
   if (rest.length) throw new Error(`unexpected: ${rest.join(" ")}`);
-  if (name === "avanzar-ronda") {
-    const extra = BONOS_ONLY.filter((option) => values[option] !== undefined);
-    if (extra.length) throw new Error(`avanzar-ronda does not accept ${extra.map((option) => `--${option}`).join(" or ")}`);
-    return { name, socket: values.socket };
-  }
   if (name !== "bonos") throw new Error(name ? `unknown command: ${name}` : "missing command");
   const counts = bonoCounts(values);
   if (counts.free + counts.paid === 0) throw new Error("no bonos to issue (the total is 0)");
@@ -88,7 +82,7 @@ export function parseCommand(argv: string[]): Command | "help" {
 
 const column = (word: string) => word.padEnd(10);
 
-type Payer = Pick<PayerClient, "health" | "issue" | "advanceRound">;
+type Payer = Pick<PayerClient, "health" | "issue">;
 type Outcome = Exclude<Step, { kind: "wait" }>;
 
 /** Requests one bono until the reply is something other than "wait". */
@@ -167,34 +161,6 @@ function report(step: Exclude<Outcome, { kind: "abort" }>, label: string, tally:
   }
 }
 
-async function advanceRound(payer: Payer, socket: string, io: Io): Promise<number> {
-  let reply;
-  try {
-    reply = await payer.advanceRound();
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    io.out(
-      code === "ENOENT" || code === "ECONNREFUSED"
-        ? `Could not connect to the payer at ${socket} (is it running?): the round has NOT advanced.`
-        : `Communication with the payer at ${socket} was lost: the round may have advanced, check it before repeating.`,
-    );
-    return 1;
-  }
-  const { status, body } = reply;
-  if (status === 200 && "status" in body) {
-    if (body.status === "advanced") return (io.out(body.round === null ? "Round advanced." : `Round advanced to ${body.round}.`), 0);
-    if (body.status === "unknown") {
-      const until = new Date(body.validUntil).toISOString();
-      io.out(`Sent with unknown outcome: it may land in a block until that time. Do not repeat it before ${until} without checking the round.`);
-    } else io.out(`Did not advance (${body.reason}).`);
-    return 1;
-  }
-  const error = "error" in body ? body.error : "?";
-  const maybe = status >= 500 ? " The round may have advanced anyway: check it before repeating." : "";
-  io.out(`The payer replied HTTP ${status} (${error}).${maybe}`);
-  return 1;
-}
-
 /** Runs the CLI and returns the exit code (0 ok, 1 something left undone, 2 bad usage). */
 export async function run(argv: string[], io: Io): Promise<number> {
   let command: Command | "help";
@@ -206,10 +172,6 @@ export async function run(argv: string[], io: Io): Promise<number> {
   }
   if (command === "help") return (io.out(USAGE), 0);
   try {
-    if (command.name === "avanzar-ronda") {
-      const socket = command.socket ?? payerSocketPath(io.config().dataDir);
-      return await advanceRound(payerClient(socket), socket, io);
-    }
     const { network, dataDir } = io.config();
     const socket = command.socket ?? payerSocketPath(dataDir);
     const keyFile = command.keyFile ?? path.join(dataDir, "demo-seed.key");

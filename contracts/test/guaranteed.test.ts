@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs';
 import * as ledger from '@midnightntwrk/ledger-v9';
 import { deploy, pc, Plan, PRICE, rand } from './sim.ts';
 
-const CIRCUITS = ['issueBono', 'buyBono', 'setPrice', 'createAlias', 'reserveMailbox', 'revealMailbox', 'advanceRound'];
+const CIRCUITS = ['issueBono', 'buyBono', 'setPrice', 'createAlias', 'registerMailbox'];
 /** Circuits whose transcript went through `partition` (and its `ckpt` check). */
 const partitioned = new Set<string>();
 
@@ -63,10 +63,7 @@ test('no fallible part: both branches of buyBono, setPrice and the other circuit
 
   assertAllGuaranteed('createAlias', await c.runFull('createAlias', { bono, j: 0n }, rand(), rand()));
   const m = c.mailbox('ana', bono, 0n);
-  assertAllGuaranteed('reserveMailbox', await c.runFull('reserveMailbox', { bono, j: 0n }, m.commit, c.view().round + 1n));
-  assertAllGuaranteed('advanceRound', await c.runFull('advanceRound', { opSk: c.opSk }));
-  await c.advanceRound();
-  assertAllGuaranteed('revealMailbox', await c.runFull('revealMailbox', {}, m.name, m.encPk, m.authPk, m.salt, m.slotNul, m.nameCipher));
+  assertAllGuaranteed('registerMailbox', await c.runFull('registerMailbox', { bono, j: 0n }, m.name, m.encPk, m.authPk, m.nameCipher));
 });
 
 test('issueBono goes ENTIRELY to the fallible part: all or nothing', async () => {

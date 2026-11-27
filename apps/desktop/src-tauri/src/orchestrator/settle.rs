@@ -1,26 +1,22 @@
 //! What the chain says about a slot, and how it is applied to the store. The chain wins, but only for what it can
-//! actually prove: an address with our keys (→ `used`) or our reservation (→ `reserved`). A spent nullifier with
-//! nothing attached, or a rejection the view does not explain, means an indexer contradicting the contract:
-//! `StaleState`, nothing burned. Outside `recover` (which sees the whole state and burns spent nullifiers with nothing
-//! attached), a slot is only burned in two cases the chain confirms: the mailbox name already belongs to another
-//! address, or the address on our nullifier has foreign keys.
+//! actually prove: an address with our keys (→ `used`). A spent nullifier with nothing attached, or a rejection the
+//! view does not explain, means an indexer contradicting the contract: `StaleState`, nothing burned. Outside `recover`
+//! (which sees the whole state and burns spent nullifiers with nothing attached), a slot is only burned when the
+//! chain confirms the address on our nullifier has foreign keys.
 
-use super::addresses::MailboxCtx;
-use super::chain::parse_round;
 use super::ports::{Chain, Issuer, Relayer};
 use super::{OrchError, Orchestrator, Result, bytes32, to_protocol_kind};
 use crate::crypto::{NAME_CIPHER_LENGTH, open_name};
-use crate::protocol::{AddressEntry, HashOp, PendingNameEntry};
+use crate::protocol::{AddressEntry, HashOp};
 use crate::store::{Address, Slot, SlotKey, SlotKind, SlotPatch, SlotStatus};
 
 /// Chain facts about a slot, from a single state read.
 #[derive(Debug, Default)]
 pub(crate) struct Facts {
-    pub round: u64,
+    /// Block time of the state read (Unix ms).
+    pub block_timestamp: u64,
     /// The address registered with the slot's nullifier.
     pub address: Option<AddressEntry>,
-    /// The slot's unrevealed reservation.
-    pub pending: Option<PendingNameEntry>,
     /// The mailbox name already belongs to another address.
     pub name_taken: bool,
     /// The nullifier is spent.
@@ -35,8 +31,7 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
         let address = view.address_by_nul(&nul).cloned();
         let name_taken = address.is_none() && name_key.is_some_and(|k| view.has_addr_key(k));
         Ok(Facts {
-            round: view.round,
-            pending: view.pending_by_nul(&nul).cloned(),
+            block_timestamp: view.block_timestamp,
             spent: view.nullifiers.contains(&nul),
             address,
             name_taken,
@@ -45,37 +40,14 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
 
     /// If the chain already has the result of an earlier proof, applies it to the store (`true`).
     pub(crate) async fn settled(&self, slot: &Slot, facts: &Facts) -> Result<bool> {
-        if let Some(entry) = &facts.address {
-            self.adopt(slot, entry).await?;
-            return Ok(true);
-        }
-        match &facts.pending {
-            Some(pending) if slot.status == SlotStatus::Reserving => {
-                self.to_reserved(slot, pending).await.map(|()| true)
-            }
-            _ => Ok(false),
-        }
+        let Some(entry) = &facts.address else { return Ok(false) };
+        self.adopt(slot, entry).await.map(|()| true)
     }
 
     /// After `slot-already-used`: the chain must explain it; otherwise `StaleState`.
     pub(crate) async fn settle_used(&self, slot: &Slot, name_key: Option<&str>) -> Result<()> {
         let facts = self.facts(slot, name_key).await?;
         if self.settled(slot, &facts).await? { Ok(()) } else { Err(OrchError::StaleState) }
-    }
-
-    /// Our reservation is on chain: `reserved` with its round. If the stored name does not match the commitment, it
-    /// is dropped (the app will ask: `NeedsName`).
-    async fn to_reserved(&self, slot: &Slot, pending: &PendingNameEntry) -> Result<()> {
-        let round = parse_round(&pending.reserved_round)?;
-        let keep_name = match &slot.pending_name {
-            Some(name) => {
-                let ctx: MailboxCtx = self.mailbox_ctx(slot, name).await?;
-                self.commit(&ctx).await? == pending.commit
-            }
-            None => true,
-        };
-        let (key, now) = (slot.key, self.now());
-        self.db(move |s| s.reconcile_reserved(key, round, keep_name, now)).await
     }
 
     pub(crate) async fn reconcile(&self, key: SlotKey, to: SlotStatus, patch: SlotPatch) -> Result<()> {

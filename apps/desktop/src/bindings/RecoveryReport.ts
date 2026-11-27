@@ -10,6 +10,6 @@ export type RecoveryReport = { bonos: number, addresses: number, burned: number,
  */
 conflicts: number, 
 /**
- * Mailboxes without a name (unrevealed reservation or unreadable name); ask the user (`Orchestrator::provide_name`).
+ * Mailboxes without a readable name; ask the user (`Orchestrator::provide_name`).
  */
 needsName: Array<SlotId>, };

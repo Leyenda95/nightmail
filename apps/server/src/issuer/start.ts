@@ -1,4 +1,4 @@
-// Startup of the Issuer, its upkeep and the RoundTicker, launched by operator-services.ts (alongside the relayer)
+// Startup of the Issuer and its upkeep, launched by operator-services.ts (alongside the relayer)
 // from bin/mail-server.ts.
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { Server } from 'node:http';
@@ -14,7 +14,6 @@ import { createIssuerServer, type IssuerApiDeps } from './issuer-api.ts';
 import { Issuer, type IssuerDeps } from './issuer.ts';
 import type { PayerClient } from './payer-client.ts';
 import { createReceiptSigner, receiptKeyFingerprint } from './receipt.ts';
-import { startRoundTicker, type RoundState } from './round-ticker.ts';
 import { IssuerStore } from './store.ts';
 import { startUpkeep } from './upkeep.ts';
 
@@ -28,7 +27,6 @@ export type IssuerConfig = {
   globalPerHour: number;
   /** Pending count at which new sign-ups get 503 busy. */
   maxPending: number;
-  maxAdvancesPerHour: number;
 };
 
 const DEMO = { captchaToken: 'nightmail-demo-captcha', cardToken: 'tok_nightmail_demo' };
@@ -51,7 +49,6 @@ export function loadIssuerConfig(env: Record<string, string | undefined>): Issue
     trustedProxy: parseFlag('NIGHTMAIL_ISSUER_TRUSTED_PROXY', env['NIGHTMAIL_ISSUER_TRUSTED_PROXY']),
     globalPerHour: integer('GLOBAL_PER_HOUR', 100),
     maxPending: integer('MAX_PENDING', 100),
-    maxAdvancesPerHour: integer('MAX_ADVANCES_PER_HOUR', 60),
   };
 }
 
@@ -73,8 +70,6 @@ export type StartIssuerOptions = {
   log: Logger;
   config: IssuerConfig;
   host?: string;
-  /** If given, starts the RoundTicker with it (in production, the round RegistrySync indexes: operator-services.ts). */
-  readRoundState?: () => Promise<RoundState>;
   /** Tests only: Issuer delay, sleep, clock and close timeout. */
   issuerOptions?: Partial<Pick<IssuerDeps, 'delayMs' | 'sleep' | 'now' | 'closeTimeoutMs'>>;
   apiOptions?: Partial<Pick<IssuerApiDeps, 'limits' | 'clientKey'>>;
@@ -122,14 +117,11 @@ export async function startIssuer(options: StartIssuerOptions): Promise<RunningI
   const port = await listen(server, db, config.port, options.host ?? '127.0.0.1');
   issuer.resume();
   const upkeep = startUpkeep({ store, log, warnPending: Math.ceil(config.maxPending / 2), ...(options.issuerOptions?.now && { now: options.issuerOptions.now }) });
-  const { readRoundState } = options;
-  const ticker = readRoundState && startRoundTicker({ payer, readRoundState, log, maxAdvancesPerHour: config.maxAdvancesPerHour });
   log.info(`issuer: listening on port ${port} (receipt key ${receiptKeyFingerprint(signer.publicKey)})`);
   return {
     port,
     issuer,
     close: async () => {
-      ticker?.stop();
       upkeep.stop();
       await new Promise<void>((resolve) => {
         server.close(() => resolve());

@@ -47,12 +47,10 @@ export function sameSuffixKey(key: Uint8Array): Uint8Array {
 /** Registry state with those addresses (everything else empty). */
 export function snapshotOf(addresses: RegistryAddress[]): RegistrySnapshot {
   return {
-    round: 0n,
     price: 100n,
     oldPrices: [],
     slotNullifiers: [],
     addresses: [...addresses].sort((a, b) => (a.addrKey < b.addrKey ? -1 : 1)),
-    pendingNames: [],
     bonos: { leafCount: 0n, root: 0n },
   };
 }

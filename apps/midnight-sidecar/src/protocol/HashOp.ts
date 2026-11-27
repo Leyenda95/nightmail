@@ -6,4 +6,4 @@ import type { Plan } from "./Plan.ts";
  * One `contract.hashes` operation. 32-byte values in hex; `name` is the mailbox name as typed by the user (the
  * sidecar normalises it, so the app and the server share a single normalisation).
  */
-export type HashOp = { "op": "idK", s: string, k: number, } | { "op": "leaf", id: string, plan: Plan, validUntil: number, } | { "op": "slotNul", s: string, kind: AddressKind, j: number, gen: number, } | { "op": "normalizeName", name: string, } | { "op": "addrKey", name: string, } | { "op": "aliasAddrKey", encPk: string, authPk: string, slotNul: string, } | { "op": "commit", addrKey: string, encPk: string, authPk: string, salt: string, slotNul: string, } | { "op": "aliasAddress", addrKey: string, };
+export type HashOp = { "op": "idK", s: string, k: number, } | { "op": "leaf", id: string, plan: Plan, validUntil: number, } | { "op": "slotNul", s: string, kind: AddressKind, j: number, gen: number, } | { "op": "normalizeName", name: string, } | { "op": "addrKey", name: string, } | { "op": "aliasAddrKey", encPk: string, authPk: string, slotNul: string, } | { "op": "aliasAddress", addrKey: string, };

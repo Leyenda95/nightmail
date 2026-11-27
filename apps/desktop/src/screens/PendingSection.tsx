@@ -9,7 +9,6 @@ import { Icon } from '../components/Icon.tsx';
 import { Progreso } from '../components/Progreso.tsx';
 import {
   actionLabels,
-  needsName,
   passBusy,
   pendingButton,
   pendingParts,
@@ -18,12 +17,10 @@ import {
   stillPendingText,
   type PendingActions,
 } from '../pending.ts';
-import { slotKindName } from '../format.ts';
 import { progressParts } from '../progress.ts';
 import { t } from '../i18n/index.ts';
 import type { CoreEvents } from '../useCoreEvents.ts';
 import { ErrorAviso } from './common.tsx';
-import { ProvideName } from './ProvideName.tsx';
 import { useAction } from './useAction.ts';
 
 const SMALL = 'button button-small nm-btn';
@@ -50,12 +47,10 @@ function AbandonDialog({ onYes, onNo }: { onYes: () => void; onNo: () => void })
 interface RowProps {
   p: PendingSlot;
   events: CoreEvents;
-  /** "@domain" for the missing name, if known. */
-  suffix?: string;
   onChanged: () => void;
 }
 
-function PendingRow({ p, events, suffix, onChanged }: RowProps) {
+function PendingRow({ p, events, onChanged }: RowProps) {
   const [op, setOp] = useState<number | null>(null);
   const [confirming, setConfirming] = useState(false);
   const { busy, error, code, run } = useAction();
@@ -65,12 +60,7 @@ function PendingRow({ p, events, suffix, onChanged }: RowProps) {
   const { who, what, stage, stopped, state } = pendingParts(p);
   const labels = actionLabels(what);
 
-  // The name form stays while its action lasts: on saving it, the row switches to "en proceso" before it
-  // finishes, and if it vanished its "Comprobando..." and its error would be lost.
-  const [naming, setNaming] = useState(false);
-  const showName = (needsName(p) && !p.inProgress) || naming;
-
-  // If what had focus disappears (the row switches to "en proceso" after "Reintentar", or the name form closes), focus would
+  // If what had focus disappears (the row switches to "en proceso" after "Reintentar"), focus would
   // go to the top of the page: it is moved to the step line. Only if that is gone and focus has not gone elsewhere.
   // A click on a slot (focus goes nowhere with the button still set) forgets it.
   const statusRef = useRef<HTMLDivElement>(null);
@@ -87,7 +77,7 @@ function PendingRow({ p, events, suffix, onChanged }: RowProps) {
     if (!gone || (active !== null && active !== document.body)) return;
     lastFocused.current = null;
     statusRef.current?.focus();
-  }, [actions.resume, actions.retry, actions.abandon, showName]);
+  }, [actions.resume, actions.retry, actions.abandon]);
 
   // Busy does not disable the buttons (focus would be lost): each handler carries its guard.
   // After any end (an error too) the list is re-read: the slot may have changed step.
@@ -168,12 +158,6 @@ function PendingRow({ p, events, suffix, onChanged }: RowProps) {
           </button>
         )}
       </div>
-      {showName && (
-        <div className="nm-filas__ancho nm-pila" onFocus={remember} onBlur={forget}>
-          <p className="nm-suave">{t().screensPlan.nameNotRead}</p>
-          <ProvideName slot={p.slot} label={t().screensPlan.nameOf(slotKindName(p.slot))} suffix={suffix} onBusy={setNaming} onDone={onChanged} />
-        </div>
-      )}
       {(shown || error) && (
         <div className="nm-filas__ancho nm-pila">
           {shown && <Progreso stage={shown.stage} note={shown.note ?? undefined} />}
@@ -189,14 +173,12 @@ function PendingRow({ p, events, suffix, onChanged }: RowProps) {
 interface Props {
   events: CoreEvents;
   reloadKey: number;
-  /** "@domain" for the missing name of a mailbox, if known. */
-  suffix?: string;
   onChanged: () => void;
   /** The list after each read, or `null` if it could not be read (the menu label and the `resume` notice). */
   onList: (list: readonly PendingSlot[] | null) => void;
 }
 
-export function PendingSection({ events, reloadKey, suffix, onChanged, onList }: Props) {
+export function PendingSection({ events, reloadKey, onChanged, onList }: Props) {
   const [pending, setPending] = useState<PendingSlot[]>([]);
 
   // Without Midnight there is nothing to do with them: a failure reading the list only hides it. Reads may
@@ -229,7 +211,7 @@ export function PendingSection({ events, reloadKey, suffix, onChanged, onList }:
       </div>
       <ul className="nm-filas">
         {pending.map((p) => (
-          <PendingRow key={slotKey(p.slot)} p={p} events={events} suffix={suffix} onChanged={changed} />
+          <PendingRow key={slotKey(p.slot)} p={p} events={events} onChanged={changed} />
         ))}
       </ul>
     </section>

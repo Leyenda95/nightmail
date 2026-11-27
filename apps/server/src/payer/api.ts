@@ -5,7 +5,6 @@
 //   GET  /health                               readiness, DUST coins and balance, queue, lost fees
 //   POST /relay          { tx: hex }           pays for and submits a client-proved transaction
 //   POST /issue          { id: hex32, plan }   issues a `bono` leaf (idempotent per id)
-//   POST /advance-round  {}                    advances the registry round
 //
 // JSON only, size-capped, with exactly each route's fields. Errors are fixed codes (`{ error }`): SDK or
 // exception messages never leave the process (only the error type is logged).
@@ -18,7 +17,7 @@ import { ensurePrivateDir } from '../wallet/storage.ts';
 import { ISSUE_PLANS, type IssuePlan } from './journal.ts';
 import type { Payer, PayerError, PayerLog } from './payer.ts';
 
-export type PayerOps = Pick<Payer, 'health' | 'relay' | 'issue' | 'advanceRound'>;
+export type PayerOps = Pick<Payer, 'health' | 'relay' | 'issue'>;
 
 export type ApiError = {
   error: 'bad-request' | 'not-found' | 'method-not-allowed' | 'payload-too-large' | 'unsupported-media-type' | 'not-ready' | 'internal';
@@ -107,7 +106,6 @@ const ROUTES: Record<string, Handler> = {
     if (!input || !HEX32.test(input.id) || !ISSUE_PLANS.includes(input.plan as IssuePlan)) return BAD_REQUEST;
     return replyOf(await payer.issue(input.id, input.plan as IssuePlan));
   },
-  '/advance-round': async (payer, body) => (fields(body, []) ? replyOf(await payer.advanceRound()) : BAD_REQUEST),
 };
 
 async function post(req: IncomingMessage, handler: Handler, payer: PayerOps | undefined): Promise<Reply> {

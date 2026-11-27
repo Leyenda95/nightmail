@@ -162,50 +162,6 @@ describe("bonos", () => {
   });
 });
 
-describe("avanzar-ronda", () => {
-  it("advances and reports the new round", async () => {
-    assert.equal(await seed("avanzar-ronda"), 0);
-    assert.equal(payer.advances, 1);
-    assert.deepEqual(out, ["Round advanced to 9."]);
-  });
-
-  it("if it advanced without being able to read the round, it is still a success", async () => {
-    payer.advance = { status: "advanced", round: null, txHash: "cd" };
-    assert.equal(await seed("avanzar-ronda"), 0);
-    assert.deepEqual(out, ["Round advanced."]);
-  });
-
-  it("unknown outcome: do not repeat before the time the payer gives", async () => {
-    payer.advance = { status: "unknown", txHash: "cd", validUntil: Date.UTC(2026, 10, 22, 10, 30) };
-    assert.equal(await seed("avanzar-ronda"), 1);
-    assert.match(out[0]!, /unknown outcome.*Do not repeat it before 2026-11-22T10:30:00\.000Z/);
-  });
-
-  it("did not advance", async () => {
-    payer.advance = { status: "failed", reason: "rejected" };
-    assert.equal(await seed("avanzar-ronda"), 1);
-    assert.deepEqual(out, ["Did not advance (rejected)."]);
-  });
-
-  it("a payer error does not guarantee nothing was paid", async () => {
-    payer.advance = { error: "internal" };
-    assert.equal(await seed("avanzar-ronda"), 1);
-    assert.match(out[0]!, /HTTP 500 \(internal\).*may have advanced/s);
-  });
-
-  it("without a payer (no socket), says it did NOT connect and the round did not advance", async () => {
-    assert.equal(await seed("avanzar-ronda", "--socket", path.join(payer.dir, "no-hay.sock")), 1);
-    assert.match(out[0]!, /Could not connect to the payer at .*no-hay\.sock .*the round has NOT advanced/);
-  });
-
-  it("if the connection is cut midway, the round may have advanced", async () => {
-    payer.advance = "cut";
-    assert.equal(await seed("avanzar-ronda"), 1);
-    assert.equal(payer.advances, 1);
-    assert.match(out[0]!, /lost: the round may have advanced/);
-  });
-});
-
 describe("usage", () => {
   for (const argv of [
     [],
@@ -216,13 +172,12 @@ describe("usage", () => {
     ["bonos", "--nada"],
     ["bonos", "--hasta", "0"],
     ["bonos", "--hasta", "10", "--free", "3"],
-    ["avanzar-ronda", "--free", "3"],
-    ["avanzar-ronda", "--key-file", "k"],
+    ["avanzar-ronda"], // removed: mailboxes no longer wait for rounds
   ]) {
     it(`bad usage (${argv.join(" ") || "nothing"}) gives 2 and the help, without calling the payer`, async () => {
       assert.equal(await seed(...argv), 2);
       assert.match(out.join("\n"), /Usage: /);
-      assert.equal(payer.issues.length + payer.advances, 0);
+      assert.equal(payer.issues.length, 0);
     });
   }
 

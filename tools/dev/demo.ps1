@@ -23,9 +23,11 @@ param(
     [string]$RepoRoot = ''
 )
 
-# Prebuilt app (debug build from build.ps1) published with the release, pinned by its SHA-256.
-$AppUrl = 'https://github.com/Leyenda95/nightmail/releases/download/v0.1.0-alpha/nightmail-desktop-windows-x64.exe'
-$AppSha256 = '8F54842C7572AE332618E5BBB425FEC74112B9FF7926CE09066A62D1CC15A925'
+# Prebuilt app (debug build from build.ps1) published with the release, pinned by its SHA-256. None is pinned for
+# this version: the v0.1.0-alpha app was built for the previous contract (round-based mailboxes) and cannot create
+# mailboxes on this one. Set both when a release for this contract is published.
+$AppUrl = ''
+$AppSha256 = 'TO_BE_FILLED_AT_RELEASE'
 
 if (-not $RepoRoot) { $RepoRoot = Join-Path $PSScriptRoot '..\..' }
 $Repo = (Resolve-Path $RepoRoot).Path
@@ -263,6 +265,12 @@ if ($Build) {
     $appFrom = 'build'
 } elseif (Test-Path $BuiltExe) {
     Ok 'app' "built here on $((Get-Item $BuiltExe).LastWriteTime.ToString('yyyy-MM-dd HH:mm')): $BuiltExe (-Build to build it again)"
+    # An app older than the contract or core sources may not match the contract the backend deploys.
+    $built = (Get-Item $BuiltExe).LastWriteTime
+    $newer = @('contracts\src', 'apps\desktop\src-tauri\src', 'apps\midnight-sidecar\src') |
+        ForEach-Object { Get-ChildItem (Join-Path $Repo $_) -Recurse -File -ErrorAction SilentlyContinue } |
+        Where-Object { $_.LastWriteTime -gt $built } | Select-Object -First 1
+    if ($newer) { Note 'app' "older than the sources ($($newer.Name) changed later): run with -Build to rebuild it" }
     $appFrom = 'built'
 } elseif (Test-AppHash $DownloadedExe) {
     Ok 'app' "downloaded before: $DownloadedExe"

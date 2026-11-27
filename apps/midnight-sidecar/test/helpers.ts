@@ -88,7 +88,7 @@ export function fakeChain(chain: FakeChain): FakeRequest[] {
 
 // --- contract.proveCall ---------------------------------------------------------------------------
 
-export const PROVABLE = ['createAlias', 'reserveMailbox', 'revealMailbox'] as const;
+export const PROVABLE = ['createAlias', 'registerMailbox'] as const;
 export type Provable = (typeof PROVABLE)[number];
 
 /**

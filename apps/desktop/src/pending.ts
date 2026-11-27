@@ -7,8 +7,7 @@ import type { SlotId } from './bindings/SlotId.ts';
 import { slotKindName, slotLabel } from './format.ts';
 import { t } from './i18n/index.ts';
 
-// "revelar" is never said. The second step of a mailbox is "activar" the name (the texts of each
-// step are in `t().status.pending.stage`).
+// The text of the step a half-done slot is at is in `t().status.pending.stage`.
 
 /** The buttons of a half-done slot row. */
 export interface PendingActions {
@@ -17,18 +16,13 @@ export interface PendingActions {
   readonly abandon: boolean;
 }
 
-/** A mailbox with no name (a restored reservation whose name could not be read): the core does not resume it until one is typed. */
-export const needsName = (p: PendingSlot): boolean => p.slot.kind === 'mailbox' && p.name === null;
-
 /** What the user can do with a half-done slot (the core checks again). */
 export function pendingActions(p: PendingSlot): PendingActions {
   // While an operation is driving it (being created or resumed), nothing has failed yet and the operation has the
   // turn: neither retry nor abandon. With nothing running, what remains is there because it failed or was cut off:
   // `resume_paused_slot` only helps after the attempt cap is exhausted; if it is not paused, everything pending
   // is retried (`resume_now`). `abandon_slot`, when the core would already allow it (`abandonable`).
-  // A mailbox with no name continues with no button: what is missing is the name (the row carries its form).
   if (p.inProgress) return { resume: false, retry: false, abandon: false };
-  if (needsName(p)) return { resume: false, retry: false, abandon: p.abandonable };
   return { resume: p.paused, retry: !p.paused, abandon: p.abandonable };
 }
 
@@ -92,21 +86,16 @@ type CallProblem = Extract<OrchError, { code: 'callRejected' }>['reason'];
 type SlotKind = PendingSlot['slot']['kind'];
 
 /** Contract rejections, with a clearer reason than "rechazado por Midnight" when there is one. A complete table, like
- *  `stopReasons`. "address-taken" only comes from `revealMailbox`, and `reveal` resolves it by looking at the chain on the next
- *  pass (today it does not stop the row). Its text stays in case that changes, and depends on the slot kind. */
+ *  `stopReasons`. "address-taken" only comes from `registerMailbox`, and the core then frees the slot (it does not stop
+ *  the row). Its text stays in case that changes, and depends on the slot kind. */
 function stopCalls(): Record<CallProblem, string | Record<SlotKind, string>> {
   const { stopReason: reason, stopCall: call } = t().status.pending;
   return {
     'not-a-bono': call.notABono,
     'no-slots-left': call.noSlotsLeft,
-    'wrong-reveal': call.wrongReveal,
     'address-taken': { mailbox: reason.nameTaken, alias: reason.aliasSuffixTaken },
-    // They clear by themselves: they never stop a row.
-    'stale-round': reason.callRejected,
-    'too-early': reason.callRejected,
     // Nothing better to say.
     'slot-already-used': reason.callRejected,
-    'not-reserved': reason.callRejected,
     'wrong-token': reason.callRejected,
     'wrong-amount': reason.callRejected,
     'old-price-expired': reason.callRejected,
@@ -128,7 +117,7 @@ export function pendingParts(p: PendingSlot): { who: string; what: string; stage
   const words = t().status.pending;
   const who = p.slot.kind === 'mailbox' && p.name ? words.mailboxNamed(p.name) : slotLabel(p.slot);
   const what = p.slot.kind === 'mailbox' && p.name ? who : slotKindName(p.slot);
-  const stage = words.stage[p.stage][p.slot.kind];
+  const stage = words.stage[p.slot.kind];
   return { who, what, stage: stage.charAt(0).toUpperCase() + stage.slice(1), stopped: p.stopped, state: rowState(p) };
 }
 

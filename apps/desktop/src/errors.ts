@@ -57,8 +57,6 @@ function simple(): Record<Exclude<Code, Parametric>, ErrorText> {
   return t().errors.simple;
 }
 
-/** The only rejections that clear by themselves (the contract's round advances); the others repeat the same, so retrying is not suggested. */
-const CALL_CLEARS: readonly unknown[] = ['stale-round', 'too-early'];
 /** Reasons the wallet gives BEFORE building a payment. `not-open` can also come when saving, after sending. */
 const WALLET_BEFORE_PAYING: readonly unknown[] = ['already-open', 'in-use', 'not-synced'];
 
@@ -104,11 +102,8 @@ const PARAMETRIC: { [C in Parametric]: (e: ByCode<C>) => ErrorParts } = {
   callRejected: (e) => {
     const { errors } = t();
     const problems: Record<ByCode<'callRejected'>['reason'], string> = errors.callRejected.problem;
-    return parts(
-      errors.callRejected.what(pick(problems, e.reason, problems.other)),
-      null,
-      CALL_CLEARS.includes(e.reason) ? errors.retrySoon : null,
-    );
+    // A contract rejection repeats the same, so retrying is not suggested.
+    return parts(errors.callRejected.what(pick(problems, e.reason, problems.other)), null, null);
   },
   rateLimited: (e) => {
     const text = t().errors.rateLimited;

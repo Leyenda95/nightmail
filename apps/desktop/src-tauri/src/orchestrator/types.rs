@@ -16,7 +16,7 @@ use crate::store::{Address, SlotKey, SlotKind, StoreError};
 pub enum OrchError {
     /// The sidecar does not start or answer, or the indexer/proof server still do not answer after retrying.
     MidnightUnavailable,
-    /// Sidecar protocol minor < 1.5, or missing the `wallet.*` methods.
+    /// Sidecar protocol older than the core's (a lower minor than `PROTOCOL_VERSION`), or missing a required method.
     SidecarTooOld,
     /// The app and the deployed contract do not match (neutral wording: "check for an update").
     ContractMismatch,
@@ -125,10 +125,6 @@ pub enum Progress {
     ServerUnreachable,
     /// The wallet has no DUST for the fee yet: waiting for its NIGHT to generate it.
     WaitingDust,
-    WaitingRound {
-        #[ts(type = "number")]
-        round: u64,
-    },
     /// The saved wallet state could not be used; syncing from scratch (this will take a while).
     WalletStateDiscarded,
     AddressReady,

@@ -128,12 +128,12 @@ async function collect(source: AsyncIterable<ActionNotice>): Promise<ActionNotic
 }
 
 test('the subscription asks only for what it needs, from the given height, and delivers the actions in order', async () => {
-  const indexer = await indexerWith({ actions: [action(5, 'ContractDeploy', null), action(6, 'ContractCall', 'advanceRound'), action(6)], then: 'complete' });
+  const indexer = await indexerWith({ actions: [action(5, 'ContractDeploy', null), action(6, 'ContractCall', 'setPrice'), action(6)], then: 'complete' });
   const source = contractActionSource(indexer.url(), ADDRESS);
   const notices = await collect(source(5, new AbortController().signal, noop));
   assert.deepEqual(notices, [
     { height: 5, hash: HASH, entryPoint: null },
-    { height: 6, hash: HASH, entryPoint: 'advanceRound' },
+    { height: 6, hash: HASH, entryPoint: 'setPrice' },
     { height: 6, hash: HASH, entryPoint: 'createAlias' },
   ]);
   assert.deepEqual(indexer.protocols, ['graphql-transport-ws']);

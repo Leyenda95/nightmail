@@ -11,7 +11,7 @@ use super::ports::{Chain, Issuer, Relayer};
 use super::{OrchError, Orchestrator, Progress, Result};
 use crate::protocol::{
     AddressEntry, CallProblem, CallRejectedData, ContractFindBonosParams, ContractHashesParams, ContractSnapshot,
-    ContractSnapshotParams, HashOp, InsufficientFundsData, NameRejectedData, PendingNameEntry, StaleProblem,
+    ContractSnapshotParams, HashOp, InsufficientFundsData, NameRejectedData, StaleProblem,
     StaleStateData, WalletUnavailableData, codes,
 };
 use crate::rpc::RpcError;
@@ -66,19 +66,13 @@ pub(crate) struct ChainView {
     pub block_height: u32,
     /// Unix ms.
     pub block_timestamp: u64,
-    pub round: u64,
     pub nullifiers: HashSet<String>,
     pub addresses: Vec<AddressEntry>,
-    pub pending: Vec<PendingNameEntry>,
 }
 
 impl ChainView {
     pub fn address_by_nul(&self, slot_nul: &str) -> Option<&AddressEntry> {
         self.addresses.iter().find(|a| a.slot_nul == slot_nul)
-    }
-
-    pub fn pending_by_nul(&self, slot_nul: &str) -> Option<&PendingNameEntry> {
-        self.pending.iter().find(|p| p.slot_nul == slot_nul)
     }
 
     pub fn has_addr_key(&self, addr_key: &str) -> bool {
@@ -88,16 +82,30 @@ impl ChainView {
     fn absorb(&mut self, page: ContractSnapshot) -> Result<()> {
         self.block_height = page.block_height;
         self.block_timestamp = page.block_timestamp;
-        self.round = parse_round(&page.round)?;
         self.nullifiers.extend(page.slot_nullifiers);
         self.addresses.extend(page.addresses);
-        self.pending.extend(page.pending_names);
         Ok(())
     }
 }
 
-pub(crate) fn parse_round(text: &str) -> Result<u64> {
-    text.parse().map_err(|_| OrchError::Internal)
+/// Midnight block slot (AURA), in seconds: one block per slot, timed at the slot's start. The contract sees block time
+/// in whole seconds.
+pub(crate) const SLOT_S: u64 = 6;
+
+/// Slot of a block time in Unix ms.
+pub(crate) fn slot_of(ms: u64) -> u64 {
+    ms / (SLOT_S * 1000)
+}
+
+/// How far the node's latest block may be ahead of the indexer's (which follows finalized blocks, measured ~15-20 s
+/// behind) for the node to be believed. A node further ahead, or behind the indexer, is lagging, on another chain or
+/// lying: the core then waits for the indexer instead. This bounds what a lying node can do: a wait at most this much
+/// longer.
+pub(crate) const HEAD_AHEAD_MAX_MS: u64 = 45_000;
+
+/// Is the node's block time `head_ms` believable against the indexer's `indexer_ms`?
+pub(crate) fn plausible_head(head_ms: u64, indexer_ms: u64) -> bool {
+    head_ms >= indexer_ms && head_ms - indexer_ms <= HEAD_AHEAD_MAX_MS
 }
 
 impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
@@ -260,7 +268,7 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
         .await
     }
 
-    /// Minimal first page: height, round, price.
+    /// Minimal first page: height, block time, price.
     pub(crate) async fn head(&self) -> Result<ContractSnapshot> {
         self.snapshot_page(None, Some(1)).await?.ok_or(OrchError::Internal)
     }
@@ -305,9 +313,32 @@ impl<C: Chain, I: Issuer, R: Relayer> Orchestrator<C, I, R> {
         self.wait_head(|h| h.block_height > height).await.map(drop)
     }
 
-    /// Waits for the round to move past `round` (mailbox reveal).
-    pub(crate) async fn wait_round_above(&self, round: u64) -> Result<()> {
-        self.emit(Progress::WaitingRound { round });
-        self.wait_head(|h| parse_round(&h.round).is_ok_and(|r| r > round)).await.map(drop)
+    /// The node's latest block time (Unix ms, `chain.head`) if it answers and is believable against the indexer's
+    /// block time `indexer_ms` ([`plausible_head`]); otherwise `None` and the caller uses the indexer. If the node is
+    /// further ahead than allowed, `indexer_ms` may just be old (read before a wait): it is read again once.
+    pub(crate) async fn node_head(&self, indexer_ms: &mut u64) -> Option<u64> {
+        let head = self.d.chain.head().await.ok()?.timestamp;
+        if plausible_head(head, *indexer_ms) {
+            return Some(head);
+        }
+        if head > *indexer_ms {
+            let fresh = self.head().await.ok()?.block_timestamp;
+            *indexer_ms = (*indexer_ms).max(fresh);
+        }
+        plausible_head(head, *indexer_ms).then_some(head)
+    }
+
+    /// Before another proof for a slot that already sent one: waits (capped) until the indexer shows the block the
+    /// node had when this was called, so a proof sent earlier that landed (the relayer answers once it is in a block,
+    /// before the indexer, which follows finalized blocks, shows it) is seen instead of being proved again, which the
+    /// node would reject. Without a believable node block time it returns at once: the caller reads the chain as
+    /// before.
+    pub(crate) async fn catch_up_with_node(&self) -> Result<()> {
+        let mut indexer_ms = self.head().await?.block_timestamp;
+        let Some(head) = self.node_head(&mut indexer_ms).await else { return Ok(()) };
+        if indexer_ms >= head {
+            return Ok(());
+        }
+        self.wait_head(|h| h.block_timestamp >= head).await.map(drop)
     }
 }

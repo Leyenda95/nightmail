@@ -1,5 +1,5 @@
-// The real payer process on devnet, driven only over its Unix socket as the server does: issue,
-// advance-round and relay. Needs the devnet running, contracts compiled with keys and the service
+// The real payer process on devnet, driven only over its Unix socket as the server does: issue
+// and relay. Needs the devnet running, contracts compiled with keys and the service
 // payer stopped; leaves a new `bono` and alias on every run.
 // Run only this one: cd apps/server && node --max-old-space-size=4096 --test --test-concurrency=1
 //   --test-timeout=3600000 test-devnet/payer.devnet.ts
@@ -161,15 +161,6 @@ test('issue: issues the leaf for the id, a repeat does not issue another (alread
   assert.equal((await view()).bonos.firstFree(), before + 1n);
 });
 
-test('advance-round: advances the registry round', async () => {
-  const before: bigint = (await view()).round;
-  const advanced = await timed('advance-round', () => client.advanceRound());
-  assert.equal(advanced.status, 200, JSON.stringify(advanced.body));
-  const result = advanced.body as { status: string; round: number; txHash: string };
-  assert.deepEqual([result.status, result.round], ['advanced', Number(before) + 1], JSON.stringify(result));
-  assert.equal((await view()).round, before + 1n);
-});
-
 test('relay: a client call goes entirely into the guaranteed part, with a broken PROOF the node rejects it with no fee', async () => {
   // The relayer does not verify the proof locally; the node does, for free, as long as the call has no
   // fallible transcript. Another slot (j = 1) so the rejection is not caused by a used slot.
@@ -239,10 +230,16 @@ test('relay: pays for a createAlias the client proved with the issued bono, the 
   const v = await view();
   assert.equal(v.slotNullifiers.member(nul), true, 'the slot is spent');
   assert.equal(v.addresses.member(aliasAddrKey(alias.encPk, alias.authPk, nul)), true, 'and the address registered');
-  const health = (await client.health()).body as any;
+  // The payer answers once the tx is in a block and accounts it when final (in the background): wait for that.
+  let health: any;
+  for (let i = 0; i < 60; i++, await sleep(1000)) {
+    health = (await client.health()).body;
+    if (health.queueLength === 0 && BigInt(health.dustSpentLastHour.relay) > spentBefore) break;
+  }
   const paid = BigInt(health.dustSpentLastHour.relay) - spentBefore;
   timings.push(`${'relay fee (DUST)'.padEnd(34)} ${(Number(paid) / 1e15).toFixed(4)}`);
   assert.ok(paid > 0n, 'what was paid counts toward the hourly cap');
+  assert.equal(health.earlyAnswersWrong, 0, 'the early answer matched the final result');
 });
 
 test('relay: the same transaction again → the node rejects it before the block (no fee), with its code', async () => {

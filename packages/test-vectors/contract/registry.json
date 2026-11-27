@@ -6,7 +6,6 @@
     "k": "1",
     "encPk": "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
     "authPk": "a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7",
-    "salt": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
     "operatorSk": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
     "name": "juan.perez (UTF-8, zero-padded to 64 bytes)",
     "mailboxSlot": "3",
@@ -36,6 +35,5 @@
   "slotNullifierAlias3": "5f1cf3b9e2515b8b450a241d37d988943a89fae05b1cd4d78b8a7956adee403e",
   "slotNullifierMailbox3Gen1": "ba294c2dfe8ef1ea8c1d4d6ad6664f474aa4961c04606a6fd6a84307d100eba5",
   "addressKey": "621068aeef170d87aab62215f32c563c6ef3d198cf39b86a0fb109c4d2046c54",
-  "aliasKey": "8b1353356240f350c37992b8f2e30229039937485f6ef9a8c764994702ae7979",
-  "nameCommit": "2ca50a6c52377d4da657691710fdcd2c9f37473a0f261ce874acf78b00f4f855"
+  "aliasKey": "8b1353356240f350c37992b8f2e30229039937485f6ef9a8c764994702ae7979"
 }

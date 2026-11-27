@@ -7,7 +7,7 @@
 import { relayProblem } from '../chain/relayable.ts';
 
 /** Circuits a user calls through the relayer (the rest are operator-only or paid with tokens). */
-export const RELAYABLE_CIRCUITS = ['reserveMailbox', 'revealMailbox', 'createAlias'] as const;
+export const RELAYABLE_CIRCUITS = ['registerMailbox', 'createAlias'] as const;
 
 /**
  * Allowed intent ttl relative to now. The app sets "(time of the last read block + 30 min) rounded down to
