@@ -75,8 +75,8 @@ test('en progress: every stage has an English heading, and the same notes as Spa
 });
 
 test('en pending rows: stage, state and stop reasons', () => {
-  assert.deepEqual(pendingParts(slot({})), { who: 'mailbox ana', what: 'mailbox ana', stage: 'Reserving the name', stopped: false, state: 'in progress' });
-  assert.equal(pendingParts(slot({ slot: { n: 1, kind: 'alias', j: 2 }, name: null })).stage, 'Reserving');
+  assert.deepEqual(pendingParts(slot({})), { who: 'mailbox ana', what: 'mailbox ana', stage: 'Creating the mailbox', stopped: false, state: 'in progress' });
+  assert.equal(pendingParts(slot({ slot: { n: 1, kind: 'alias', j: 2 }, name: null })).stage, 'Creating the alias');
   assert.equal(pendingParts(slot({ stopped: true, paused: true, stopReason: { code: 'attemptsExhausted' } })).state, 'stopped: after several unsuccessful attempts');
   assert.equal(inProcessText(), 'in progress');
   assert.equal(stoppedText(), 'stopped');

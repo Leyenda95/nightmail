@@ -25,7 +25,7 @@ param(
 
 # Prebuilt app (debug build from build.ps1) published with the release, pinned by its SHA-256.
 $AppUrl = 'https://github.com/Leyenda95/nightmail/releases/download/v0.1.1-alpha/nightmail-desktop-windows-x64.exe'
-$AppSha256 = 'E6CF82CBAC9ADDA53664BCB23529FE5131A9B7FDABF7D68DF555578AC78CB903'
+$AppSha256 = '47D88313160E52EFC36315BB0F84CC6703448575790995FC32E67B5E9EE9236D'
 
 if (-not $RepoRoot) { $RepoRoot = Join-Path $PSScriptRoot '..\..' }
 $Repo = (Resolve-Path $RepoRoot).Path

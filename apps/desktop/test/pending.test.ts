@@ -72,7 +72,7 @@ test('pendingParts: who, stage (capitalized heading), whether it is stopped and 
   assert.deepEqual(pendingParts(slot({ name: 'juan.perez' })), {
     who: 'buzón juan.perez',
     what: 'buzón juan.perez',
-    stage: 'Reservando el nombre',
+    stage: 'Creando el buzón',
     stopped: false,
     state: inProcessText(),
   });
@@ -80,7 +80,7 @@ test('pendingParts: who, stage (capitalized heading), whether it is stopped and 
   assert.deepEqual(pendingParts(exhausted), {
     who: 'alias en creación',
     what: 'alias',
-    stage: 'Reservando',
+    stage: 'Creando el alias',
     stopped: true,
     state: 'detenido: tras varios intentos sin éxito',
   });

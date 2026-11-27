@@ -62,7 +62,7 @@ export default {
   // pending.ts
   pending: {
     // Lowercase: `pendingParts` capitalises the headline.
-    stage: { mailbox: 'reservando el nombre', alias: 'reservando' },
+    stage: { mailbox: 'creando el buzón', alias: 'creando el alias' },
     button: { resume: RESUME, retry: RETRY },
     inProcess: 'en proceso',
     stopped: 'detenido',

@@ -75,7 +75,7 @@ NightMail runs on a local Midnight network in Docker.
 
 ### Windows
 
-You need Git, Node.js 24 and Docker Desktop (running, or it is started for you).
+You need Git, Node.js 24 (24.12.0 or later) and Docker Desktop (running, or it is started for you).
 
 ```powershell
 git clone https://github.com/Leyenda95/nightmail.git
@@ -91,7 +91,7 @@ Alternative with WSL (Ubuntu) instead of the backend in Docker: clone to `C:\nig
 
 ### Linux or WSL
 
-You need Git, Node.js 24 and Docker.
+You need Git, Node.js 24 (24.12.0 or later) and Docker.
 
 ```bash
 git clone https://github.com/Leyenda95/nightmail.git
@@ -138,7 +138,7 @@ For what is in progress and planned, see [Project status](#project-status).
 | **Desktop app** | `apps/desktop` ([Tauri](https://tauri.app): Rust core and React interface) | The core stores your keys encrypted with your password, downloads and decrypts mail, keeps it in an encrypted database, and signs and encrypts what you send. The interface only displays and has no access to the network or to files. |
 | **Midnight helper process** | `apps/midnight-sidecar` (Node and TypeScript) | Launched by the app, it talks to it over standard input and output, opening no ports. It reads the contract state, builds the zero-knowledge proofs with the local proof server and runs the wallet used to pay for the plan. It stores nothing in the clear: the app gives it the wallet seed and the key that encrypts the wallet state it saves. While the wallet is open, its keys are in the helper's memory. |
 | **Shared packages** | `packages/core-ts`, `packages/midnight`, `packages/test-vectors` | Server-side cryptography (mailbox encryption, signatures, the mail format between addresses), contract utilities (the same calculations as the chain) and test vectors shared by Rust and TypeScript so both implementations match byte for byte. |
-| **Tools** | `tools/dev`, `tools/demo-mailer`, `tools/demo-seed`, `infra/devnet` | Scripts to start, build and open the app, sample mail over SMTP, demo network setup and the local Midnight network in Docker (node, indexer and proof server). |
+| **Tools** | `tools/dev`, `tools/demo-mailer`, `tools/demo-seed`, `infra/devnet`, `infra/backend` | Scripts to start, build and open the app, sample mail over SMTP, demo network setup, the local Midnight network in Docker (node, indexer and proof server) and the demo backend in Docker (mail server, payer and contract deployment) used by `npm run demo:windows`. |
 
 ```
  Your computer                                      NightMail operator
@@ -171,7 +171,7 @@ For what is in progress and planned, see [Project status](#project-status).
 
 1. The app proves with a zero-knowledge proof, generated on your computer, that it holds a plan with free slots, without saying which one.
 2. It sends the proof to the operator's relayer, which pays the fee and sends it to the chain.
-3. A named mailbox is created in two steps (reservation, then reveal of the name once the chain's clock is 30 seconds past the reservation) so that nobody watching the operation can get ahead and register the same name. An alias is created in one step, because its name comes from its own keys.
+3. Each address is created in a single operation, which spends the slot and registers the address together. For a mailbox, the chain receives a fingerprint of the name and a copy encrypted with a key derived from your 24 words (so that restoring can recover it), never the name in the clear. If someone registers the same name first, the whole operation is rejected: nothing is charged, the slot is not spent and you can choose another name. An alias cannot clash with anyone, because its name comes from its own keys.
 4. Each address has its own keys, derived from your 24 words, which is why restoring recovers all of them.
 
 ### Mail between NightMail addresses
@@ -188,7 +188,6 @@ For what is in progress and planned, see [Project status](#project-status).
 - **Slot:** one place in a plan's quota. Each address spends one.
 - **Nullifier:** a public value that marks a slot as spent. It comes from your secret, so nobody can tell which plan it belongs to, and the same slot cannot be spent twice.
 - **Address:** a **mailbox** (a name you choose) or an **alias** (a random name that comes from its own keys). Each one has its own keys, and its public keys are in the registry.
-- **Reveal delay:** the 30 seconds of chain time a mailbox reservation waits before its name can be revealed. Whoever copies a name from a pending reveal would have to wait that long after its own reservation, so the first reveal lands first.
 - **Relayer:** the part of the server that sends the app's proofs to the chain. The operator pays the fee.
 - **Payer:** the separate process that holds the operator wallet and pays the network fees.
 - **Sidecar:** the Midnight helper process the app launches (`apps/midnight-sidecar`).

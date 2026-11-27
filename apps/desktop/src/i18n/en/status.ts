@@ -67,7 +67,7 @@ export default {
 
   // pending.ts
   pending: {
-    stage: { mailbox: 'reserving the name', alias: 'reserving' },
+    stage: { mailbox: 'creating the mailbox', alias: 'creating the alias' },
     button: { resume: RESUME, retry: RETRY },
     inProcess: 'in progress',
     stopped: 'stopped',
