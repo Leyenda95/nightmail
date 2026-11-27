@@ -1,6 +1,6 @@
 {
   "name": "@nightmail/core-ts",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Shared NightMail cryptography in TypeScript: mailbox encryption and signing of mailbox requests",
   "type": "module",

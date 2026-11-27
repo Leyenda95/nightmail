@@ -1,6 +1,6 @@
 [package]
 name = "nightmail-desktop"
-version = "0.1.0"
+version = "0.1.1"
 description = "NightMail: private email provider on Midnight (desktop app)"
 authors = ["NightMail"]
 publish = false

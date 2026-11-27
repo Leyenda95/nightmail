@@ -1,6 +1,6 @@
 {
   "name": "@nightmail/server",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "NightMail operator server: SMTP, mailboxes, relayer, bono (plan) issuance",
   "type": "module",
@@ -30,8 +30,8 @@
     "@midnightntwrk/wallet-sdk": "2.0.1",
     "@midnightntwrk/wallet-sdk-capabilities": "4.0.1",
     "@midnightntwrk/wallet-sdk-dust-wallet": "5.1.0",
-    "@nightmail/core-ts": "0.1.0",
-    "@nightmail/midnight": "0.1.0",
+    "@nightmail/core-ts": "0.1.1",
+    "@nightmail/midnight": "0.1.1",
     "effect": "3.22.4",
     "graphql-ws": "6.4.2",
     "smtp-server": "3.21.6",

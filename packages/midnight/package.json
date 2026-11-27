@@ -1,6 +1,6 @@
 {
   "name": "@nightmail/midnight",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Midnight logic shared by the server and the sidecar: hashes via the compiled contract pure circuits, NightMailRegistry state reading and address resolution index",
   "type": "module",
@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@midnight-ntwrk/compact-runtime": "0.21.0",
-    "@nightmail/contracts": "0.1.0",
+    "@nightmail/contracts": "0.1.1",
     "@scure/bip39": "2.4.0"
   },
   "devDependencies": {

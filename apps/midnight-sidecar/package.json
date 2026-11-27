@@ -1,6 +1,6 @@
 {
   "name": "@nightmail/midnight-sidecar",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "NightMail helper process: talks to Midnight (TypeScript SDK) over JSON-RPC on stdio",
   "type": "module",
@@ -22,8 +22,8 @@
     "@midnightntwrk/ledger-v9": "1.0.2",
     "@midnightntwrk/wallet-sdk": "2.0.1",
     "@midnightntwrk/wallet-sdk-capabilities": "4.0.1",
-    "@nightmail/contracts": "0.1.0",
-    "@nightmail/midnight": "0.1.0"
+    "@nightmail/contracts": "0.1.1",
+    "@nightmail/midnight": "0.1.1"
   },
   "devDependencies": {
     "@midnight-ntwrk/compact-runtime": "0.21.0",

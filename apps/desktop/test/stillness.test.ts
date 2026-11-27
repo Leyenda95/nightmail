@@ -111,10 +111,10 @@ test('watchStillness: with focus in the iframe, it stops when the window loses i
 
 test('app.css: endless pulsing goes in steps (a single switch) and stops with data-quieto', () => {
   const css = readFileSync(new URL('../src/styles/app.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
-  assert.match(css, /:root \{ --nm-latido-paso: steps\(12\); --nm-trabaja-paso: steps\(8\); \}/);
+  assert.match(css, /:root \{ --nm-latido-paso: steps\(12\); \}/);
+  assert.doesNotMatch(css, /--nm-trabaja-paso/);
   for (const [cls, paso, gate] of [
     ['nm-luz--late', 'latido', ':root\\[data-movimiento\\] '],
-    ['nm-luz--trabaja', 'trabaja', ''],
     ['nm-noche__luz', 'latido', ':root\\[data-movimiento\\] '],
     ['nm-noche__tuya', 'latido', ':root\\[data-movimiento\\] '],
   ]) {
@@ -127,6 +127,8 @@ test('app.css: endless pulsing goes in steps (a single switch) and stops with da
   assert.deepEqual(ungated.sort(), ['.nm-espera__gira', '.nm-fila__gira', '.nm-luz--trabaja']);
   const still = /:root\[data-quieto\] \.nm-luz:not\(\.nm-luz--trabaja\),\s*:root\[data-quieto\] \.nm-noche__luz,\s*:root\[data-quieto\] \.nm-noche__tuya \{ animation-play-state: paused; \}/;
   assert.match(css, still);
+  // The working light (pending dot): continuous curve, not steps; always moves (keep-motion).
+  assert.match(css, /^\.nm-luz--trabaja \{ animation: nm-latido-fluido 1\.4s ease-in-out infinite; will-change: opacity; \}/m);
   // The wait icon's smooth spin: continuous (no steps).
   assert.match(css, /^\.nm-espera__gira \{ animation: nm-gira 1s linear infinite; \}/m);
   // The three wait indicators only stop with the window hidden (data-oculta).

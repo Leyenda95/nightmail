@@ -1,6 +1,6 @@
 {
   "name": "@nightmail/contracts",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "NightMail Compact contracts (NightMailRegistry and TestToken) and their simulator tests",
   "type": "module",

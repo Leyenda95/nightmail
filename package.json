@@ -1,6 +1,6 @@
 {
   "name": "nightmail",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Private email provider on Midnight: not even the operator knows which addresses are yours",
   "type": "module",
